@@ -1,6 +1,7 @@
 using Packmaster.Cards.Batter;
 using Packmaster.Cards.BitingCold;
 using Packmaster.Cards.CoreSet;
+using Packmaster.Cards.Distortion;
 using Packmaster.Cards.EnergyAndEcho;
 using Packmaster.Cards.EvenOdd;
 using Packmaster.Cards.Farmer;
@@ -27,6 +28,7 @@ public static class PackDefinitions
     public const string WardenId = "Warden";
     public const string FarmerId = "Farmer";
     public const string HermitId = "Hermit";
+    public const string DistortionId = "Distortion";
 
     public static void RegisterAll()
     {
@@ -232,6 +234,23 @@ public static class PackDefinitions
                 typeof(Purgatory),
                 typeof(Quickdraw),
                 typeof(Virtue),
+            ]));
+
+        PackRegistry.Register(new PackDefinition(
+            Id: DistortionId,
+            AlwaysInclude: false,
+            CardTypes:
+            [
+                typeof(BurningAct),
+                typeof(CursedCircle),
+                typeof(Darken),
+                typeof(Deconstruct),
+                typeof(Deterioration),
+                typeof(MindMaze),
+                typeof(Rue),
+                typeof(Shatter),
+                typeof(Srke),
+                typeof(Static),
             ]));
     }
 }

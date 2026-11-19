@@ -94,5 +94,14 @@
   "PACKMASTER-OVERWHELMING_POWER_POWER.smartDescription": "Lose [blue]{Amount}[/blue] HP if you end your turn with [blue]0[/blue] Energy.",
   "PACKMASTER-DRAW_LESS_NEXT_TURN_POWER.title": "Draw Reduction",
   "PACKMASTER-DRAW_LESS_NEXT_TURN_POWER.description": "Draw fewer cards at the start of your next turn.",
-  "PACKMASTER-DRAW_LESS_NEXT_TURN_POWER.smartDescription": "Draw [blue]{Amount}[/blue] fewer {Amount:plural:card|cards} at the start of your next turn."
+  "PACKMASTER-DRAW_LESS_NEXT_TURN_POWER.smartDescription": "Draw [blue]{Amount}[/blue] fewer {Amount:plural:card|cards} at the start of your next turn.",
+  "PACKMASTER-DISTORTION_POWER.title": "Distortion",
+  "PACKMASTER-DISTORTION_POWER.description": "Whenever a card is Exhausted, loses HP and reduces this by 1.",
+  "PACKMASTER-DISTORTION_POWER.smartDescription": "{OnPlayer:Whenever a card is [gold]Exhausted[/gold], lose [blue]{Amount}[/blue] HP and reduce this by [blue]1[/blue].|Whenever a card is [gold]Exhausted[/gold], loses [blue]{Amount}[/blue] HP and reduces this by [blue]1[/blue].}",
+  "PACKMASTER-RUE_POWER.title": "Rue",
+  "PACKMASTER-RUE_POWER.description": "Exhaust the next cards you play.",
+  "PACKMASTER-RUE_POWER.smartDescription": "[gold]Exhaust[/gold] the next [blue]{Amount}[/blue] {Amount:plural:card|cards} you play.",
+  "PACKMASTER-DETERIORATION_POWER.title": "Deterioration",
+  "PACKMASTER-DETERIORATION_POWER.description": "At the end of your turn, Exhaust 1 random card in your Discard Pile and gain Block.",
+  "PACKMASTER-DETERIORATION_POWER.smartDescription": "At the end of your turn, [gold]Exhaust[/gold] [blue]1[/blue] random card in your [gold]Discard Pile[/gold] and gain [blue]{Amount}[/blue] [gold]Block[/gold]."
 }

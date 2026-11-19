@@ -31,6 +31,7 @@ using Packmaster.Cards;
 using Packmaster.Cards.Batter;
 using Packmaster.Cards.BitingCold;
 using Packmaster.Cards.CoreSet;
+using Packmaster.Cards.Distortion;
 using Packmaster.Cards.EnergyAndEcho;
 using Packmaster.Cards.EvenOdd;
 using Packmaster.Cards.Farmer;
@@ -128,6 +129,7 @@ internal static class PackmasterAutoTestRunner
                 ("WardenPackInCombat", TestWardenPackInCombat),
                 ("FarmerPackInCombat", TestFarmerPackInCombat),
                 ("HermitPackInCombat", TestHermitPackInCombat),
+                ("DistortionPackInCombat", TestDistortionPackInCombat),
             ];
 
             foreach (var (name, run) in tests)
@@ -306,6 +308,7 @@ internal static class PackmasterAutoTestRunner
         AutoTestAssert.True(new LocString("gameplay_ui", "PACKMASTER-BOUNTY_KEYWORD.description").Exists(), "Missing Bounty keyword desc loc");
         AutoTestAssert.True(new LocString("cards", "PACKMASTER-PIERCE_VEIL.selectionScreenPrompt").Exists(), "Missing PierceVeil selectionScreenPrompt loc");
         AutoTestAssert.True(new LocString("cards", "PACKMASTER-STALL.selectionScreenPrompt").Exists(), "Missing Stall selectionScreenPrompt loc");
+        AutoTestAssert.True(new LocString("cards", "PACKMASTER-BURNING_ACT.selectionScreenPrompt").Exists(), "Missing BurningAct selectionScreenPrompt loc");
 
         // Validate relics.
         var relics = relicPool.AllRelics.ToList();
@@ -3561,6 +3564,264 @@ internal static class PackmasterAutoTestRunner
         AutoTestAssert.True(enemy.IsDead, "DeadOrAlive killed enemy");
         AutoTestAssert.True(pcs.ExhaustPile.Cards.Contains(deadOrAlive), "DeadOrAlive exhausted");
         AutoTestAssert.Equal(goldBefore + 15, player.Gold, "DeadOrAlive Fatal granted +15 Gold Bounty for Normal enemy");
+    }
+
+    private static async Task TestDistortionPackInCombat()
+    {
+        var (player, _, combatState) = await StartCombatAsync("PMDIST01");
+        var pcs = AutoTestAssert.NotNull(player.PlayerCombatState, "PlayerCombatState");
+        var enemy = AutoTestAssert.NotNull(combatState.HittableEnemies.FirstOrDefault(), "First hittable enemy");
+        var enemy2 = await CreatureCmd.Add<MegaCrit.Sts2.Core.Models.Monsters.Nibbit>(combatState);
+
+        await CreatureCmd.GainMaxHp(enemy, 1000m);
+        await CreatureCmd.GainMaxHp(enemy2, 1000m);
+
+        foreach (var c in pcs.Hand.Cards.ToList())
+            await CardPileCmd.Add(c, PileType.Discard);
+        await PlayerCmd.GainEnergy(20, player);
+
+        var savedSelector = _activeCardSelector;
+
+        // 0. Shatter at 0 HP-loss events: 0 damage, no error.
+        var shatterZero = combatState.CreateCard<Shatter>(player);
+        await CardPileCmd.Add(shatterZero, PileType.Hand);
+        int e1Hp = enemy.CurrentHp;
+        AutoTestAssert.True(shatterZero.TryManualPlay(enemy), "Play Shatter with 0 HP-loss events");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(e1Hp, enemy.CurrentHp, "Shatter dealt 0 damage when enemy had 0 HP-loss events");
+
+        // 1. Srke (Strike tag, 6 dmg + 4 Distortion).
+        var srke = combatState.CreateCard<Srke>(player);
+        AutoTestAssert.True(srke.Tags.Contains(CardTag.Strike), "Srke has Strike tag");
+        await CardPileCmd.Add(srke, PileType.Hand);
+        e1Hp = enemy.CurrentHp;
+        AutoTestAssert.True(srke.TryManualPlay(enemy), "Play Srke");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(e1Hp - 6, enemy.CurrentHp, "Srke dealt 6 damage");
+        AutoTestAssert.Equal(4, enemy.GetPowerAmount<DistortionPower>(), "Srke applied 4 Distortion");
+
+        // 2. Deconstruct (Exhaust, +5 Distortion to ALL enemies -> enemy1 4+5=9, enemy2 0+5=5; then Deconstruct exhausts -> triggers Distortion: enemy1 loses 9 HP (9->8), enemy2 loses 5 HP (5->4)!).
+        var deconstruct = combatState.CreateCard<Deconstruct>(player);
+        await CardPileCmd.Add(deconstruct, PileType.Hand);
+        e1Hp = enemy.CurrentHp;
+        int e2Hp = enemy2.CurrentHp;
+        AutoTestAssert.True(deconstruct.TryManualPlay(null), "Play Deconstruct");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.True(pcs.ExhaustPile.Cards.Contains(deconstruct), "Deconstruct exhausted");
+        AutoTestAssert.Equal(e1Hp - 9, enemy.CurrentHp, "Deconstruct exhaust triggered 9 Distortion HP loss on enemy 1");
+        AutoTestAssert.Equal(e2Hp - 5, enemy2.CurrentHp, "Deconstruct exhaust triggered 5 Distortion HP loss on enemy 2");
+        AutoTestAssert.Equal(8, enemy.GetPowerAmount<DistortionPower>(), "Enemy 1 Distortion decremented 9 -> 8");
+        AutoTestAssert.Equal(4, enemy2.GetPowerAmount<DistortionPower>(), "Enemy 2 Distortion decremented 5 -> 4");
+
+        // 3. Darken: enemy1 has ONLY Distortion (not another debuff) -> +7 Distortion (8 -> 15);
+        //    enemy2 gets WeakPower -> +7+4 = +11 Distortion in a single apply (4 -> 15)!
+        var darken1 = combatState.CreateCard<Darken>(player);
+        var darken2 = combatState.CreateCard<Darken>(player);
+        await CardPileCmd.Add(darken1, PileType.Hand);
+        await CardPileCmd.Add(darken2, PileType.Hand);
+        AutoTestAssert.True(darken1.TryManualPlay(enemy), "Play Darken on enemy 1 (only Distortion)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(15, enemy.GetPowerAmount<DistortionPower>(), "Darken without other debuff applied +7 Distortion (8 -> 15)");
+
+        await PowerCmd.Apply<WeakPower>(new ThrowingPlayerChoiceContext(), enemy2, 1m, player.Creature, null);
+        AutoTestAssert.True(darken2.TryManualPlay(enemy2), "Play Darken on enemy 2 (has Weak)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(15, enemy2.GetPowerAmount<DistortionPower>(), "Darken with another debuff applied +11 Distortion (4 -> 15)");
+
+        // 4. Shatter (0 cost -> 4 dmg per time target lost HP this turn):
+        //    Enemy 1 lost HP TWICE this turn so far (Srke attack + Deconstruct Distortion HP loss) -> Shatter hits 2x = 8 dmg!
+        var shatter = combatState.CreateCard<Shatter>(player);
+        await CardPileCmd.Add(shatter, PileType.Hand);
+        e1Hp = enemy.CurrentHp;
+        AutoTestAssert.True(shatter.TryManualPlay(enemy), "Play Shatter on enemy 1 (2 HP-loss events this turn)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(e1Hp - 8, enemy.CurrentHp, "Shatter hit 2x (Srke + Distortion HP loss) for 8 damage");
+
+        // 5. Static (1 dmg x4 random enemy + Distortion equal to unblocked dmg dealt -> +4 total Distortion across enemies!).
+        int totalDistortionBeforeStatic = enemy.GetPowerAmount<DistortionPower>() + enemy2.GetPowerAmount<DistortionPower>();
+        int totalHpBeforeStatic = enemy.CurrentHp + enemy2.CurrentHp;
+        var staticCard = combatState.CreateCard<Static>(player);
+        await CardPileCmd.Add(staticCard, PileType.Hand);
+        AutoTestAssert.True(staticCard.TryManualPlay(null), "Play Static");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(totalHpBeforeStatic - 4, enemy.CurrentHp + enemy2.CurrentHp, "Static dealt 4 total unblocked damage");
+        AutoTestAssert.Equal(totalDistortionBeforeStatic + 4, enemy.GetPowerAmount<DistortionPower>() + enemy2.GetPowerAmount<DistortionPower>(),
+            "Static applied +4 total Distortion equal to unblocked damage");
+
+        // 6. Rue (+2 Energy, draw 1, RuePower(3) — does NOT self-exhaust or self-decrement!).
+        //    Then play 3 cards: Deterioration (Power consumes 1 charge 3->2 without Exhaust), Strike #1 (Exhausts, 2->1), Strike #2 (Exhausts, 1->0!).
+        //    4th card (Defend) must NOT exhaust!
+        var rue = combatState.CreateCard<Rue>(player);
+        await CardPileCmd.Add(rue, PileType.Hand);
+        int energyBeforeRue = pcs.Energy;
+        AutoTestAssert.True(rue.TryManualPlay(null), "Play Rue");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(energyBeforeRue + 2, pcs.Energy, "Rue granted +2 Energy");
+        AutoTestAssert.Equal(3, player.Creature.GetPowerAmount<RuePower>(), "Rue applied RuePower(3) without self-decrementing");
+        AutoTestAssert.True(pcs.DiscardPile.Cards.Contains(rue), "Rue went to Discard (not self-exhausted)");
+
+        var deterioration = combatState.CreateCard<Deterioration>(player);
+        var rueStrike1 = combatState.CreateCard<PackmasterStrike>(player);
+        var rueStrike2 = combatState.CreateCard<PackmasterStrike>(player);
+        var postRueDefend = combatState.CreateCard<PackmasterDefend>(player);
+        await CardPileCmd.Add(deterioration, PileType.Hand);
+        await CardPileCmd.Add(rueStrike1, PileType.Hand);
+        await CardPileCmd.Add(rueStrike2, PileType.Hand);
+        await CardPileCmd.Add(postRueDefend, PileType.Hand);
+
+        AutoTestAssert.True(deterioration.TryManualPlay(null), "Play Deterioration (Power consumes Rue 3 -> 2)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(5, player.Creature.GetPowerAmount<DeteriorationPower>(), "DeteriorationPower(5) applied");
+        AutoTestAssert.Equal(2, player.Creature.GetPowerAmount<RuePower>(), "Power card consumed Rue charge 3 -> 2");
+
+        AutoTestAssert.True(rueStrike1.TryManualPlay(enemy), "Play Strike #1 under Rue (2 -> 1, Exhausts)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.True(pcs.ExhaustPile.Cards.Contains(rueStrike1), "Rue exhausted Strike #1");
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<RuePower>(), "Rue decremented 2 -> 1");
+
+        AutoTestAssert.True(rueStrike2.TryManualPlay(enemy), "Play Strike #2 under final Rue charge (1 -> 0, Exhausts)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.True(pcs.ExhaustPile.Cards.Contains(rueStrike2), "Rue exhausted Strike #2 on final charge");
+        AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<RuePower>(), "Rue removed after 3rd card");
+
+        // Also test 2nd Rue while RuePower(1) active (exhausts 2nd Rue, net RuePower 1 + 3 - 1 = 3) + nested Crossroads under RuePower(1) (auto-played top card NOT over-exhausted!).
+        await PowerCmd.Apply<RuePower>(new ThrowingPlayerChoiceContext(), player.Creature, 1m, player.Creature, null);
+        var rue2 = combatState.CreateCard<Rue>(player);
+        await CardPileCmd.Add(rue2, PileType.Hand);
+        AutoTestAssert.True(rue2.TryManualPlay(null), "Play 2nd Rue while RuePower(1) is active");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.True(pcs.ExhaustPile.Cards.Contains(rue2), "2nd Rue exhausted under pre-existing RuePower");
+        AutoTestAssert.Equal(3, player.Creature.GetPowerAmount<RuePower>(), "2nd Rue left net RuePower = 1 + 3 - 1 = 3");
+
+        // Burn down 2 charges (using ForceBolt+ Persist to prove Rue overrides Hand-return -> Exhausts!), leaving RuePower == 1.
+        var fb = combatState.CreateCard<ForceBolt>(player);
+        CardCmd.Upgrade(fb);
+        var burnCard = combatState.CreateCard<PackmasterStrike>(player);
+        await CardPileCmd.Add(fb, PileType.Hand);
+        await CardPileCmd.Add(burnCard, PileType.Hand);
+        AutoTestAssert.True(fb.TryManualPlay(enemy), "Play ForceBolt+ under RuePower (overrides Hand return -> Exhausts!)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.True(pcs.ExhaustPile.Cards.Contains(fb), "RuePower overrode ForceBolt+ Persist Hand-return and exhausted it");
+        AutoTestAssert.True(burnCard.TryManualPlay(enemy), "Play Strike under RuePower (2 -> 1)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<RuePower>(), "RuePower now at 1");
+
+        // Nested AutoPlay under RuePower(1): Crossroads consumes last charge; auto-played top Defend goes to Discard (NOT exhausted)!
+        var nestedDefend = combatState.CreateCard<PackmasterDefend>(player);
+        await CardPileCmd.Add(nestedDefend, PileType.Draw, CardPilePosition.Top);
+        var nestedCrossroads = combatState.CreateCard<Crossroads>(player);
+        await CardPileCmd.Add(nestedCrossroads, PileType.Hand);
+        _activeCardSelector = new TakeNCardSelector(0);
+        try
+        {
+            AutoTestAssert.True(nestedCrossroads.TryManualPlay(null), "Play Crossroads under RuePower(1)");
+            await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        }
+        finally
+        {
+            _activeCardSelector = savedSelector;
+        }
+        AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<RuePower>(), "Crossroads consumed final RuePower charge");
+        AutoTestAssert.True(pcs.DiscardPile.Cards.Contains(nestedDefend), "Nested auto-played Defend was NOT over-exhausted by RuePower(1)");
+
+        AutoTestAssert.True(postRueDefend.TryManualPlay(null), "Play Defend after Rue expired");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.True(pcs.DiscardPile.Cards.Contains(postRueDefend), "Post-Rue Defend went to Discard normally");
+
+        // 7. BurningAct (unupgraded random exhaust) AND BurningAct+ (player chooses 2 drawn cards to Exhaust -> triggers Distortion!).
+        foreach (var c in pcs.Hand.Cards.ToList())
+            await CardPileCmd.Add(c, PileType.Discard);
+        while (pcs.DrawPile.Cards.Count < 10)
+            await CardPileCmd.Add(combatState.CreateCard<PackmasterStrike>(player), PileType.Draw);
+        var burningBase = combatState.CreateCard<BurningAct>(player);
+        await CardPileCmd.Add(burningBase, PileType.Hand);
+        int exhaustBeforeBurnBase = pcs.ExhaustPile.Cards.Count;
+        AutoTestAssert.True(burningBase.TryManualPlay(null), "Play unupgraded BurningAct (random exhaust 2)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(exhaustBeforeBurnBase + 2, pcs.ExhaustPile.Cards.Count, "Unupgraded BurningAct randomly exhausted 2 drawn cards");
+
+        foreach (var c in pcs.Hand.Cards.ToList())
+            await CardPileCmd.Add(c, PileType.Discard);
+        var burningAct = combatState.CreateCard<BurningAct>(player);
+        CardCmd.Upgrade(burningAct);
+        await CardPileCmd.Add(burningAct, PileType.Hand);
+        int exhaustBeforeBurn = pcs.ExhaustPile.Cards.Count;
+        int e1DistBeforeBurn = enemy.GetPowerAmount<DistortionPower>();
+        _activeCardSelector = new TakeNCardSelector(2);
+        try
+        {
+            AutoTestAssert.True(burningAct.TryManualPlay(null), "Play BurningAct+");
+            await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        }
+        finally
+        {
+            _activeCardSelector = savedSelector;
+        }
+        AutoTestAssert.Equal(exhaustBeforeBurn + 2, pcs.ExhaustPile.Cards.Count, "BurningAct+ exhausted exact 2 drawn cards");
+        AutoTestAssert.Equal(2, pcs.Hand.Cards.Count, "BurningAct+ kept 2 of the 4 drawn cards in Hand");
+        AutoTestAssert.Equal(e1DistBeforeBurn - 2, enemy.GetPowerAmount<DistortionPower>(), "2 Exhausts from BurningAct+ triggered Distortion twice");
+
+        // 8. CursedCircle (0 cost Exhaust -> player & ALL enemies lose Strength this turn equal to cards in Hand excluding self!).
+        // Hand currently has 2 cards -> adding CursedCircle makes 3, excluding self = 2!
+        var cursedCircle = combatState.CreateCard<CursedCircle>(player);
+        await CardPileCmd.Add(cursedCircle, PileType.Hand);
+        AutoTestAssert.True(cursedCircle.TryManualPlay(null), "Play CursedCircle with 2 other cards in Hand");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.True(pcs.ExhaustPile.Cards.Contains(cursedCircle), "CursedCircle exhausted");
+        AutoTestAssert.Equal(-2, player.Creature.GetPowerAmount<StrengthPower>(), "CursedCircle reduced player Strength by 2");
+        AutoTestAssert.Equal(-2, enemy.GetPowerAmount<StrengthPower>(), "CursedCircle reduced enemy 1 Strength by 2");
+        AutoTestAssert.Equal(-2, enemy2.GetPowerAmount<StrengthPower>(), "CursedCircle reduced enemy 2 Strength by 2");
+
+        // 9. MindMaze (X cost -> set Energy to 2 -> gains 22 Block + puts 2 Dazed on TOP of DrawPile!).
+        if (pcs.Energy < 2)
+            await PlayerCmd.GainEnergy(2 - pcs.Energy, player);
+        else if (pcs.Energy > 2)
+            await PlayerCmd.LoseEnergy(pcs.Energy - 2, player);
+        var mindMaze = combatState.CreateCard<MindMaze>(player);
+        await CardPileCmd.Add(mindMaze, PileType.Hand);
+        int blockBeforeMaze = player.Creature.Block;
+        AutoTestAssert.True(mindMaze.TryManualPlay(null), "Play MindMaze at X=2");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(blockBeforeMaze + 22, player.Creature.Block, "MindMaze X=2 gained 22 Block");
+        AutoTestAssert.True(pcs.DrawPile.Cards.Take(2).All(c => c is MegaCrit.Sts2.Core.Models.Cards.Dazed), "MindMaze placed 2 Dazed on top of DrawPile");
+
+        // 10. End Turn 1:
+        //     - DeteriorationPower exhausts 1 card from DiscardPile (triggering Distortion!) and gains +5 Block!
+        //     - Player PiercingWailPower restores player Strength (-2 -> 0) at end of player turn!
+        //     - Turn 2 draws the 2 Dazed from MindMaze!
+        int e1DistBeforeEnd = enemy.GetPowerAmount<DistortionPower>();
+        int exhaustBeforeEnd = pcs.ExhaustPile.Cards.Count;
+        int blockEntriesBeforeEnd = CombatManager.Instance.History.Entries
+            .OfType<MegaCrit.Sts2.Core.Combat.History.Entries.BlockGainedEntry>()
+            .Count(e => e.Actor == player.Creature && e.Amount == 5);
+        await EndTurnAndWaitForRoundAsync(player, 2);
+        AutoTestAssert.True(pcs.ExhaustPile.Cards.Count >= exhaustBeforeEnd + 1, "DeteriorationPower exhausted a card from DiscardPile at end of Turn 1");
+        AutoTestAssert.True(
+            CombatManager.Instance.History.Entries
+                .OfType<MegaCrit.Sts2.Core.Combat.History.Entries.BlockGainedEntry>()
+                .Count(e => e.Actor == player.Creature && e.Amount == 5) > blockEntriesBeforeEnd,
+            "DeteriorationPower granted 5 Block at end of Turn 1");
+        AutoTestAssert.Equal(e1DistBeforeEnd - 1, enemy.GetPowerAmount<DistortionPower>(), "DeteriorationPower end-of-turn exhaust triggered Distortion");
+        AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<StrengthPower>(), "CursedCircle player temp Strength restored to 0");
+        AutoTestAssert.Equal(0, enemy.GetPowerAmount<PiercingWailPower>(), "CursedCircle enemy 1 PiercingWailPower expired");
+        AutoTestAssert.Equal(2, pcs.Hand.Cards.Count(c => c is MegaCrit.Sts2.Core.Models.Cards.Dazed), "Turn 2 drew 2 Dazed placed on top by MindMaze");
+
+        // Also test DistortionPower 1 -> 0 removal on a fresh spawned enemy!
+        var enemy3 = await CreatureCmd.Add<MegaCrit.Sts2.Core.Models.Monsters.Nibbit>(combatState);
+        await PowerCmd.Apply<DistortionPower>(new ThrowingPlayerChoiceContext(), enemy3, 1m, player.Creature, null);
+        int e3HpBefore = enemy3.CurrentHp;
+        var dummyExhaust = combatState.CreateCard<PackmasterStrike>(player);
+        await CardPileCmd.Add(dummyExhaust, PileType.Hand);
+        await CardCmd.Exhaust(new ThrowingPlayerChoiceContext(), dummyExhaust);
+        AutoTestAssert.Equal(e3HpBefore - 1, enemy3.CurrentHp, "DistortionPower(1) dealt 1 HP loss on exhaust");
+        AutoTestAssert.Equal(0, enemy3.GetPowerAmount<DistortionPower>(), "DistortionPower removed cleanly after decrementing 1 -> 0");
+
+        // End Turn 2: ensure DiscardPile has a card so DeteriorationPower exhausts 1 + 2 Ethereal Dazed exhaust -> triggers Distortion 3 times!
+        await CardPileCmd.Add(combatState.CreateCard<PackmasterStrike>(player), PileType.Discard);
+        int e1DistBeforeT3 = enemy.GetPowerAmount<DistortionPower>();
+        await EndTurnAndWaitForRoundAsync(player, 3);
+        AutoTestAssert.Equal(e1DistBeforeT3 - 3, enemy.GetPowerAmount<DistortionPower>(),
+            "Ethereal Dazed x2 + DeteriorationPower exhaust triggered Distortion 3 times on Turn 2 end");
     }
 
     private static async Task WaitUntilAsync(Func<bool> predicate, int timeoutMs = 15000)
