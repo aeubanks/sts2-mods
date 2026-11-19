@@ -7,6 +7,7 @@ using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Factories;
 using MegaCrit.Sts2.Core.GameActions;
+using MegaCrit.Sts2.Core.GameActions.Multiplayer;
 using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Localization;
 using MegaCrit.Sts2.Core.Map;
@@ -21,6 +22,7 @@ using MegaCrit.Sts2.Core.Settings;
 using MegaCrit.Sts2.Core.Unlocks;
 using Packmaster.Cards;
 using Packmaster.Cards.CoreSet;
+using Packmaster.Cards.Quiet;
 using Packmaster.Character;
 using Packmaster.Config;
 using Packmaster.Packs;
@@ -81,6 +83,7 @@ internal static class PackmasterAutoTestRunner
                 ("PackSystemAndCardPoolFiltering", TestPackSystemAndCardPoolFiltering),
                 ("StartRunAndPlayStarterCombat", TestStartRunAndPlayStarterCombat),
                 ("CoreSetCardsInCombat", TestCoreSetCardsInCombat),
+                ("QuietPackInCombat", TestQuietPackInCombat),
             ];
 
             foreach (var (name, run) in tests)
@@ -165,6 +168,28 @@ internal static class PackmasterAutoTestRunner
 
         var combatState = AutoTestAssert.NotNull(player.Creature.CombatState as CombatState, "CombatState after entering monster room");
         return (player, runState, combatState);
+    }
+
+    private static async Task EndTurnAndWaitForRoundAsync(Player player, int targetRound)
+    {
+        var roundStarted = new TaskCompletionSource();
+        void OnTurnStarted(CombatState state)
+        {
+            if (state.RoundNumber == targetRound && state.CurrentSide == CombatSide.Player)
+                roundStarted.TrySetResult();
+        }
+        CombatManager.Instance.TurnStarted += OnTurnStarted;
+        try
+        {
+            RunManager.Instance.ActionQueueSynchronizer.RequestEnqueue(
+                new EndPlayerTurnAction(player, player.PlayerCombatState!.TurnNumber));
+            await roundStarted.Task.WaitAsync(TimeSpan.FromSeconds(15));
+            await WaitUntilAsync(() => !CombatManager.Instance.PlayerActionsDisabled && !RunManager.Instance.ActionExecutor.IsRunning);
+        }
+        finally
+        {
+            CombatManager.Instance.TurnStarted -= OnTurnStarted;
+        }
     }
 
     private static Task TestModelDbAssetsAndLocIntegrity()
@@ -454,23 +479,7 @@ internal static class PackmasterAutoTestRunner
         AutoTestAssert.Equal(energyBeforeFreeStrike, pcs.Energy, "0-cost Rummaged Strike spent 0 energy");
         AutoTestAssert.Equal(enemyHpBeforeStrike - 6, enemy.CurrentHp, "Enemy HP after Strike");
 
-        var turn2Started = new TaskCompletionSource();
-        void OnTurnStarted(CombatState state)
-        {
-            if (state.RoundNumber == 2 && state.CurrentSide == CombatSide.Player)
-                turn2Started.TrySetResult();
-        }
-        CombatManager.Instance.TurnStarted += OnTurnStarted;
-        try
-        {
-            RunManager.Instance.ActionQueueSynchronizer.RequestEnqueue(new EndPlayerTurnAction(player, pcs.TurnNumber));
-            await turn2Started.Task.WaitAsync(TimeSpan.FromSeconds(15));
-            await WaitUntilAsync(() => !CombatManager.Instance.PlayerActionsDisabled && !RunManager.Instance.ActionExecutor.IsRunning);
-        }
-        finally
-        {
-            CombatManager.Instance.TurnStarted -= OnTurnStarted;
-        }
+        await EndTurnAndWaitForRoundAsync(player, 2);
 
         AutoTestAssert.Equal(5, pcs.Hand.Cards.Count, "Turn-2 hand size (HandyHaversack must not re-trigger)");
         AutoTestAssert.Equal(3, pcs.Energy, "Turn-2 energy (HandyHaversack must not re-trigger)");
@@ -660,6 +669,153 @@ internal static class PackmasterAutoTestRunner
         await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
         AutoTestAssert.Equal(1, pcs.Hand.Cards.Count, "MayhemFormPower did not trigger a second time in the same turn");
         AutoTestAssert.Equal(0, pcs.Energy, "MayhemFormPower did not grant energy a second time in the same turn");
+    }
+
+    private static async Task TestQuietPackInCombat()
+    {
+        var (player, _, combatState) = await StartCombatAsync("PMQUIET1");
+        var pcs = AutoTestAssert.NotNull(player.PlayerCombatState, "PlayerCombatState");
+        var enemy = AutoTestAssert.NotNull(combatState.HittableEnemies.FirstOrDefault(), "First hittable enemy");
+        await CreatureCmd.GainMaxHp(enemy, 500m);
+
+        foreach (var c in pcs.Hand.Cards.ToList())
+            await CardPileCmd.Add(c, PileType.Discard);
+
+        async Task RefillEnergy(int target = 6)
+        {
+            if (pcs.Energy < target)
+                await PlayerCmd.GainEnergy(target - pcs.Energy, player);
+        }
+
+        // 1. IronShield: +11 Block + adds 1 Weight to hand; Oppressor: 11 dmg + discards Weight -> Weight exhausts!
+        await RefillEnergy();
+        var ironShield = combatState.CreateCard<IronShield>(player);
+        await CardPileCmd.Add(ironShield, PileType.Hand);
+        AutoTestAssert.True(ironShield.TryManualPlay(null), "Play IronShield");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(11, player.Creature.Block, "IronShield Block");
+        var weight = AutoTestAssert.NotNull(pcs.Hand.Cards.FirstOrDefault(c => c is Weight), "Weight added to hand by IronShield");
+
+        var oppressor = combatState.CreateCard<Oppressor>(player);
+        await CardPileCmd.Add(oppressor, PileType.Hand);
+        int hpBeforeOppressor = enemy.CurrentHp;
+        AutoTestAssert.True(oppressor.TryManualPlay(enemy), "Play Oppressor");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(hpBeforeOppressor - 11, enemy.CurrentHp, "Oppressor 11 damage");
+        AutoTestAssert.True(pcs.ExhaustPile.Cards.Contains(weight), "Discarded Weight exhausted itself");
+
+        // 2. Lie: enemy loses 4 Strength this turn (PiercingWailPower + StrengthPower -4) + adds Weight.
+        await RefillEnergy();
+        var lie = combatState.CreateCard<Lie>(player);
+        await CardPileCmd.Add(lie, PileType.Hand);
+        AutoTestAssert.True(lie.TryManualPlay(enemy), "Play Lie");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(4, enemy.GetPowerAmount<PiercingWailPower>(), "Lie applied PiercingWailPower(4)");
+        AutoTestAssert.Equal(-4, enemy.GetPowerAmount<StrengthPower>(), "Lie reduced enemy Strength by 4 this turn");
+        AutoTestAssert.True(pcs.Hand.Cards.Any(c => c is Weight), "Lie added Weight to hand");
+
+        // 3. Crunch & Shine on-draw triggers + Frontflip discarding unplayable drawn Weight!
+        foreach (var c in pcs.Hand.Cards.ToList())
+            await CardPileCmd.Add(c, PileType.Discard);
+        foreach (var c in pcs.DrawPile.Cards.ToList())
+            await CardPileCmd.Add(c, PileType.Discard);
+
+        var targetForShine = combatState.CreateCard<PackmasterStrike>(player);
+        await CardPileCmd.Add(targetForShine, PileType.Hand);
+
+        var drawExtra1 = combatState.CreateCard<PackmasterDefend>(player);
+        var drawExtra2 = combatState.CreateCard<PackmasterDefend>(player);
+        var weightInDraw = combatState.CreateCard<Weight>(player);
+        var crunch = combatState.CreateCard<Crunch>(player);
+        var shine = combatState.CreateCard<Shine>(player);
+
+        // Top of draw pile order (last added to Top is drawn first): shine, crunch, drawExtra1, drawExtra2, weightInDraw
+        await CardPileCmd.Add(drawExtra2, PileType.Draw, CardPilePosition.Top);
+        await CardPileCmd.Add(drawExtra1, PileType.Draw, CardPilePosition.Top);
+        await CardPileCmd.Add(crunch, PileType.Draw, CardPilePosition.Top);
+        await CardPileCmd.Add(shine, PileType.Draw, CardPilePosition.Top);
+
+        // Draw Shine -> upgrades targetForShine!
+        await CardPileCmd.Draw(new ThrowingPlayerChoiceContext(), 1m, player);
+        AutoTestAssert.True(targetForShine.IsUpgraded, "Drawing Shine upgraded another card in hand");
+
+        // Draw Crunch -> automatically draws 2 more cards (drawExtra1, drawExtra2)!
+        await CardPileCmd.Draw(new ThrowingPlayerChoiceContext(), 1m, player);
+        AutoTestAssert.True(pcs.Hand.Cards.Contains(drawExtra1) && pcs.Hand.Cards.Contains(drawExtra2), "Drawing Crunch drew 2 extra cards");
+
+        // 4. Frontflip: +13 Block, draws 3 cards, auto-discards unplayable Weight (which then exhausts)!
+        foreach (var c in pcs.Hand.Cards.ToList())
+            await CardPileCmd.Add(c, PileType.Discard);
+        await RefillEnergy();
+        await CardPileCmd.Add(weightInDraw, PileType.Draw, CardPilePosition.Top);
+        var frontflip = combatState.CreateCard<Frontflip>(player);
+        await CardPileCmd.Add(frontflip, PileType.Hand);
+        int blockBeforeFlip = player.Creature.Block;
+        AutoTestAssert.True(frontflip.TryManualPlay(null), "Play Frontflip");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(blockBeforeFlip + 13, player.Creature.Block, "Frontflip Block");
+        AutoTestAssert.True(pcs.ExhaustPile.Cards.Contains(weightInDraw), "Frontflip discarded drawn unplayable Weight (which exhausted)");
+
+        // 5. GlaiveThrow: 7 dmg + draw 2 + discard 2 (net -1 card since GlaiveThrow leaves hand).
+        await RefillEnergy();
+        var glaive = combatState.CreateCard<GlaiveThrow>(player);
+        await CardPileCmd.Add(glaive, PileType.Hand);
+        int hpBeforeGlaive = enemy.CurrentHp;
+        int handBeforeGlaive = pcs.Hand.Cards.Count;
+        int discardBeforeGlaive = pcs.DiscardPile.Cards.Count;
+        AutoTestAssert.True(glaive.TryManualPlay(enemy), "Play GlaiveThrow");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(hpBeforeGlaive - 7, enemy.CurrentHp, "GlaiveThrow 7 damage");
+        AutoTestAssert.Equal(handBeforeGlaive - 1, pcs.Hand.Cards.Count, "GlaiveThrow net hand size (play -1, draw +2, discard -2)");
+        AutoTestAssert.True(pcs.DiscardPile.Cards.Count >= discardBeforeGlaive + 2, "GlaiveThrow discarded cards");
+
+        // 6. Wisdom: +1 Energy, discard/draw, Exhaust.
+        await RefillEnergy(2);
+        var wisdom = combatState.CreateCard<Wisdom>(player);
+        await CardPileCmd.Add(wisdom, PileType.Hand);
+        int energyBeforeWisdom = pcs.Energy;
+        AutoTestAssert.True(wisdom.TryManualPlay(null), "Play Wisdom");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(energyBeforeWisdom + 1, pcs.Energy, "Wisdom gained 1 Energy");
+        AutoTestAssert.True(pcs.ExhaustPile.Cards.Contains(wisdom), "Wisdom exhausted");
+
+        // 7. Flail (13x2 + 2 Weights) + HammerThrow (3 AoE dmg per retained card at end of turn).
+        foreach (var c in pcs.Hand.Cards.ToList())
+            await CardPileCmd.Add(c, PileType.Discard);
+        await RefillEnergy();
+        var flail = combatState.CreateCard<Flail>(player);
+        var hammerThrow = combatState.CreateCard<HammerThrow>(player);
+        await CardPileCmd.Add(flail, PileType.Hand);
+        await CardPileCmd.Add(hammerThrow, PileType.Hand);
+
+        int hpBeforeFlail = enemy.CurrentHp;
+        AutoTestAssert.True(flail.TryManualPlay(enemy), "Play Flail");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(hpBeforeFlail - 26, enemy.CurrentHp, "Flail 13x2 damage");
+        AutoTestAssert.Equal(2, pcs.Hand.Cards.Count(c => c is Weight), "Flail added 2 Weights to hand");
+
+        AutoTestAssert.True(hammerThrow.TryManualPlay(null), "Play HammerThrow");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(3, player.Creature.GetPowerAmount<HammerThrowPower>(), "HammerThrowPower(3) applied");
+
+        // Put Shine+ on TOP of draw pile (above 4 fresh Strikes) so it is drawn FIRST on Turn 2 start-of-turn hand draw!
+        foreach (var c in pcs.DrawPile.Cards.ToList())
+            await CardPileCmd.Add(c, PileType.Discard);
+        var turn2Strikes = Enumerable.Range(0, 4).Select(_ => combatState.CreateCard<PackmasterStrike>(player)).ToList();
+        foreach (var s in turn2Strikes)
+            await CardPileCmd.Add(s, PileType.Draw, CardPilePosition.Top);
+        var shinePlus = combatState.CreateCard<Shine>(player);
+        CardCmd.Upgrade(shinePlus);
+        await CardPileCmd.Add(shinePlus, PileType.Draw, CardPilePosition.Top);
+
+        // End turn with 2 Retained Weights in hand -> HammerThrow deals 3 x 2 = 6 AoE damage!
+        int hpBeforeEndTurn = enemy.CurrentHp;
+        await EndTurnAndWaitForRoundAsync(player, 2);
+
+        AutoTestAssert.Equal(hpBeforeEndTurn - 6, enemy.CurrentHp, "HammerThrow dealt 3x2=6 damage for 2 retained Weights");
+        AutoTestAssert.Equal(0, enemy.GetPowerAmount<StrengthPower>(), "Lie temporary Strength loss restored on Turn 2");
+        AutoTestAssert.Equal(2, pcs.Hand.Cards.Count(c => c is Weight), "Retained Weights stayed in hand and did not exhaust");
+        AutoTestAssert.True(turn2Strikes.All(s => s.IsUpgraded), "Shine+ drawn as card #1 on Turn 2 upgraded all other drawn cards");
     }
 
     private static async Task WaitUntilAsync(Func<bool> predicate, int timeoutMs = 15000)
