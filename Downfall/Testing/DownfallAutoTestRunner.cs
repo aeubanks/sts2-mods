@@ -139,6 +139,7 @@ internal static class DownfallAutoTestRunner
                 ("AwakenedVisualsRuntime", AwakenedTests.TestVisualsRuntime),
                 ("AwakenedStarterCombat", AwakenedTests.TestStarterCombat),
                 ("AwakenedCommonCardsInCombat", AwakenedTests.TestCommonCardsInCombat),
+                ("AwakenedUncommonBatch1InCombat", AwakenedTests.TestUncommonBatch1InCombat),
             ];
 
             foreach (var (name, run) in tests)
@@ -494,6 +495,10 @@ internal static class DownfallAutoTestRunner
         AutoTestAssert.True(new LocString("cards", "DOWNFALL-DEJECTION.selectionScreenPrompt").Exists(), "Missing Dejection selectionScreenPrompt loc");
         AutoTestAssert.True(new LocString("cards", "DOWNFALL-GATHER.selectionScreenPrompt").Exists(), "Missing Gather selectionScreenPrompt loc");
         AutoTestAssert.True(new LocString("cards", "DOWNFALL-PROFANE_STRIKE.selectionScreenPrompt").Exists(), "Missing ProfaneStrike selectionScreenPrompt loc");
+        AutoTestAssert.True(new LocString("cards", "DOWNFALL-ALTAR.selectionScreenPrompt").Exists(), "Missing Altar selectionScreenPrompt loc");
+        AutoTestAssert.True(new LocString("cards", "DOWNFALL-BIRDS_EYE.selectionScreenPrompt").Exists(), "Missing BirdsEye selectionScreenPrompt loc");
+        AutoTestAssert.True(new LocString("cards", "DOWNFALL-INSCRIBE.selectionScreenPrompt").Exists(), "Missing Inscribe selectionScreenPrompt loc");
+        AutoTestAssert.True(new LocString("cards", "DOWNFALL-MIDDEN_HEAP.selectionScreenPrompt").Exists(), "Missing MiddenHeap selectionScreenPrompt loc");
         AutoTestAssert.True(new LocString("potions", "DOWNFALL-ECLIPSE.selectionScreenPrompt").Exists(), "Missing Eclipse selectionScreenPrompt loc");
 
         return Task.CompletedTask;

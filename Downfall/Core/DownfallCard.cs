@@ -1,5 +1,6 @@
 using BaseLib.Abstracts;
 using MegaCrit.Sts2.Core.Entities.Cards;
+using MegaCrit.Sts2.Core.Helpers;
 
 namespace Downfall.Core;
 
@@ -13,7 +14,7 @@ public abstract class DownfallCard(
     : CustomCardModel(cost, type, rarity, target, showInCardLibrary)
 {
     protected abstract string CharacterKey { get; }
-    protected abstract string PortraitKey { get; }
+    protected virtual string PortraitKey => StringHelper.Slugify(GetType().Name).ToLowerInvariant();
 
     public override string PortraitPath => $"res://Downfall/images/{CharacterKey}/cards/{PortraitKey}.png";
     public override string CustomPortraitPath => $"res://Downfall/images/{CharacterKey}/cards/big/{PortraitKey}.png";

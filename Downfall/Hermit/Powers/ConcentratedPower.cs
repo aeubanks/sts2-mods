@@ -10,7 +10,8 @@ namespace Downfall.Hermit.Powers;
 
 public sealed class ConcentratedPower : HermitPower
 {
-    private readonly HashSet<CardPlay> _consumingPlays = [];
+    private HashSet<CardPlay>? _consumingPlays;
+    private HashSet<CardPlay> ConsumingPlays => _consumingPlays ??= [];
 
     protected override string IconKey => "concentrated_power";
 
@@ -22,19 +23,26 @@ public sealed class ConcentratedPower : HermitPower
         HermitCard.DeadOnHoverTip
     ];
 
+    protected override void DeepCloneFields()
+    {
+        base.DeepCloneFields();
+        _consumingPlays = null;
+    }
+
     public override Task BeforeCardPlayed(CardPlay cardPlay)
     {
         if (cardPlay.Card is HermitCard { UsesDeadOn: true }
             && cardPlay.Card.Owner == Owner.Player)
         {
-            _consumingPlays.Add(cardPlay);
+            ConsumingPlays.Add(cardPlay);
         }
         return Task.CompletedTask;
     }
 
     public override async Task AfterCardPlayed(PlayerChoiceContext choiceContext, CardPlay cardPlay)
     {
-        if (_consumingPlays.Remove(cardPlay)
+        if (_consumingPlays is not null
+            && _consumingPlays.Remove(cardPlay)
             && cardPlay.PlayIndex >= cardPlay.PlayCount - 1
             && !CombatManager.Instance.IsOverOrEnding)
         {

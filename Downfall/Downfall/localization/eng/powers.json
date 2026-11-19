@@ -64,5 +64,20 @@
   "DOWNFALL-TAKE_AIM_POWER.smartDescription": "At the start of your turn, [gold]Concentrate[/gold].",
   "DOWNFALL-VOID_REFUND_POWER.title": "Clarion Call",
   "DOWNFALL-VOID_REFUND_POWER.description": "The next time you are Drained, gain [gold]Energy[/gold].",
-  "DOWNFALL-VOID_REFUND_POWER.smartDescription": "The next time you are Drained, gain [blue]{Amount}[/blue] [gold]Energy[/gold]."
+  "DOWNFALL-VOID_REFUND_POWER.smartDescription": "The next time you are Drained, gain [blue]{Amount}[/blue] [gold]Energy[/gold].",
+  "DOWNFALL-CHOSENS_VERSE_POWER.title": "Chosen Verse",
+  "DOWNFALL-CHOSENS_VERSE_POWER.description": "The next non-Attack cards you play this turn draw a card and gain [gold]Block[/gold].",
+  "DOWNFALL-CHOSENS_VERSE_POWER.smartDescription": "The next {Amount:plural:time|[blue]{}[/blue] times} you play a non-Attack card this turn, draw a card and gain [blue]{Block}[/blue] [gold]Block[/gold].",
+  "DOWNFALL-DARK_ECHO_POWER.title": "Dark Echo",
+  "DOWNFALL-DARK_ECHO_POWER.description": "At the end of your turn, deal damage to ALL enemies, increased by [gold]Strength[/gold].",
+  "DOWNFALL-DARK_ECHO_POWER.smartDescription": "At the end of your turn, deal [blue]{Damage}[/blue] damage to ALL enemies{Amount:plural:| [blue]{}[/blue] times}.",
+  "DOWNFALL-DARKNESS_FALLS_POWER.title": "Darkness Falls",
+  "DOWNFALL-DARKNESS_FALLS_POWER.description": "Whenever you are Drained, gain [gold]Block[/gold].",
+  "DOWNFALL-DARKNESS_FALLS_POWER.smartDescription": "Whenever you are Drained, gain [blue]{Amount}[/blue] [gold]Block[/gold].",
+  "DOWNFALL-CURSED_STRENGTH_POWER.title": "Darkblessed",
+  "DOWNFALL-CURSED_STRENGTH_POWER.description": "Whenever you are Drained, gain [gold]Strength[/gold].",
+  "DOWNFALL-CURSED_STRENGTH_POWER.smartDescription": "Whenever you are Drained, gain [blue]{Amount}[/blue] [gold]Strength[/gold].",
+  "DOWNFALL-ENSORCELATE_POWER.title": "Ensorcelate",
+  "DOWNFALL-ENSORCELATE_POWER.description": "The next Power you play costs 0.",
+  "DOWNFALL-ENSORCELATE_POWER.smartDescription": "The next {Amount:plural:Power|[blue]{}[/blue] Powers} you play {Amount:plural:costs|cost} 0."
 }

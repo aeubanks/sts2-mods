@@ -1,10 +1,12 @@
 using System.Runtime.CompilerServices;
 using Downfall.Awakened.Cards;
+using MegaCrit.Sts2.Core.CardSelection;
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Commands;
 using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.GameActions.Multiplayer;
+using MegaCrit.Sts2.Core.Localization;
 using MegaCrit.Sts2.Core.Models;
 
 namespace Downfall.Awakened;
@@ -79,8 +81,22 @@ internal static class AwakenedSpellbook
             RefillQueue(state, owner);
         }
         state.ExtraSpells.Add(canonicalSpell);
-        state.Queue.Add(canonicalSpell);
+        int insertIndex = owner.RunState.Rng.CombatCardGeneration.NextInt(state.Queue.Count + 1);
+        state.Queue.Insert(insertIndex, canonicalSpell);
     }
+
+    public static void RefreshSpells(ICombatState combatState, Player owner)
+    {
+        var state = GetState(combatState, owner);
+        state.Queue.Clear();
+        RefillQueue(state, owner);
+    }
+
+    public static int GetRemainingQueueCount(ICombatState? combatState, Player? owner) =>
+        combatState is not null && owner is not null ? GetState(combatState, owner).Queue.Count : 0;
+
+    public static IReadOnlyList<CardModel> GetRemainingQueue(ICombatState? combatState, Player? owner) =>
+        combatState is not null && owner is not null ? GetState(combatState, owner).Queue : [];
 
     public static void TryCheckAwakening(ICombatState combatState, Player owner, bool force = false)
     {
@@ -138,6 +154,101 @@ internal static class AwakenedSpellbook
         }
 
         return card;
+    }
+
+    public static async Task<CardModel?> ChooseSpellToConjureAsync(
+        PlayerChoiceContext choiceContext,
+        Player owner,
+        ICombatState combatState,
+        LocString prompt,
+        PileType destination = PileType.Hand,
+        CardPilePosition position = CardPilePosition.Top)
+    {
+        if (!owner.Creature.IsAlive || CombatManager.Instance.IsOverOrEnding)
+            return null;
+
+        TryCheckAwakening(combatState, owner);
+        var state = GetState(combatState, owner);
+        if (state.Queue.Count == 0)
+        {
+            RefillQueue(state, owner);
+        }
+
+        var choices = new List<CardModel>();
+        var seen = new HashSet<CardModel>();
+        foreach (var canonical in state.Queue)
+        {
+            if (!seen.Add(canonical))
+                continue;
+
+            var preview = combatState.CreateCard(canonical, owner);
+            if (state.IsAwakened && preview.IsUpgradable)
+            {
+                CardCmd.Upgrade(preview);
+            }
+            choices.Add(preview);
+        }
+
+        var prefs = new CardSelectorPrefs(prompt, 1);
+        var chosen = (await CardSelectCmd.FromSimpleGrid(choiceContext, choices, owner, prefs)).FirstOrDefault();
+        if (chosen is null)
+            return null;
+
+        state.Queue.Remove(chosen.CanonicalInstance);
+        state.ConjuresThisCombat++;
+
+        await CardPileCmd.AddGeneratedCardToCombat(chosen, destination, owner, position);
+
+        if (state.Queue.Count == 0)
+        {
+            RefillQueue(state, owner);
+        }
+
+        return chosen;
+    }
+
+    public static async Task<CardModel?> ChooseSpellToInscribeAsync(
+        PlayerChoiceContext choiceContext,
+        Player owner,
+        ICombatState combatState,
+        LocString prompt,
+        int copies)
+    {
+        if (!owner.Creature.IsAlive || CombatManager.Instance.IsOverOrEnding || copies <= 0)
+            return null;
+
+        TryCheckAwakening(combatState, owner);
+        var state = GetState(combatState, owner);
+
+        var pool = new List<CardModel>(DefaultSpells);
+        var esp = ModelDb.Card<EspSpell>();
+        if (state.ExtraSpells.Contains(esp))
+        {
+            pool.Add(esp);
+        }
+
+        var choices = new List<CardModel>(pool.Count);
+        foreach (var canonical in pool)
+        {
+            var preview = combatState.CreateCard(canonical, owner);
+            if (state.IsAwakened && preview.IsUpgradable)
+            {
+                CardCmd.Upgrade(preview);
+            }
+            choices.Add(preview);
+        }
+
+        var prefs = new CardSelectorPrefs(prompt, 1);
+        var chosen = (await CardSelectCmd.FromSimpleGrid(choiceContext, choices, owner, prefs)).FirstOrDefault();
+        if (chosen is null)
+            return null;
+
+        for (int i = 0; i < copies; i++)
+        {
+            AddSpellToSpellbook(combatState, owner, chosen.CanonicalInstance);
+        }
+
+        return chosen.CanonicalInstance;
     }
 
     public static async Task NotifyEnergyDrainedAsync(

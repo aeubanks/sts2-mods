@@ -15,7 +15,8 @@ namespace Downfall.Hermit.Relics;
 
 public sealed class RedScarf : HermitRelic
 {
-    private readonly HashSet<(Creature Target, ModelId PowerId)> _pendingNewDebuffs = [];
+    private HashSet<(Creature Target, ModelId PowerId)>? _pendingNewDebuffs;
+    private HashSet<(Creature Target, ModelId PowerId)> PendingNewDebuffs => _pendingNewDebuffs ??= [];
 
     protected override string IconKey => "red_scarf";
 
@@ -31,15 +32,21 @@ public sealed class RedScarf : HermitRelic
         HoverTipFactory.Static(StaticHoverTip.Block)
     ];
 
+    protected override void DeepCloneFields()
+    {
+        base.DeepCloneFields();
+        _pendingNewDebuffs = null;
+    }
+
     public override Task BeforeCombatStart()
     {
-        _pendingNewDebuffs.Clear();
+        _pendingNewDebuffs?.Clear();
         return Task.CompletedTask;
     }
 
     public override Task AfterCombatEnd(CombatRoom room)
     {
-        _pendingNewDebuffs.Clear();
+        _pendingNewDebuffs?.Clear();
         return Task.CompletedTask;
     }
 
@@ -58,7 +65,7 @@ public sealed class RedScarf : HermitRelic
             && !target.HasPower(power.Id)
             && !target.HasPower<ArtifactPower>())
         {
-            _pendingNewDebuffs.Add((target, power.Id));
+            PendingNewDebuffs.Add((target, power.Id));
         }
 
         return Task.CompletedTask;
@@ -71,7 +78,7 @@ public sealed class RedScarf : HermitRelic
         Creature? applier,
         CardModel? cardSource)
     {
-        if (applier != Owner.Creature || !_pendingNewDebuffs.Remove((power.Owner, power.Id)))
+        if (applier != Owner.Creature || _pendingNewDebuffs is null || !_pendingNewDebuffs.Remove((power.Owner, power.Id)))
             return;
 
         if (!Owner.Creature.IsAlive || CombatManager.Instance.IsOverOrEnding)

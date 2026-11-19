@@ -3,6 +3,7 @@ using Downfall.Awakened.Cards;
 using Downfall.Awakened.Powers;
 using Downfall.Awakened.Relics;
 using Downfall.Hermit.Powers;
+using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Commands;
 using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Entities.Relics;
@@ -502,5 +503,508 @@ internal static class AwakenedTests
         AutoTestAssert.True(unleash.TryManualPlay(enemy1), "Play Unleash with 3 other cards in hand");
         await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
         AutoTestAssert.Equal(hpBefore - 8, enemy1.CurrentHp, "Unleash dealt 5 + 3 = 8 damage");
+    }
+
+    public static async Task TestUncommonBatch1InCombat()
+    {
+        var (player, _, combatState) = await DownfallAutoTestRunner.StartCombatAsync<TheAwakenedOne>("DFAWK03");
+        var pcs = AutoTestAssert.NotNull(player.PlayerCombatState, "PlayerCombatState");
+        var enemy1 = AutoTestAssert.NotNull(combatState.HittableEnemies.FirstOrDefault(), "First enemy");
+        var enemy2 = await CreatureCmd.Add<MegaCrit.Sts2.Core.Models.Monsters.Nibbit>(combatState);
+        var ctx = new ThrowingPlayerChoiceContext();
+
+        await CreatureCmd.GainMaxHp(enemy1, 800m);
+        await CreatureCmd.GainMaxHp(enemy2, 800m);
+
+        async Task ResetHandAndEnergy(int energy = 10)
+        {
+            foreach (var c in pcs.Hand.Cards.ToList())
+                await CardPileCmd.Add(c, PileType.Discard);
+            if (pcs.Energy > energy)
+                await PlayerCmd.LoseEnergy(pcs.Energy - energy, player);
+            else if (pcs.Energy < energy)
+                await PlayerCmd.GainEnergy(energy - pcs.Energy, player);
+            if (player.Creature.Block > 0)
+                await CreatureCmd.LoseBlock(ctx, player.Creature, player.Creature.Block, null);
+        }
+
+        // 1. Altar: gains 5 Block, exhausts 1 chosen card, Conjures a Spell.
+        await ResetHandAndEnergy();
+        var altar = combatState.CreateCard<Altar>(player);
+        var fodder = combatState.CreateCard<AwakenedStrike>(player);
+        await CardPileCmd.Add(altar, PileType.Hand);
+        await CardPileCmd.Add(fodder, PileType.Hand);
+        int conjuresBefore = AwakenedSpellbook.GetConjuresThisCombat(combatState, player);
+        using (DownfallAutoTestRunner.PreferCards(c => ReferenceEquals(c, fodder)))
+        {
+            AutoTestAssert.True(altar.TryManualPlay(null), "Play Altar");
+            await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        }
+        AutoTestAssert.Equal(5, player.Creature.Block, "Altar gained 5 Block");
+        AutoTestAssert.Equal(PileType.Exhaust, fodder.Pile?.Type, "Altar exhausted chosen card");
+        AutoTestAssert.Equal(conjuresBefore + 1, AwakenedSpellbook.GetConjuresThisCombat(combatState, player), "Altar Conjured a Spell");
+        AutoTestAssert.True(pcs.Hand.Cards.OfType<AwakenedSpellCard>().Any(), "Altar added conjured Spell to Hand");
+
+        // Altar sole-card-in-hand edge case: still gains Block and Conjures cleanly with nothing to Exhaust.
+        await ResetHandAndEnergy();
+        var altarSolo = combatState.CreateCard<Altar>(player);
+        await CardPileCmd.Add(altarSolo, PileType.Hand);
+        conjuresBefore = AwakenedSpellbook.GetConjuresThisCombat(combatState, player);
+        AutoTestAssert.True(altarSolo.TryManualPlay(null), "Play Altar as sole card in Hand");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(5, player.Creature.Block, "Altar solo gained 5 Block");
+        AutoTestAssert.Equal(conjuresBefore + 1, AwakenedSpellbook.GetConjuresThisCombat(combatState, player), "Altar solo still Conjured");
+
+        // 2. BirdsEye (base + upgraded): choose a specific remaining Spell; upgraded refreshes Spellbook first!
+        await ResetHandAndEnergy();
+        var targetCanonical = AutoTestAssert.NotNull(
+            AwakenedSpellbook.GetRemainingQueue(combatState, player).FirstOrDefault(),
+            "Remaining Spell in queue");
+        int queueBefore = AwakenedSpellbook.GetRemainingQueueCount(combatState, player);
+        var birdsEye = combatState.CreateCard<BirdsEye>(player);
+        await CardPileCmd.Add(birdsEye, PileType.Hand);
+        using (DownfallAutoTestRunner.PreferCards(c => ReferenceEquals(c.CanonicalInstance, targetCanonical)))
+        {
+            AutoTestAssert.True(birdsEye.TryManualPlay(null), "Play BirdsEye");
+            await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        }
+        AutoTestAssert.True(
+            pcs.Hand.Cards.Any(c => ReferenceEquals(c.CanonicalInstance, targetCanonical)),
+            "BirdsEye conjured the chosen Spell");
+        if (queueBefore > 1)
+        {
+            AutoTestAssert.Equal(queueBefore - 1, AwakenedSpellbook.GetRemainingQueueCount(combatState, player), "BirdsEye removed chosen Spell from queue");
+        }
+
+        // BirdsEye+: refreshes Spellbook back to full size (4) before choosing, leaving 3 in queue.
+        await ResetHandAndEnergy();
+        var birdsEyePlus = combatState.CreateCard<BirdsEye>(player);
+        CardCmd.Upgrade(birdsEyePlus);
+        await CardPileCmd.Add(birdsEyePlus, PileType.Hand);
+        using (DownfallAutoTestRunner.PreferCards(c => c is Thunderbolt))
+        {
+            AutoTestAssert.True(birdsEyePlus.TryManualPlay(null), "Play BirdsEye+");
+            await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        }
+        AutoTestAssert.True(pcs.Hand.Cards.OfType<Thunderbolt>().Any(), "BirdsEye+ conjured chosen Thunderbolt after refresh");
+        AutoTestAssert.Equal(3, AwakenedSpellbook.GetRemainingQueueCount(combatState, player), "BirdsEye+ refreshed Spellbook (4 -> 3 after choosing 1)");
+
+        // 3. BloodRite: deals 8 damage and adds Ceremony to Hand.
+        await ResetHandAndEnergy();
+        var bloodRite = combatState.CreateCard<BloodRite>(player);
+        await CardPileCmd.Add(bloodRite, PileType.Hand);
+        int hpBefore = enemy1.CurrentHp;
+        AutoTestAssert.True(bloodRite.TryManualPlay(enemy1), "Play BloodRite");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(hpBefore - 8, enemy1.CurrentHp, "BloodRite dealt 8 damage");
+        AutoTestAssert.True(pcs.Hand.Cards.OfType<Ceremony>().Any(), "BloodRite added Ceremony to Hand");
+
+        // 4. Carrionmaker: 1 hit (9 dmg) with 0 Spells played this turn, then 3 hits (27 dmg) after 2 Spells!
+        await ResetHandAndEnergy();
+        var carrion1 = combatState.CreateCard<Carrionmaker>(player);
+        await CardPileCmd.Add(carrion1, PileType.Hand);
+        int totalHpBefore = enemy1.CurrentHp + enemy2.CurrentHp;
+        AutoTestAssert.True(carrion1.TryManualPlay(null), "Play Carrionmaker with 0 Spells played");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(totalHpBefore - 9, enemy1.CurrentHp + enemy2.CurrentHp, "Carrionmaker dealt 1x9=9 damage with 0 Spells played");
+
+        // Play 2 Spells (Cryostasis + EspSpell) this turn, then play Carrionmaker again -> 3x9 = 27 damage!
+        var spellA = combatState.CreateCard<Cryostasis>(player);
+        var spellB = combatState.CreateCard<EspSpell>(player);
+        await CardPileCmd.Add(spellA, PileType.Hand);
+        await CardPileCmd.Add(spellB, PileType.Hand);
+        AutoTestAssert.True(spellA.TryManualPlay(null), "Play Spell 1");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.True(spellB.TryManualPlay(null), "Play Spell 2");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+
+        await ResetHandAndEnergy();
+        var carrion2 = combatState.CreateCard<Carrionmaker>(player);
+        await CardPileCmd.Add(carrion2, PileType.Hand);
+        totalHpBefore = enemy1.CurrentHp + enemy2.CurrentHp;
+        AutoTestAssert.True(carrion2.TryManualPlay(null), "Play Carrionmaker after 2 Spells");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(totalHpBefore - 27, enemy1.CurrentHp + enemy2.CurrentHp, "Carrionmaker dealt 3x9=27 damage after 2 Spells played");
+
+        // 5. Caw: without Chant does NOT buff; with Chant buffs ALL Caw copies in combat by +4!
+        await ResetHandAndEnergy();
+        var cawNoChant = combatState.CreateCard<Caw>(player);
+        var cawAlly = combatState.CreateCard<Caw>(player);
+        await CardPileCmd.Add(cawNoChant, PileType.Hand);
+        await CardPileCmd.Add(cawAlly, PileType.Hand);
+        hpBefore = enemy1.CurrentHp;
+        AutoTestAssert.True(cawNoChant.TryManualPlay(enemy1), "Play Caw without Chant");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(hpBefore - 4, enemy1.CurrentHp, "Caw without Chant dealt 4 damage");
+        AutoTestAssert.Equal(4m, cawAlly.DynamicVars.Damage.BaseValue, "Caw without Chant did NOT buff other Caw");
+
+        // Play a Power (Ceremony), then play Caw -> triggers Chant and buffs all Caws by +4!
+        var ceremony = combatState.CreateCard<Ceremony>(player);
+        await CardPileCmd.Add(ceremony, PileType.Hand);
+        AutoTestAssert.True(ceremony.TryManualPlay(null), "Play Ceremony (Power) to activate Chant");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        var cawChant = combatState.CreateCard<Caw>(player);
+        await CardPileCmd.Add(cawChant, PileType.Hand);
+        hpBefore = enemy1.CurrentHp;
+        AutoTestAssert.True(cawChant.TryManualPlay(enemy1), "Play Caw with Chant");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(hpBefore - 5, enemy1.CurrentHp, "Caw dealt 4 + 1 Strength (from Ceremony) = 5 damage");
+        AutoTestAssert.Equal(8m, cawChant.DynamicVars.Damage.BaseValue, "Caw Chant increased played Caw copy base damage (4 -> 8)");
+        AutoTestAssert.Equal(8m, cawAlly.DynamicVars.Damage.BaseValue, "Caw Chant increased all Caw base damage by +4 (4 -> 8)");
+        AutoTestAssert.Equal(8m, cawNoChant.DynamicVars.Damage.BaseValue, "Caw Chant also increased Caw in Discard (4 -> 8)");
+
+        // Clear Ceremony Strength for clean damage checks ahead.
+        if (player.Creature.GetPower<StrengthPower>() is { } strP)
+            await PowerCmd.Remove(strP);
+
+        // 6. ChosenVerse: does NOT self-trigger, ignores Attacks, triggers on non-Attacks, supports stacking!
+        await ResetHandAndEnergy();
+        for (int i = 0; i < 4; i++)
+            await CardPileCmd.Add(combatState.CreateCard<AwakenedStrike>(player), PileType.Draw);
+        var chosenVerse1 = combatState.CreateCard<ChosenVerse>(player);
+        await CardPileCmd.Add(chosenVerse1, PileType.Hand);
+        int handBefore = pcs.Hand.Cards.Count;
+        AutoTestAssert.True(chosenVerse1.TryManualPlay(null), "Play ChosenVerse");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(0, player.Creature.Block, "ChosenVerse did NOT trigger on itself");
+        AutoTestAssert.Equal(handBefore - 1, pcs.Hand.Cards.Count, "ChosenVerse did NOT draw on itself");
+        AutoTestAssert.Equal(2, player.Creature.GetPowerAmount<ChosensVersePower>(), "ChosenVerse applied 2 triggers");
+
+        // Attack should NOT trigger ChosenVerse.
+        var atk = combatState.CreateCard<AwakenedStrike>(player);
+        await CardPileCmd.Add(atk, PileType.Hand);
+        AutoTestAssert.True(atk.TryManualPlay(enemy1), "Play Attack while ChosenVerse active");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(0, player.Creature.Block, "Attack did NOT trigger ChosenVerse");
+        AutoTestAssert.Equal(2, player.Creature.GetPowerAmount<ChosensVersePower>(), "Attack kept ChosenVerse at 2");
+
+        // Skill triggers ChosenVerse: draws 1 card and gains 4 Block, decrements to 1.
+        var defend = combatState.CreateCard<AwakenedDefend>(player);
+        await CardPileCmd.Add(defend, PileType.Hand);
+        int handBeforeSkill = pcs.Hand.Cards.Count;
+        AutoTestAssert.True(defend.TryManualPlay(null), "Play Defend (non-Attack) to trigger ChosenVerse");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(5 + 4, player.Creature.Block, "Defend (5) + ChosenVerse (4) = 9 Block");
+        AutoTestAssert.Equal(handBeforeSkill, pcs.Hand.Cards.Count, "ChosenVerse drew 1 card (-1 played +1 drawn)");
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<ChosensVersePower>(), "ChosenVerse decremented to 1");
+
+        // Play ChosenVerse+ (6 Block) while 1st ChosenVerse still has 2 triggers left:
+        // Entry 1 (4 Block) fires on ChosenVerse+ (leaving 1), Entry 2 (6 Block) starts at 2 -> both entries overlap!
+        await ResetHandAndEnergy();
+        for (int i = 0; i < 6; i++)
+            await CardPileCmd.Add(combatState.CreateCard<AwakenedStrike>(player), PileType.Draw);
+        if (player.Creature.GetPower<ChosensVersePower>() is { } oldCv)
+            await PowerCmd.Remove(oldCv);
+        var cvOverlap1 = combatState.CreateCard<ChosenVerse>(player);
+        var cvOverlap2 = combatState.CreateCard<ChosenVerse>(player);
+        CardCmd.Upgrade(cvOverlap2);
+        var overlapDefend = combatState.CreateCard<AwakenedDefend>(player);
+        await CardPileCmd.Add(cvOverlap1, PileType.Hand);
+        await CardPileCmd.Add(cvOverlap2, PileType.Hand);
+        await CardPileCmd.Add(overlapDefend, PileType.Hand);
+        AutoTestAssert.True(cvOverlap1.TryManualPlay(null), "Play ChosenVerse (overlap 1)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.True(cvOverlap2.TryManualPlay(null), "Play ChosenVerse+ (overlap 2)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(4, player.Creature.Block, "Entry 1 triggered on ChosenVerse+ (+4 Block), Entry 2 did not self-trigger");
+        AutoTestAssert.Equal(3, player.Creature.GetPowerAmount<ChosensVersePower>(), "Total remaining triggers = 1 (Entry 1) + 2 (Entry 2) = 3");
+
+        await CreatureCmd.LoseBlock(ctx, player.Creature, player.Creature.Block, null);
+        int handBeforeOverlap = pcs.Hand.Cards.Count;
+        AutoTestAssert.True(overlapDefend.TryManualPlay(null), "Play Defend while BOTH entries (4 and 6 Block) are alive");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(5 + 4 + 6, player.Creature.Block, "Simultaneous ChosenVerse entries granted 5 + 4 + 6 = 15 Block");
+        AutoTestAssert.Equal(handBeforeOverlap + 1, pcs.Hand.Cards.Count, "Simultaneous ChosenVerse entries drew 2 cards (-1 played +2 drawn)");
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<ChosensVersePower>(), "Simultaneous trigger decremented by 2 (3 -> 1)");
+
+        // End of turn removes ChosensVersePower.
+        var cvPower = AutoTestAssert.NotNull(player.Creature.GetPower<ChosensVersePower>(), "ChosensVersePower active");
+        await cvPower.AfterSideTurnEnd(ctx, CombatSide.Player, [player.Creature]);
+        AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<ChosensVersePower>(), "ChosensVersePower removed at turn end");
+
+        // 7. Ensorcelate + DarkEcho + DarkEchoPower:
+        // Ensorcelate gains 10 Block and makes next Power (DarkEcho, base cost 2) cost 0!
+        await ResetHandAndEnergy(energy: 6);
+        var ensorcelate = combatState.CreateCard<Ensorcelate>(player);
+        var darkEcho1 = combatState.CreateCard<DarkEcho>(player);
+        var darkEcho2 = combatState.CreateCard<DarkEcho>(player);
+        await CardPileCmd.Add(ensorcelate, PileType.Hand);
+        await CardPileCmd.Add(darkEcho1, PileType.Hand);
+        await CardPileCmd.Add(darkEcho2, PileType.Hand);
+        AutoTestAssert.True(ensorcelate.TryManualPlay(null), "Play Ensorcelate (2 Energy)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(10, player.Creature.Block, "Ensorcelate gained 10 Block");
+        AutoTestAssert.Equal(4, pcs.Energy, "Ensorcelate cost 2 Energy (6 -> 4)");
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<EnsorcelatePower>(), "Ensorcelate applied 1 EnsorcelatePower");
+        AutoTestAssert.Equal(0, darkEcho1.EnergyCost.GetAmountToSpend(), "DarkEcho costs 0 under EnsorcelatePower");
+
+        // Non-Power play and AutoPlay of a Power must NOT consume EnsorcelatePower!
+        var nonPowerSkill = combatState.CreateCard<AwakenedDefend>(player);
+        await CardPileCmd.Add(nonPowerSkill, PileType.Hand);
+        AutoTestAssert.True(nonPowerSkill.TryManualPlay(null), "Play Skill while EnsorcelatePower active");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<EnsorcelatePower>(), "Non-Power did NOT consume EnsorcelatePower");
+        var autoPower = combatState.CreateCard<Ceremony>(player);
+        await CardCmd.AutoPlay(ctx, autoPower, null);
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<EnsorcelatePower>(), "AutoPlay Power did NOT consume EnsorcelatePower");
+        if (player.Creature.GetPower<StrengthPower>() is { } strAuto)
+            await PowerCmd.Remove(strAuto);
+
+        AutoTestAssert.True(darkEcho1.TryManualPlay(null), "Play DarkEcho for 0 Energy");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(3, pcs.Energy, "DarkEcho spent 0 Energy under EnsorcelatePower (only Defend spent 1)");
+        AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<EnsorcelatePower>(), "EnsorcelatePower consumed after Power play");
+        AutoTestAssert.Equal(2, darkEcho2.EnergyCost.GetAmountToSpend(), "Second DarkEcho back to cost 2");
+
+        // 2 stacks of EnsorcelatePower make 2 consecutive Powers cost 0!
+        await PowerCmd.Apply<EnsorcelatePower>(ctx, player.Creature, 2m, player.Creature, null);
+        var freeP1 = combatState.CreateCard<DarkEcho>(player);
+        var freeP2 = combatState.CreateCard<DarknessFalls>(player);
+        await CardPileCmd.Add(freeP1, PileType.Hand);
+        await CardPileCmd.Add(freeP2, PileType.Hand);
+        int energyBeforeTwoFree = pcs.Energy;
+        AutoTestAssert.True(freeP1.TryManualPlay(null), "Play 1st free Power with 2 stacks");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<EnsorcelatePower>(), "1 stack remains after 1st Power");
+        AutoTestAssert.True(freeP2.TryManualPlay(null), "Play 2nd free Power with 2 stacks");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(energyBeforeTwoFree, pcs.Energy, "Both Powers cost 0 Energy with 2 EnsorcelatePower stacks");
+        AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<EnsorcelatePower>(), "EnsorcelatePower depleted after 2 Powers");
+        if (player.Creature.GetPower<DarknessFallsPower>() is { } tmpDfp) await PowerCmd.Remove(tmpDfp);
+        if (player.Creature.GetPower<CursedStrengthPower>() is { } tmpCsp) await PowerCmd.Remove(tmpCsp);
+
+        // DarkEchoPower is now stacked to 2 (darkEcho1 + freeP1).
+        AutoTestAssert.Equal(2, player.Creature.GetPowerAmount<DarkEchoPower>(), "DarkEchoPower stacked to 2");
+
+        // With +3 Strength + Vulnerable on enemy1, DarkEchoPower(2) still deals unpowered (4 + 3) * 2 = 14 to BOTH enemies!
+        await PowerCmd.Apply<StrengthPower>(ctx, player.Creature, 3m, player.Creature, null);
+        await PowerCmd.Apply<VulnerablePower>(ctx, enemy1, 2m, player.Creature, null);
+        var darkEchoPower = AutoTestAssert.NotNull(player.Creature.GetPower<DarkEchoPower>(), "DarkEchoPower present");
+        int e1Before = enemy1.CurrentHp;
+        int e2Before = enemy2.CurrentHp;
+        await darkEchoPower.BeforeSideTurnEnd(ctx, CombatSide.Player, [player.Creature]);
+        AutoTestAssert.Equal(e1Before - 14, enemy1.CurrentHp, "DarkEchoPower(2) dealt unpowered 14 to Vulnerable enemy1 (not scaled by Vulnerable)");
+        AutoTestAssert.Equal(e2Before - 14, enemy2.CurrentHp, "DarkEchoPower(2) with +3 Str dealt 14 to enemy2");
+
+        // Negative Strength (-5 -> 4 - 5 = -1 clamped to 0) deals 0 damage!
+        await PowerCmd.Apply<StrengthPower>(ctx, player.Creature, -8m, player.Creature, null);
+        e1Before = enemy1.CurrentHp;
+        await darkEchoPower.BeforeSideTurnEnd(ctx, CombatSide.Player, [player.Creature]);
+        AutoTestAssert.Equal(e1Before, enemy1.CurrentHp, "DarkEchoPower clamped negative total damage to 0");
+        await PowerCmd.Remove(darkEchoPower);
+        if (enemy1.GetPower<VulnerablePower>() is { } vulnP) await PowerCmd.Remove(vulnP);
+        if (player.Creature.GetPower<StrengthPower>() is { } strP2)
+            await PowerCmd.Remove(strP2);
+
+        // 8. DarknessFalls + DarknessFallsPower + CursedStrengthPower:
+        await ResetHandAndEnergy();
+        var darknessFalls = combatState.CreateCard<DarknessFalls>(player);
+        var darknessFallsPlus = combatState.CreateCard<DarknessFalls>(player);
+        CardCmd.Upgrade(darknessFallsPlus);
+        AutoTestAssert.True(darknessFallsPlus.Keywords.Contains(CardKeyword.Innate), "DarknessFalls+ is Innate");
+        await CardPileCmd.Add(darknessFalls, PileType.Hand);
+        AutoTestAssert.True(darknessFalls.TryManualPlay(null), "Play DarknessFalls");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(4, player.Creature.GetPowerAmount<DarknessFallsPower>(), "DarknessFalls applied 4 DarknessFallsPower");
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<CursedStrengthPower>(), "DarknessFalls applied 1 CursedStrengthPower");
+
+        // Drain 1 Energy via Void draw -> gains 4 Block and 1 Strength!
+        var voidCard = combatState.CreateCard<StsCards.Void>(player);
+        await CardPileCmd.Add(voidCard, PileType.Draw, CardPilePosition.Top);
+        await CardPileCmd.Draw(ctx, 1m, player);
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(4, player.Creature.Block, "DarknessFallsPower gained 4 Block on Void Drain");
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<StrengthPower>(), "CursedStrengthPower gained 1 Strength on Void Drain");
+
+        // Remove DarknessFalls powers & Strength so remaining checks are isolated.
+        if (player.Creature.GetPower<DarknessFallsPower>() is { } dfp) await PowerCmd.Remove(dfp);
+        if (player.Creature.GetPower<CursedStrengthPower>() is { } csp) await PowerCmd.Remove(csp);
+        if (player.Creature.GetPower<StrengthPower>() is { } strP3) await PowerCmd.Remove(strP3);
+
+        // 9. DeathCoil: applies 8 Manaburn to enemy and 1 HermitDrainedPower to player.
+        await ResetHandAndEnergy();
+        var deathCoil = combatState.CreateCard<DeathCoil>(player);
+        await CardPileCmd.Add(deathCoil, PileType.Hand);
+        AutoTestAssert.True(deathCoil.TryManualPlay(enemy1), "Play DeathCoil");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(8, enemy1.GetPowerAmount<ManaburnPower>(), "DeathCoil applied 8 Manaburn");
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<HermitDrainedPower>(), "DeathCoil applied 1 Drained");
+        if (enemy1.GetPower<ManaburnPower>() is { } mbp) await PowerCmd.Remove(mbp);
+        if (player.Creature.GetPower<HermitDrainedPower>() is { } hdp) await PowerCmd.Remove(hdp);
+
+        // 10. Eventide: deals 8x2 = 16 damage to random enemies and puts a Void on top of Draw Pile.
+        await ResetHandAndEnergy();
+        var eventide = combatState.CreateCard<Eventide>(player);
+        await CardPileCmd.Add(eventide, PileType.Hand);
+        totalHpBefore = enemy1.CurrentHp + enemy2.CurrentHp;
+        AutoTestAssert.True(eventide.TryManualPlay(null), "Play Eventide");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(totalHpBefore - 16, enemy1.CurrentHp + enemy2.CurrentHp, "Eventide dealt 8x2=16 damage");
+        AutoTestAssert.True(PileType.Draw.GetPile(player).Cards.FirstOrDefault() is StsCards.Void, "Eventide put a Void on top of Draw Pile");
+
+        // 11. Extension: deals 11 damage; stays in Discard on Skill, returns to Hand on Power!
+        await ResetHandAndEnergy();
+        var extension = combatState.CreateCard<Extension>(player);
+        await CardPileCmd.Add(extension, PileType.Hand);
+        hpBefore = enemy1.CurrentHp;
+        AutoTestAssert.True(extension.TryManualPlay(enemy1), "Play Extension");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(hpBefore - 11, enemy1.CurrentHp, "Extension dealt 11 damage");
+        AutoTestAssert.Equal(PileType.Discard, extension.Pile?.Type, "Extension went to Discard");
+
+        var skillNonPower = combatState.CreateCard<AwakenedDefend>(player);
+        await CardPileCmd.Add(skillNonPower, PileType.Hand);
+        AutoTestAssert.True(skillNonPower.TryManualPlay(null), "Play Skill (non-Power)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(PileType.Discard, extension.Pile?.Type, "Extension stayed in Discard after Skill");
+
+        var powerTrigger = combatState.CreateCard<Ceremony>(player);
+        await CardPileCmd.Add(powerTrigger, PileType.Hand);
+        AutoTestAssert.True(powerTrigger.TryManualPlay(null), "Play Ceremony (Power)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(PileType.Hand, extension.Pile?.Type, "Extension returned from Discard to Hand on Power play");
+
+        // Extension full-hand guard: with 10 cards in Hand, playing a Power leaves Extension in Discard!
+        await CardPileCmd.Add(extension, PileType.Discard);
+        while (pcs.Hand.Cards.Count < CardPile.MaxCardsInHand)
+            await CardPileCmd.Add(combatState.CreateCard<AwakenedDefend>(player), PileType.Hand);
+        var fullHandPower = combatState.CreateCard<Ceremony>(player);
+        await CardCmd.AutoPlay(ctx, fullHandPower, null);
+        AutoTestAssert.Equal(PileType.Discard, extension.Pile?.Type, "Extension stayed in Discard when Hand was full (10 cards)");
+        if (player.Creature.GetPower<StrengthPower>() is { } strExt)
+            await PowerCmd.Remove(strExt);
+
+        // 12. FeatherVeil: 0-cost, gains 10 Block, loses 1 Strength (1 -> 0).
+        await ResetHandAndEnergy();
+        var featherVeil = combatState.CreateCard<FeatherVeil>(player);
+        await CardPileCmd.Add(featherVeil, PileType.Hand);
+        int strBefore = player.Creature.GetPowerAmount<StrengthPower>();
+        AutoTestAssert.True(featherVeil.TryManualPlay(null), "Play FeatherVeil");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(10, player.Creature.Block, "FeatherVeil gained 10 Block");
+        AutoTestAssert.Equal(strBefore - 1, player.Creature.GetPowerAmount<StrengthPower>(), "FeatherVeil reduced Strength by 1");
+
+        // 13. FeatherWhirl (X-cost, base and upgraded):
+        await ResetHandAndEnergy(energy: 2);
+        var featherWhirl = combatState.CreateCard<FeatherWhirl>(player);
+        await CardPileCmd.Add(featherWhirl, PileType.Hand);
+        AutoTestAssert.True(featherWhirl.TryManualPlay(null), "Play FeatherWhirl at X=2");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(2, pcs.Hand.Cards.OfType<PlumeJab>().Count(), "FeatherWhirl at X=2 added 2 Plume Jabs");
+
+        await ResetHandAndEnergy(energy: 2);
+        var featherWhirlPlus = combatState.CreateCard<FeatherWhirl>(player);
+        CardCmd.Upgrade(featherWhirlPlus);
+        await CardPileCmd.Add(featherWhirlPlus, PileType.Hand);
+        AutoTestAssert.True(featherWhirlPlus.TryManualPlay(null), "Play FeatherWhirl+ at X=2");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(3, pcs.Hand.Cards.OfType<PlumeJab>().Count(), "FeatherWhirl+ at X=2 added 3 Plume Jabs");
+
+        // 14. Inscribe (base + upgraded): adds 2 copies of chosen Spell to Spellbook; upgraded also Conjures!
+        await ResetHandAndEnergy();
+        int qBeforeInscribe = AwakenedSpellbook.GetRemainingQueueCount(combatState, player);
+        int cBeforeInscribe = AwakenedSpellbook.GetConjuresThisCombat(combatState, player);
+        var inscribe = combatState.CreateCard<Inscribe>(player);
+        await CardPileCmd.Add(inscribe, PileType.Hand);
+        using (DownfallAutoTestRunner.PreferCards(c => c is BurningStudy))
+        {
+            AutoTestAssert.True(inscribe.TryManualPlay(null), "Play Inscribe");
+            await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        }
+        AutoTestAssert.Equal(qBeforeInscribe + 2, AwakenedSpellbook.GetRemainingQueueCount(combatState, player), "Inscribe added 2 Spell copies to Spellbook queue");
+        AutoTestAssert.Equal(cBeforeInscribe, AwakenedSpellbook.GetConjuresThisCombat(combatState, player), "Base Inscribe did NOT increment ConjuresThisCombat");
+
+        await ResetHandAndEnergy();
+        int cBeforeInscribePlus = AwakenedSpellbook.GetConjuresThisCombat(combatState, player);
+        var inscribePlus = combatState.CreateCard<Inscribe>(player);
+        CardCmd.Upgrade(inscribePlus);
+        await CardPileCmd.Add(inscribePlus, PileType.Hand);
+        using (DownfallAutoTestRunner.PreferCards(c => c is Darkleech))
+        {
+            AutoTestAssert.True(inscribePlus.TryManualPlay(null), "Play Inscribe+");
+            await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        }
+        AutoTestAssert.Equal(cBeforeInscribePlus + 1, AwakenedSpellbook.GetConjuresThisCombat(combatState, player), "Inscribe+ Conjured 1 Spell");
+        AutoTestAssert.True(pcs.Hand.Cards.OfType<AwakenedSpellCard>().Any(), "Inscribe+ added Conjured Spell to Hand");
+        AwakenedSpellbook.RefreshSpells(combatState, player);
+        AutoTestAssert.Equal(4 + 4, AwakenedSpellbook.GetRemainingQueueCount(combatState, player), "Inscribed copies (2 + 2) persisted across RefreshSpells (total 8)");
+
+        // 15. KnifesEdge: gains 2 Strength and adds 2 Voids to Discard Pile.
+        await ResetHandAndEnergy();
+        int voidsInDiscardBefore = PileType.Discard.GetPile(player).Cards.OfType<StsCards.Void>().Count();
+        strBefore = player.Creature.GetPowerAmount<StrengthPower>();
+        var knifesEdge = combatState.CreateCard<KnifesEdge>(player);
+        await CardPileCmd.Add(knifesEdge, PileType.Hand);
+        AutoTestAssert.True(knifesEdge.TryManualPlay(null), "Play KnifesEdge");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(strBefore + 2, player.Creature.GetPowerAmount<StrengthPower>(), "KnifesEdge gained 2 Strength");
+        AutoTestAssert.Equal(voidsInDiscardBefore + 2, PileType.Discard.GetPile(player).Cards.OfType<StsCards.Void>().Count(), "KnifesEdge added 2 Voids to Discard");
+
+        // 16. MiddenHeap: Discard->Hand, Draw->Hand (no Void drain), MiddenHeap+ (2 cards), full-hand Draw->Discard overflow, and 0 candidates!
+        await ResetHandAndEnergy(energy: 5);
+        var midden = combatState.CreateCard<MiddenHeap>(player);
+        await CardPileCmd.Add(midden, PileType.Hand);
+        var discardVoid = PileType.Discard.GetPile(player).Cards.OfType<StsCards.Void>().First();
+        using (DownfallAutoTestRunner.PreferCards(c => ReferenceEquals(c, discardVoid)))
+        {
+            AutoTestAssert.True(midden.TryManualPlay(null), "Play MiddenHeap (Discard -> Hand)");
+            await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        }
+        AutoTestAssert.Equal(3, player.Creature.Block, "MiddenHeap gained 3 Block");
+        AutoTestAssert.Equal(PileType.Hand, discardVoid.Pile?.Type, "MiddenHeap moved Void from Discard to Hand");
+        AutoTestAssert.Equal(5, pcs.Energy, "MiddenHeap moving Void to Hand did NOT drain Energy");
+
+        // MiddenHeap+ moving 2 Voids (1 from Draw + 1 from Discard) without draining Energy!
+        await ResetHandAndEnergy(energy: 5);
+        var drawVoid = combatState.CreateCard<StsCards.Void>(player);
+        await CardPileCmd.Add(drawVoid, PileType.Draw, CardPilePosition.Top);
+        var discardVoid2 = combatState.CreateCard<StsCards.Void>(player);
+        await CardPileCmd.Add(discardVoid2, PileType.Discard);
+        var middenPlus = combatState.CreateCard<MiddenHeap>(player);
+        CardCmd.Upgrade(middenPlus);
+        await CardPileCmd.Add(middenPlus, PileType.Hand);
+        using (DownfallAutoTestRunner.PreferCards(c => ReferenceEquals(c, drawVoid) || ReferenceEquals(c, discardVoid2)))
+        {
+            AutoTestAssert.True(middenPlus.TryManualPlay(null), "Play MiddenHeap+ (2 Status cards from Draw + Discard)");
+            await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        }
+        AutoTestAssert.Equal(4, player.Creature.Block, "MiddenHeap+ gained 4 Block");
+        AutoTestAssert.Equal(PileType.Hand, drawVoid.Pile?.Type, "MiddenHeap+ moved Void from Draw to Hand");
+        AutoTestAssert.Equal(PileType.Hand, discardVoid2.Pile?.Type, "MiddenHeap+ moved 2nd Void from Discard to Hand");
+        AutoTestAssert.Equal(5, pcs.Energy, "MiddenHeap+ moving Void from Draw did NOT drain Energy");
+
+        // MiddenHeap+ with 9 other cards in Hand + 1 Void in Draw: 1st moves to Hand (filling to 10), 2nd from Draw overflows to Discard!
+        await ResetHandAndEnergy(energy: 5);
+        var overflowDrawVoid1 = combatState.CreateCard<StsCards.Void>(player);
+        var overflowDrawVoid2 = combatState.CreateCard<StsCards.Void>(player);
+        await CardPileCmd.Add(overflowDrawVoid1, PileType.Draw, CardPilePosition.Top);
+        await CardPileCmd.Add(overflowDrawVoid2, PileType.Draw, CardPilePosition.Top);
+        var middenFull = combatState.CreateCard<MiddenHeap>(player);
+        CardCmd.Upgrade(middenFull);
+        await CardPileCmd.Add(middenFull, PileType.Hand);
+        while (pcs.Hand.Cards.Count < CardPile.MaxCardsInHand)
+            await CardPileCmd.Add(combatState.CreateCard<AwakenedDefend>(player), PileType.Hand);
+        using (DownfallAutoTestRunner.PreferCards(c => ReferenceEquals(c, overflowDrawVoid1) || ReferenceEquals(c, overflowDrawVoid2)))
+        {
+            AutoTestAssert.True(middenFull.TryManualPlay(null), "Play MiddenHeap+ with 9 other cards in Hand");
+            await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        }
+        int inHandOverflow = (overflowDrawVoid1.Pile?.Type == PileType.Hand ? 1 : 0) + (overflowDrawVoid2.Pile?.Type == PileType.Hand ? 1 : 0);
+        int inDiscardOverflow = (overflowDrawVoid1.Pile?.Type == PileType.Discard ? 1 : 0) + (overflowDrawVoid2.Pile?.Type == PileType.Discard ? 1 : 0);
+        AutoTestAssert.Equal(1, inHandOverflow, "MiddenHeap+ filled 10th Hand slot with 1st Draw Void");
+        AutoTestAssert.Equal(1, inDiscardOverflow, "MiddenHeap+ overflowed 2nd Draw Void to Discard");
+
+        // MiddenHeap with 0 Status/Curse candidates in Draw/Discard still grants Block cleanly!
+        await ResetHandAndEnergy(energy: 5);
+        foreach (var sc in PileType.Draw.GetPile(player).Cards.Concat(PileType.Discard.GetPile(player).Cards)
+            .Where(c => c.Type is CardType.Status or CardType.Curse).ToList())
+        {
+            await CardCmd.Exhaust(ctx, sc);
+        }
+        var middenEmpty = combatState.CreateCard<MiddenHeap>(player);
+        await CardPileCmd.Add(middenEmpty, PileType.Hand);
+        AutoTestAssert.True(middenEmpty.TryManualPlay(null), "Play MiddenHeap with 0 Status/Curse candidates");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(3, player.Creature.Block, "MiddenHeap with 0 candidates still gained 3 Block");
     }
 }
