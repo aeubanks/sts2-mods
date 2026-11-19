@@ -28,5 +28,20 @@
   "DOWNFALL-THE_AWAKENED_ONE.goldMonologue": "Trinkets for the faithful.",
   "DOWNFALL-THE_AWAKENED_ONE.banter": "CAW CAW!",
   "DOWNFALL-THE_AWAKENED_ONE.bestiaryQuote": "An ancient dark bird awakened by forbidden rites.",
-  "DOWNFALL-THE_AWAKENED_ONE.aromaPrinciple": "Ozone and dark feathers."
+  "DOWNFALL-THE_AWAKENED_ONE.aromaPrinciple": "Ozone and dark feathers.",
+  "DOWNFALL-THE_GREMLINS.title": "The Gremlins",
+  "DOWNFALL-THE_GREMLINS.titleObject": "the Gremlins",
+  "DOWNFALL-THE_GREMLINS.shortTitle": "Gremlins",
+  "DOWNFALL-THE_GREMLINS.description": "A chaotic mob of Spire denizens banded together\nin search of food and treasure.",
+  "DOWNFALL-THE_GREMLINS.pronounObject": "them",
+  "DOWNFALL-THE_GREMLINS.possessiveAdjective": "their",
+  "DOWNFALL-THE_GREMLINS.pronounPossessive": "theirs",
+  "DOWNFALL-THE_GREMLINS.pronounSubject": "they",
+  "DOWNFALL-THE_GREMLINS.cardsModifierTitle": "Gremlins' Cards",
+  "DOWNFALL-THE_GREMLINS.cardsModifierDescription": "Gremlin cards can now appear in rewards and shops.",
+  "DOWNFALL-THE_GREMLINS.eventDeathPrevention": "Not the whole mob!",
+  "DOWNFALL-THE_GREMLINS.goldMonologue": "Shiny! Shiny! Gimme!",
+  "DOWNFALL-THE_GREMLINS.banter": "Get 'em, boys!",
+  "DOWNFALL-THE_GREMLINS.bestiaryQuote": "Five scheming gremlins swapping in and out of the fray.",
+  "DOWNFALL-THE_GREMLINS.aromaPrinciple": "Stolen snacks and chaos."
 }

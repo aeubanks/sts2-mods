@@ -143,6 +143,8 @@ internal static class DownfallAutoTestRunner
                 ("AwakenedUncommonBatch2InCombat", AwakenedTests.TestUncommonBatch2InCombat),
                 ("AwakenedRareCardsInCombat", AwakenedTests.TestRareCardsInCombat),
                 ("AwakenedRelicsAndPotionsInCombat", AwakenedTests.TestRelicsAndPotionsInCombat),
+                ("GremlinVisualsRuntime", GremlinTests.TestVisualsRuntime),
+                ("GremlinStarterCombat", GremlinTests.TestStarterCombat),
             ];
 
             foreach (var (name, run) in tests)
@@ -258,7 +260,9 @@ internal static class DownfallAutoTestRunner
         }
     }
 
-    internal static async Task RunCharacterVisualsRuntimeTest<TCharacter>(string seed)
+    internal static async Task RunCharacterVisualsRuntimeTest<TCharacter>(
+        string seed,
+        Func<string?, bool>? isValidCombatSprite = null)
         where TCharacter : DownfallCharacter
     {
         var character = ModelDb.Character<TCharacter>();
@@ -337,7 +341,15 @@ internal static class DownfallAutoTestRunner
             $"{character.Id} live player NCreature mounted in combat");
         AutoTestAssert.True(playerCreatureNode.Visuals.IsNodeReady(), $"{character.Id} NCreatureVisuals._Ready() completed");
         var combatSprite = AutoTestAssert.NotNull(playerCreatureNode.Visuals.Body as Sprite2D, $"{character.Id} live combat body is Sprite2D");
-        AutoTestAssert.Equal(spritePath, combatSprite.Texture?.ResourcePath, $"{character.Id} live combat uses custom sprite");
+        if (isValidCombatSprite is not null)
+        {
+            AutoTestAssert.True(isValidCombatSprite(combatSprite.Texture?.ResourcePath),
+                $"{character.Id} live combat uses valid custom sprite (got {combatSprite.Texture?.ResourcePath})");
+        }
+        else
+        {
+            AutoTestAssert.Equal(spritePath, combatSprite.Texture?.ResourcePath, $"{character.Id} live combat uses custom sprite");
+        }
         AutoTestAssert.Equal(Control.MouseFilterEnum.Ignore, playerCreatureNode.Visuals.Bounds.MouseFilter, $"{character.Id} combat %Bounds ignores mouse");
         AutoTestAssert.True(playerCreatureNode.Visuals.VfxSpawnPosition.Position.Y < -50f,
             $"{character.Id} VfxSpawnPosition should be on torso (got Y={playerCreatureNode.Visuals.VfxSpawnPosition.Position.Y})");
@@ -506,6 +518,13 @@ internal static class DownfallAutoTestRunner
         AutoTestAssert.True(new LocString("cards", "DOWNFALL-PROCESSION.selectionScreenPrompt").Exists(), "Missing Procession selectionScreenPrompt loc");
         AutoTestAssert.True(new LocString("potions", "DOWNFALL-ECLIPSE.selectionScreenPrompt").Exists(), "Missing Eclipse selectionScreenPrompt loc");
         AutoTestAssert.True(new LocString("relics", "DOWNFALL-MOON_TALISMAN.selectionScreenPrompt").Exists(), "Missing MoonTalisman selectionScreenPrompt loc");
+        AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-SWAP_KEYWORD.title").Exists(), "Missing Swap title loc");
+        AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-SWAP_KEYWORD.description").Exists(), "Missing Swap desc loc");
+        AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-TEMP_HP_KEYWORD.title").Exists(), "Missing Temp HP title loc");
+        AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-TEMP_HP_KEYWORD.description").Exists(), "Missing Temp HP desc loc");
+        AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-ECHO_KEYWORD.title").Exists(), "Missing Echo title loc");
+        AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-ECHO_KEYWORD.description").Exists(), "Missing Echo desc loc");
+        AutoTestAssert.True(new LocString("cards", "DOWNFALL-TAG_TEAM.selectionScreenPrompt").Exists(), "Missing TagTeam selectionScreenPrompt loc");
 
         return Task.CompletedTask;
     }

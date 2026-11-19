@@ -9,7 +9,7 @@ import argparse
 import json
 import math
 import os
-from PIL import Image
+from PIL import Image, ImageDraw
 
 
 def solve_3x3(A, B):
@@ -90,6 +90,7 @@ def render_spine_pose(
     skin_name="default",
     flip_x=False,
     skip_slots=(),
+    anim_name=None,
 ):
     pages, regions = parse_atlas(atlas_path)
     with open(json_path, "r", encoding="utf-8") as f:
@@ -112,6 +113,25 @@ def render_spine_pose(
         }
         bones_by_name[bd["name"]] = bd
         bone_list.append(bd)
+
+    if anim_name:
+        anim = skel.get("animations", {}).get(anim_name)
+        if anim:
+            for bn, tracks in anim.get("bones", {}).items():
+                b = bones_by_name.get(bn)
+                if not b:
+                    continue
+                rot = tracks.get("rotate")
+                if rot and rot[0].get("time", 0.0) == 0.0:
+                    b["rotation"] += rot[0].get("angle", 0.0)
+                tr = tracks.get("translate")
+                if tr and tr[0].get("time", 0.0) == 0.0:
+                    b["x"] += tr[0].get("x", 0.0)
+                    b["y"] += tr[0].get("y", 0.0)
+                sc_t = tracks.get("scale")
+                if sc_t and sc_t[0].get("time", 0.0) == 0.0:
+                    b["scaleX"] *= sc_t[0].get("x", 1.0)
+                    b["scaleY"] *= sc_t[0].get("y", 1.0)
 
     def update_world():
         for b in bone_list:
@@ -173,6 +193,144 @@ def render_spine_pose(
                 b1["rotation"] = math.degrees(a1)
                 b2["rotation"] = math.degrees(a2)
                 update_world()
+
+    # Apply Spine path constraints FIRST (cubic Bezier chain placement), since transform constraints often target path tips
+    skins_raw = skel.get("skins", {})
+    skin_lookup = {s["name"]: s.get("attachments", {}) for s in skins_raw} if isinstance(skins_raw, list) else skins_raw
+    path_skin = skin_lookup.get(skin_name, skin_lookup.get("default", {}))
+    default_path_skin = skin_lookup.get("default", {})
+    slots_by_name = {s["name"]: s for s in skel.get("slots", [])}
+
+    for pc in skel.get("path", []):
+        slot = slots_by_name.get(pc.get("target"))
+        if not slot or not slot.get("attachment"):
+            continue
+        sname, aname = slot["name"], slot["attachment"]
+        att = path_skin.get(sname, {}).get(aname) or default_path_skin.get(sname, {}).get(aname)
+        if not att or att.get("type") != "path":
+            continue
+        verts = att["vertices"]
+        vcount = att["vertexCount"]
+        slot_bone = bones_by_name[slot["bone"]]
+        pts = []
+        if len(verts) == vcount * 2:
+            for i in range(vcount):
+                vx, vy = verts[2 * i], verts[2 * i + 1]
+                pts.append((slot_bone["a"] * vx + slot_bone["b"] * vy + slot_bone["wx"],
+                            slot_bone["c"] * vx + slot_bone["d"] * vy + slot_bone["wy"]))
+        else:
+            idx = 0
+            while idx < len(verts):
+                cnt = int(verts[idx]); idx += 1
+                wx = wy = 0.0
+                for _ in range(cnt):
+                    bi = int(verts[idx]); vx, vy, w = verts[idx + 1], verts[idx + 2], verts[idx + 3]; idx += 4
+                    bb = bone_list[bi]
+                    wx += (bb["a"] * vx + bb["b"] * vy + bb["wx"]) * w
+                    wy += (bb["c"] * vx + bb["d"] * vy + bb["wy"]) * w
+                pts.append((wx, wy))
+        segs = (len(pts) - 1) // 3
+        if segs < 1:
+            continue
+        poly = []
+        steps = 24
+        for s_i in range(segs):
+            p0, p1, p2, p3 = pts[1 + 3 * s_i], pts[2 + 3 * s_i], pts[3 + 3 * s_i], pts[4 + 3 * s_i]
+            for k in range(steps + (1 if s_i == segs - 1 else 0)):
+                t = k / steps
+                mt = 1.0 - t
+                x = mt**3 * p0[0] + 3 * mt**2 * t * p1[0] + 3 * mt * t**2 * p2[0] + t**3 * p3[0]
+                y = mt**3 * p0[1] + 3 * mt**2 * t * p1[1] + 3 * mt * t**2 * p2[1] + t**3 * p3[1]
+                poly.append((x, y))
+        cum = [0.0]
+        for i in range(1, len(poly)):
+            cum.append(cum[-1] + math.hypot(poly[i][0] - poly[i - 1][0], poly[i][1] - poly[i - 1][1]))
+        total_len = cum[-1]
+        if total_len < 1e-6:
+            continue
+
+        def sample_at(dist):
+            dist = max(0.0, min(total_len, dist))
+            for i in range(1, len(cum)):
+                if cum[i] >= dist:
+                    seg_l = cum[i] - cum[i - 1]
+                    f = (dist - cum[i - 1]) / seg_l if seg_l > 1e-9 else 0.0
+                    return (poly[i - 1][0] + (poly[i][0] - poly[i - 1][0]) * f,
+                            poly[i - 1][1] + (poly[i][1] - poly[i - 1][1]) * f)
+            return poly[-1]
+
+        cbones = [bones_by_name[bn] for bn in pc.get("bones", []) if bn in bones_by_name]
+        n_cb = len(cbones)
+        if n_cb == 0:
+            continue
+        pos0 = pc.get("position", 0.0)
+        if pc.get("positionMode", "percent") == "percent":
+            pos0 *= total_len
+        spacing = pc.get("spacing", 1.0 / n_cb)
+        if pc.get("spacingMode", "length") == "percent":
+            spacing *= total_len
+        for i, cb in enumerate(cbones):
+            d0 = pos0 + i * spacing
+            d1 = pos0 + (i + 1) * spacing
+            x0, y0 = sample_at(d0)
+            x1, y1 = sample_at(d1)
+            dx, dy = x1 - x0, y1 - y0
+            seg_d = math.hypot(dx, dy)
+            ang = math.atan2(dy, dx) if seg_d > 1e-6 else 0.0
+            scale_x = (seg_d / cb["length"]) if (pc.get("rotateMode") == "chainScale" and cb["length"] > 1e-6) else 1.0
+            ca, sa = math.cos(ang), math.sin(ang)
+            det = cb["a"] * cb["d"] - cb["b"] * cb["c"]
+            ysign = -1.0 if det < 0 else 1.0
+            cb["wx"], cb["wy"] = x0, y0
+            cb["a"], cb["b"] = ca * scale_x, -sa * ysign
+            cb["c"], cb["d"] = sa * scale_x, ca * ysign
+
+    # Apply Spine transform constraints (position/rotation copy onto target bone) and propagate to descendants
+    constrained = set()
+    for tc in skel.get("transform", []):
+        tgt = bones_by_name.get(tc.get("target"))
+        if not tgt:
+            continue
+        rmix = tc.get("rotateMix", 1.0)
+        tmix = tc.get("translateMix", 1.0)
+        ox_t, oy_t = tc.get("x", 0.0), tc.get("y", 0.0)
+        rot_off = math.radians(tc.get("rotation", 0.0))
+        for bn in tc.get("bones", []):
+            b = bones_by_name.get(bn)
+            if not b:
+                continue
+            constrained.add(bn)
+            if tmix > 0:
+                tx = tgt["a"] * ox_t + tgt["b"] * oy_t + tgt["wx"]
+                ty = tgt["c"] * ox_t + tgt["d"] * oy_t + tgt["wy"]
+                b["wx"] += (tx - b["wx"]) * tmix
+                b["wy"] += (ty - b["wy"]) * tmix
+            if rmix > 0:
+                cr, sr = math.cos(rot_off), math.sin(rot_off)
+                b["a"], b["b"] = tgt["a"] * cr - tgt["b"] * sr, tgt["a"] * sr + tgt["b"] * cr
+                b["c"], b["d"] = tgt["c"] * cr - tgt["d"] * sr, tgt["c"] * sr + tgt["d"] * cr
+
+    if constrained:
+        dirty = set(constrained)
+        for b in bone_list:
+            if b["name"] in constrained:
+                continue
+            if b["parent"] in dirty:
+                dirty.add(b["name"])
+                p = bones_by_name[b["parent"]]
+                rad = math.radians(b["rotation"])
+                c, s = math.cos(rad), math.sin(rad)
+                la, lb = c * b["scaleX"], -s * b["scaleY"]
+                lc, ld = s * b["scaleX"], c * b["scaleY"]
+                b["wx"] = p["a"] * b["x"] + p["b"] * b["y"] + p["wx"]
+                b["wy"] = p["c"] * b["x"] + p["d"] * b["y"] + p["wy"]
+                if b["transform"] == "noRotationOrReflection" or not b["inheritRotation"]:
+                    b["a"], b["b"], b["c"], b["d"] = la, lb, lc, ld
+                else:
+                    b["a"] = p["a"] * la + p["b"] * lc
+                    b["b"] = p["a"] * lb + p["b"] * ld
+                    b["c"] = p["c"] * la + p["d"] * lc
+                    b["d"] = p["c"] * lb + p["d"] * ld
 
     ss = 2
     W, H = width * ss, height * ss
@@ -281,6 +439,39 @@ def render_spine_pose(
                         wy += (bb["c"] * vx + bb["d"] * vy + bb["wy"]) * w
                     world_pts.append(to_px(wx, wy))
             src_pts = [(uvs[2 * i] * orig_w, uvs[2 * i + 1] * orig_h) for i in range(n_uv)]
+            tris = att.get("triangles")
+            if tris and len(tris) >= 3:
+                mesh_layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+                for t in range(0, len(tris) - 2, 3):
+                    i0, i1, i2 = tris[t], tris[t + 1], tris[t + 2]
+                    d_tri = [world_pts[i0], world_pts[i1], world_pts[i2]]
+                    s_tri = [src_pts[i0], src_pts[i1], src_pts[i2]]
+                    tc = fit_affine_ls(d_tri, s_tri)
+                    if tc is None:
+                        continue
+                    xs = [p[0] for p in d_tri]
+                    ys = [p[1] for p in d_tri]
+                    x0 = max(0, int(math.floor(min(xs))) - 1)
+                    y0 = max(0, int(math.floor(min(ys))) - 1)
+                    x1 = min(W, int(math.ceil(max(xs))) + 2)
+                    y1 = min(H, int(math.ceil(max(ys))) + 2)
+                    if x1 <= x0 or y1 <= y0:
+                        continue
+                    bw, bh = x1 - x0, y1 - y0
+                    a, b_, c, d_, e, f = tc
+                    # Shift destination coordinates by (x0, y0)
+                    tc_local = (a, b_, a * x0 + b_ * y0 + c, d_, e, d_ * x0 + e * y0 + f)
+                    patch = part.transform((bw, bh), Image.Transform.AFFINE, tc_local, resample=Image.Resampling.BICUBIC)
+                    mask = Image.new("L", (bw, bh), 0)
+                    local_poly = [(p[0] - x0, p[1] - y0) for p in d_tri]
+                    ImageDraw.Draw(mask).polygon(local_poly, fill=255)
+                    # Multiply patch alpha by triangle mask
+                    pa = patch.getchannel("A")
+                    pa_comb = Image.composite(pa, Image.new("L", (bw, bh), 0), mask)
+                    patch.putalpha(pa_comb)
+                    mesh_layer.alpha_composite(patch, (x0, y0))
+                canvas = Image.alpha_composite(canvas, mesh_layer)
+                continue
             coeffs = fit_affine_ls(world_pts, src_pts)
 
         if coeffs is None:
@@ -307,6 +498,7 @@ def main():
     p.add_argument("--skin", default="default")
     p.add_argument("--flip-x", action="store_true")
     p.add_argument("--skip-slot", action="append", default=[])
+    p.add_argument("--anim", default=None)
     args = p.parse_args()
     size, bbox = render_spine_pose(
         args.atlas,
@@ -320,6 +512,7 @@ def main():
         skin_name=args.skin,
         flip_x=args.flip_x,
         skip_slots=args.skip_slot,
+        anim_name=args.anim,
     )
     print(f"Rendered {args.out}: size={size}, bbox={bbox}")
 

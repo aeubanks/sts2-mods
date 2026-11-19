@@ -6,5 +6,11 @@
   "DOWNFALL-CHANT_KEYWORD.title": "Chant",
   "DOWNFALL-CHANT_KEYWORD.description": "[gold]Chant[/gold] cards trigger a bonus effect for the rest of combat if the previous card you played was a [gold]Power[/gold].",
   "DOWNFALL-CONJURE_KEYWORD.title": "Conjure",
-  "DOWNFALL-CONJURE_KEYWORD.description": "Add the next Spell from your Spellbook into your [gold]Hand[/gold]. Playing 7 [gold]Powers[/gold] Awakens you, upgrading all Spells for the rest of combat."
+  "DOWNFALL-CONJURE_KEYWORD.description": "Add the next Spell from your Spellbook into your [gold]Hand[/gold]. Playing 7 [gold]Powers[/gold] Awakens you, upgrading all Spells for the rest of combat.",
+  "DOWNFALL-SWAP_KEYWORD.title": "Swap",
+  "DOWNFALL-SWAP_KEYWORD.description": "Switch your active Gremlin with another living Gremlin in standby.",
+  "DOWNFALL-TEMP_HP_KEYWORD.title": "Temp HP",
+  "DOWNFALL-TEMP_HP_KEYWORD.description": "Temporary HP absorbs unblocked HP loss before your real HP.",
+  "DOWNFALL-ECHO_KEYWORD.title": "Echo",
+  "DOWNFALL-ECHO_KEYWORD.description": "Echoes are copies of cards with [gold]Ethereal[/gold] and [gold]Exhaust[/gold]. Echoes cannot be Echoed."
 }
