@@ -1,0 +1,13 @@
+{
+  "DOWNFALL-HERMIT_STRIKE.title": "Strike",
+  "DOWNFALL-HERMIT_STRIKE.description": "Deal {Damage:diff()} damage.",
+  "DOWNFALL-HERMIT_DEFEND.title": "Defend",
+  "DOWNFALL-HERMIT_DEFEND.description": "Gain {Block:diff()} [gold]Block[/gold].",
+  "DOWNFALL-SNAPSHOT.title": "Snapshot",
+  "DOWNFALL-SNAPSHOT.description": "Deal {Damage:diff()} damage.\n[gold]Dead On[/gold]: Gain [gold]Block[/gold] equal to unblocked damage dealt.",
+  "DOWNFALL-COVET.title": "Covet",
+  "DOWNFALL-COVET.description": "Discard 1 card.\nDraw {Cards:diff()} {Cards:plural:card|cards}.\nDiscarded [gold]Curses[/gold] are [gold]Exhausted[/gold].",
+  "DOWNFALL-COVET.selectionScreenPrompt": "Choose a card to discard.",
+  "DOWNFALL-MEMENTO_CARD.title": "Memento",
+  "DOWNFALL-MEMENTO_CARD.description": "Apply {VulnerablePower:diff()} [gold]Vulnerable[/gold] to EVERYONE."
+}

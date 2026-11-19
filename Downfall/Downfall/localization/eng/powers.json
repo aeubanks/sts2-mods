@@ -1,0 +1,11 @@
+{
+  "DOWNFALL-BRUISE_POWER.title": "Bruised",
+  "DOWNFALL-BRUISE_POWER.description": "Takes more Attack damage this turn.",
+  "DOWNFALL-BRUISE_POWER.smartDescription": "This turn, takes [blue]{Amount}[/blue] more Attack damage.",
+  "DOWNFALL-CONCENTRATED_POWER.title": "Concentration",
+  "DOWNFALL-CONCENTRATED_POWER.description": "Your next [gold]Dead On[/gold] card this turn triggers regardless of position.",
+  "DOWNFALL-CONCENTRATED_POWER.smartDescription": "The next [gold]Dead On[/gold] card you play this turn triggers its effect regardless of position.",
+  "DOWNFALL-RUGGED_POWER.title": "Rugged",
+  "DOWNFALL-RUGGED_POWER.description": "Reduces incoming unblocked Attack damage to [blue]2[/blue].",
+  "DOWNFALL-RUGGED_POWER.smartDescription": "The next {Amount:plural:time|[blue]{}[/blue] times} you would take more than 2 unblocked Attack damage, reduce it to [blue]2[/blue]."
+}
