@@ -1,0 +1,12 @@
+{
+  "PACKMASTER-PACKMASTER_STRIKE.title": "Strike",
+  "PACKMASTER-PACKMASTER_STRIKE.description": "Deal {Damage:diff()} damage.",
+  "PACKMASTER-PACKMASTER_DEFEND.title": "Defend",
+  "PACKMASTER-PACKMASTER_DEFEND.description": "Gain {Block:diff()} [gold]Block[/gold].",
+  "PACKMASTER-COMMON_STRIKE.title": "Common Strike",
+  "PACKMASTER-COMMON_STRIKE.description": "Deal {Damage:diff()} damage.",
+  "PACKMASTER-UNCOMMON_STRIKE.title": "Uncommon Strike",
+  "PACKMASTER-UNCOMMON_STRIKE.description": "Deal {Damage:diff()} damage.",
+  "PACKMASTER-RARE_STRIKE.title": "Rare Strike",
+  "PACKMASTER-RARE_STRIKE.description": "Deal {Damage:diff()} damage."
+}

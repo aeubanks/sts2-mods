@@ -1,0 +1,51 @@
+using BaseLib.Abstracts;
+using BaseLib.Utils.NodeFactories;
+using Godot;
+using MegaCrit.Sts2.Core.Entities.Characters;
+using MegaCrit.Sts2.Core.Models;
+using MegaCrit.Sts2.Core.Models.Relics;
+using Packmaster.Cards;
+
+namespace Packmaster.Character;
+
+public class ThePackmaster : PlaceholderCharacterModel
+{
+    public const string CharacterId = "ThePackmaster";
+
+    public static readonly Color CharacterColor = new(0.76f, 0.65f, 0.52f);
+
+    public override Color NameColor => CharacterColor;
+    public override CharacterGender Gender => CharacterGender.Neutral;
+    public override int StartingHp => 75;
+
+    public override IEnumerable<CardModel> StartingDeck =>
+    [
+        ModelDb.Card<PackmasterStrike>(),
+        ModelDb.Card<PackmasterDefend>()
+    ];
+
+    public override IReadOnlyList<RelicModel> StartingRelics =>
+    [
+        ModelDb.Relic<BurningBlood>()
+    ];
+
+    public override CardPoolModel CardPool => ModelDb.CardPool<PackmasterCardPool>();
+    public override RelicPoolModel RelicPool => ModelDb.RelicPool<PackmasterRelicPool>();
+    public override PotionPoolModel PotionPool => ModelDb.PotionPool<PackmasterPotionPool>();
+
+    public override Control CustomIcon
+    {
+        get
+        {
+            var icon = NodeFactory<Control>.CreateFromResource(CustomIconTexturePath);
+            icon.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
+            return icon;
+        }
+    }
+
+    public override string CustomIconTexturePath => "res://Packmaster/images/charui/character_icon_packmaster.png";
+    public override string CustomCharacterSelectIconPath => "res://Packmaster/images/charui/char_select_packmaster.png";
+    public override string CustomCharacterSelectLockedIconPath => "res://Packmaster/images/charui/char_select_packmaster_locked.png";
+    public override string CustomCharacterSelectBg => "res://Packmaster/scenes/char_select_bg_packmaster.tscn";
+    public override string CustomMapMarkerPath => "res://Packmaster/images/charui/map_marker_packmaster.png";
+}
