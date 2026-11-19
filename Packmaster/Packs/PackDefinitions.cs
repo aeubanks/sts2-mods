@@ -3,6 +3,7 @@ using Packmaster.Cards.BitingCold;
 using Packmaster.Cards.CoreSet;
 using Packmaster.Cards.EnergyAndEcho;
 using Packmaster.Cards.EvenOdd;
+using Packmaster.Cards.Farmer;
 using Packmaster.Cards.HighEnergy;
 using Packmaster.Cards.Quiet;
 using Packmaster.Cards.Shaman;
@@ -23,6 +24,7 @@ public static class PackDefinitions
     public const string EnergyAndEchoId = "EnergyAndEcho";
     public const string ShamanId = "Shaman";
     public const string WardenId = "Warden";
+    public const string FarmerId = "Farmer";
 
     public static void RegisterAll()
     {
@@ -194,6 +196,23 @@ public static class PackDefinitions
                 typeof(Recurrence),
                 typeof(RiskOfBlades),
                 typeof(Stall),
+            ]));
+
+        PackRegistry.Register(new PackDefinition(
+            Id: FarmerId,
+            AlwaysInclude: false,
+            CardTypes:
+            [
+                typeof(HarvestBeans),
+                typeof(HarvestCarrots),
+                typeof(HarvestPotatoes),
+                typeof(HarvestRadishes),
+                typeof(OutToMarket),
+                typeof(PestControl),
+                typeof(SoilResiliency),
+                typeof(SowTheSeeds),
+                typeof(SupplyChain),
+                typeof(TillTheEarth),
             ]));
     }
 }

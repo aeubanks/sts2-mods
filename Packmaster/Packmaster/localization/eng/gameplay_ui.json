@@ -20,6 +20,8 @@
   "PACKMASTER-PACK_SHAMAN.description": "Command fire and frost with relentless Ignite burns, Scry, and next-turn payoffs.",
   "PACKMASTER-PACK_WARDEN.title": "Warden",
   "PACKMASTER-PACK_WARDEN.description": "Foresee and shape the top of your Draw Pile with Scry, setup plays, and Divine Might.",
+  "PACKMASTER-PACK_FARMER.title": "Farmer",
+  "PACKMASTER-PACK_FARMER.description": "Mix Attacks, Skills, Powers, and Status Fertilizers to reap multiplied harvests.",
   "PACKMASTER-ECHO_KEYWORD.title": "Echo",
   "PACKMASTER-ECHO_KEYWORD.description": "Add a copy of this card with [gold]Exhaust[/gold] and [gold]Ethereal[/gold] to your [gold]Hand[/gold].",
   "PACKMASTER-DRAFT_PAGE.description": "Choose your Packmaster Packs ([gold]{Pick}/{Total}[/gold]).\nActive Packs: {ActiveList}",

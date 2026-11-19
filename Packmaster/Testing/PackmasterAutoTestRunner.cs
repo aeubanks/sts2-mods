@@ -33,6 +33,7 @@ using Packmaster.Cards.BitingCold;
 using Packmaster.Cards.CoreSet;
 using Packmaster.Cards.EnergyAndEcho;
 using Packmaster.Cards.EvenOdd;
+using Packmaster.Cards.Farmer;
 using Packmaster.Cards.HighEnergy;
 using Packmaster.Cards.Quiet;
 using Packmaster.Cards.Shaman;
@@ -124,6 +125,7 @@ internal static class PackmasterAutoTestRunner
                 ("EnergyAndEchoPackInCombat", TestEnergyAndEchoPackInCombat),
                 ("ShamanPackInCombat", TestShamanPackInCombat),
                 ("WardenPackInCombat", TestWardenPackInCombat),
+                ("FarmerPackInCombat", TestFarmerPackInCombat),
             ];
 
             foreach (var (name, run) in tests)
@@ -3143,6 +3145,227 @@ internal static class PackmasterAutoTestRunner
         }
         AutoTestAssert.True(testedImmediatePrediction, "Verified Prediction immediate-block branch");
         AutoTestAssert.True(testedDeferredPrediction, "Verified Prediction deferred BlockNextTurnPower branch");
+    }
+
+    private static async Task TestFarmerPackInCombat()
+    {
+        var (player, _, combatState) = await StartCombatAsync("PMFARM01");
+        var pcs = AutoTestAssert.NotNull(player.PlayerCombatState, "PlayerCombatState");
+        var enemy = AutoTestAssert.NotNull(combatState.HittableEnemies.FirstOrDefault(), "First hittable enemy");
+        var enemy2 = await CreatureCmd.Add<MegaCrit.Sts2.Core.Models.Monsters.Nibbit>(combatState);
+
+        await CreatureCmd.GainMaxHp(enemy, 1000m);
+        await CreatureCmd.GainMaxHp(enemy2, 1000m);
+
+        foreach (var c in pcs.Hand.Cards.ToList())
+            await CardPileCmd.Add(c, PileType.Discard);
+        await PlayerCmd.GainEnergy(25, player);
+
+        // 1. Play Strike (#1 Attack), then OutToMarket+ (#2 Power): must NOT self-trigger on its own application!
+        var openingStrike = combatState.CreateCard<PackmasterStrike>(player);
+        var outToMarket = combatState.CreateCard<OutToMarket>(player);
+        CardCmd.Upgrade(outToMarket);
+        await CardPileCmd.Add(openingStrike, PileType.Hand);
+        await CardPileCmd.Add(outToMarket, PileType.Hand);
+        AutoTestAssert.True(openingStrike.TryManualPlay(enemy), "Play opening Strike (#1 Attack)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        int e1Hp = enemy.CurrentHp;
+        int e2Hp = enemy2.CurrentHp;
+        AutoTestAssert.True(outToMarket.TryManualPlay(null), "Play OutToMarket+ (#2 Power after Attack)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(2, player.Creature.GetPowerAmount<OutToMarketPower>(), "OutToMarketPower(2) applied");
+        AutoTestAssert.Equal(e1Hp, enemy.CurrentHp, "OutToMarket did not self-trigger on enemy 1");
+        AutoTestAssert.Equal(e2Hp, enemy2.CurrentHp, "OutToMarket did not self-trigger on enemy 2");
+
+        // 2. SupplyChain+ (Innate on upgrade) as Card #3 (Power after Power -> SAME type -> NO OutToMarket trigger!).
+        var supplyChain = combatState.CreateCard<SupplyChain>(player);
+        CardCmd.Upgrade(supplyChain);
+        AutoTestAssert.True(supplyChain.Keywords.Contains(CardKeyword.Innate), "SupplyChain+ is Innate");
+        await CardPileCmd.Add(supplyChain, PileType.Hand);
+        AutoTestAssert.True(supplyChain.TryManualPlay(null), "Play SupplyChain+ (#2 Power)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<SupplyChainPower>(), "SupplyChainPower(1) applied");
+        AutoTestAssert.Equal(e1Hp, enemy.CurrentHp, "Power after Power did not trigger OutToMarketPower");
+
+        // 3. HarvestBeans as Card #3 (Attack after Power -> triggers OutToMarket 2 AoE + HarvestBeans 5 single + 5 AoE!).
+        var beans1 = combatState.CreateCard<HarvestBeans>(player);
+        await CardPileCmd.Add(beans1, PileType.Hand);
+        e1Hp = enemy.CurrentHp;
+        e2Hp = enemy2.CurrentHp;
+        AutoTestAssert.True(beans1.TryManualPlay(enemy), "Play HarvestBeans #1 (Attack after Power)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        // Enemy 1: 5 single + 5 AoE + 2 OutToMarket = 12 damage! Enemy 2: 5 AoE + 2 OutToMarket = 7 damage!
+        AutoTestAssert.Equal(e1Hp - 12, enemy.CurrentHp, "HarvestBeans after Power dealt 5+5+2 = 12 to enemy 1");
+        AutoTestAssert.Equal(e2Hp - 7, enemy2.CurrentHp, "HarvestBeans after Power dealt 5+2 = 7 to enemy 2");
+
+        // 4. TillTheEarth (Attack after Attack -> NO OutToMarket, deals 7 dmg + adds Fertilizer to Hand!).
+        var till = combatState.CreateCard<TillTheEarth>(player);
+        await CardPileCmd.Add(till, PileType.Hand);
+        e1Hp = enemy.CurrentHp;
+        e2Hp = enemy2.CurrentHp;
+        AutoTestAssert.True(till.TryManualPlay(enemy), "Play TillTheEarth (Attack after Attack)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(e1Hp - 7, enemy.CurrentHp, "TillTheEarth dealt 7 damage without OutToMarket");
+        AutoTestAssert.Equal(e2Hp, enemy2.CurrentHp, "Attack after Attack did not trigger OutToMarket");
+        var fert = AutoTestAssert.NotNull(pcs.Hand.Cards.OfType<Fertilizer>().FirstOrDefault(), "TillTheEarth added Fertilizer to Hand");
+
+        // 5. HarvestBeans #2 (Attack after Attack -> NO AoE bonus, NO OutToMarket -> exact 5 single-target damage!).
+        var beans2 = combatState.CreateCard<HarvestBeans>(player);
+        await CardPileCmd.Add(beans2, PileType.Hand);
+        e1Hp = enemy.CurrentHp;
+        e2Hp = enemy2.CurrentHp;
+        AutoTestAssert.True(beans2.TryManualPlay(enemy), "Play HarvestBeans #2 (Attack after Attack)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(e1Hp - 5, enemy.CurrentHp, "HarvestBeans after Attack dealt only 5 single-target damage");
+        AutoTestAssert.Equal(e2Hp, enemy2.CurrentHp, "HarvestBeans after Attack dealt 0 AoE damage");
+
+        // 6. Fertilizer+ (Status after Attack -> triggers OutToMarket 2 AoE, draws 2 cards, Exhausts!).
+        CardCmd.Upgrade(fert);
+        int handBeforeFert = pcs.Hand.Cards.Count;
+        e1Hp = enemy.CurrentHp;
+        e2Hp = enemy2.CurrentHp;
+        AutoTestAssert.True(fert.TryManualPlay(null), "Play Fertilizer+ (Status after Attack)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.True(pcs.ExhaustPile.Cards.Contains(fert), "Fertilizer exhausted");
+        AutoTestAssert.Equal(handBeforeFert - 1 + 2, pcs.Hand.Cards.Count, "Fertilizer+ drew 2 cards");
+        AutoTestAssert.Equal(e1Hp - 2, enemy.CurrentHp, "Status after Attack triggered OutToMarket(2) on enemy 1");
+        AutoTestAssert.Equal(e2Hp - 2, enemy2.CurrentHp, "Status after Attack triggered OutToMarket(2) on enemy 2");
+
+        // 7. HarvestPotatoes #1 (Skill after Status -> +5+5 = 10 Block + OutToMarket 2 AoE!) & #2 (Skill after Skill -> +5 Block, NO OutToMarket!).
+        var potatoes1 = combatState.CreateCard<HarvestPotatoes>(player);
+        var potatoes2 = combatState.CreateCard<HarvestPotatoes>(player);
+        await CardPileCmd.Add(potatoes1, PileType.Hand);
+        await CardPileCmd.Add(potatoes2, PileType.Hand);
+        int blockBeforePot = player.Creature.Block;
+        e1Hp = enemy.CurrentHp;
+        AutoTestAssert.True(potatoes1.TryManualPlay(null), "Play HarvestPotatoes #1 (Skill after Status)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(blockBeforePot + 10, player.Creature.Block, "HarvestPotatoes after Status gained 5+5 = 10 Block");
+        AutoTestAssert.Equal(e1Hp - 2, enemy.CurrentHp, "Skill after Status triggered OutToMarket(2)");
+
+        blockBeforePot = player.Creature.Block;
+        e1Hp = enemy.CurrentHp;
+        AutoTestAssert.True(potatoes2.TryManualPlay(null), "Play HarvestPotatoes #2 (Skill after Skill)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(blockBeforePot + 5, player.Creature.Block, "HarvestPotatoes after Skill gained only 5 Block");
+        AutoTestAssert.Equal(e1Hp, enemy.CurrentHp, "Skill after Skill did not trigger OutToMarket");
+
+        // 8. Distinct types played so far this turn = 4 (Power, Attack, Status, Skill):
+        //    - HarvestCarrots: 4 * (4 + 1) = 20 Block!
+        //    - HarvestRadishes: 12 dmg + 4 Weak (+ 2 OutToMarket since Attack after Skill)!
+        //    - PestControl: 6 * (4 + 1) = 30 dmg (Attack after Attack -> no OutToMarket)!
+        var carrots = combatState.CreateCard<HarvestCarrots>(player);
+        await CardPileCmd.Add(carrots, PileType.Hand);
+        int blockBeforeCarrots = player.Creature.Block;
+        AutoTestAssert.True(carrots.TryManualPlay(null), "Play HarvestCarrots with 4 distinct types played");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(blockBeforeCarrots + 20, player.Creature.Block, "HarvestCarrots gained 4 * (4+1) = 20 Block");
+
+        var radishes = combatState.CreateCard<HarvestRadishes>(player);
+        await CardPileCmd.Add(radishes, PileType.Hand);
+        e1Hp = enemy.CurrentHp;
+        AutoTestAssert.True(radishes.TryManualPlay(enemy), "Play HarvestRadishes with 4 distinct types played");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(e1Hp - 14, enemy.CurrentHp, "HarvestRadishes dealt 12 + 2 OutToMarket = 14 damage");
+        AutoTestAssert.Equal(4, enemy.GetPowerAmount<WeakPower>(), "HarvestRadishes applied 4 Weak");
+
+        var pest = combatState.CreateCard<PestControl>(player);
+        await CardPileCmd.Add(pest, PileType.Hand);
+        e1Hp = enemy.CurrentHp;
+        AutoTestAssert.True(pest.TryManualPlay(enemy), "Play PestControl with 4 distinct types played");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(e1Hp - 30, enemy.CurrentHp, "PestControl dealt 6 * (4+1) = 30 damage");
+
+        // 9. SoilResiliency (Exhaustive 3 -> 4 upgraded, doubles Strength capped at 10 when >= 3 types played!):
+        var soil = combatState.CreateCard<SoilResiliency>(player);
+        CardCmd.Upgrade(soil); // UsesLeft = 4!
+        await CardPileCmd.Add(soil, PileType.Hand);
+        // Play #1: +1 Str -> doubles to 2 (UsesLeft 4 -> 3, Discard)
+        AutoTestAssert.True(soil.TryManualPlay(null), "Play SoilResiliency+ #1");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<StrengthPower>(), "SoilResiliency #1 granted +1 Strength");
+        AutoTestAssert.Equal(2, soil.DynamicVars.Strength.IntValue, "SoilResiliency doubled 1 -> 2");
+        AutoTestAssert.True(pcs.DiscardPile.Cards.Contains(soil), "SoilResiliency #1 went to Discard");
+        // Play #2: +2 Str -> doubles to 4 (UsesLeft 3 -> 2, Discard)
+        await CardPileCmd.Add(soil, PileType.Hand);
+        AutoTestAssert.True(soil.TryManualPlay(null), "Play SoilResiliency+ #2");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(3, player.Creature.GetPowerAmount<StrengthPower>(), "SoilResiliency #2 granted +2 Strength (total 3)");
+        AutoTestAssert.Equal(4, soil.DynamicVars.Strength.IntValue, "SoilResiliency doubled 2 -> 4");
+        // Play #3: +4 Str -> doubles to 8 (UsesLeft 2 -> 1, Discard)
+        await CardPileCmd.Add(soil, PileType.Hand);
+        AutoTestAssert.True(soil.TryManualPlay(null), "Play SoilResiliency+ #3");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(7, player.Creature.GetPowerAmount<StrengthPower>(), "SoilResiliency #3 granted +4 Strength (total 7)");
+        AutoTestAssert.Equal(8, soil.DynamicVars.Strength.IntValue, "SoilResiliency doubled 4 -> 8");
+        AutoTestAssert.True(pcs.DiscardPile.Cards.Contains(soil), "SoilResiliency+ #3 still went to Discard (UsesLeft == 1)");
+        // Play #4: +8 Str -> doubles capped at 10 (UsesLeft 1 -> 0, EXHAUSTS!)
+        await CardPileCmd.Add(soil, PileType.Hand);
+        AutoTestAssert.True(soil.TryManualPlay(null), "Play SoilResiliency+ #4 (final use)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(15, player.Creature.GetPowerAmount<StrengthPower>(), "SoilResiliency #4 granted +8 Strength (total 15)");
+        AutoTestAssert.Equal(10, soil.DynamicVars.Strength.IntValue, "SoilResiliency doubled 8 -> capped at 10");
+        AutoTestAssert.True(pcs.ExhaustPile.Cards.Contains(soil), "SoilResiliency+ exhausted on 4th use");
+
+        // 10. SowTheSeeds (adds Fertilizer to Hand + fetches 2 random cards with DIFFERENT CardTypes from DrawPile!).
+        foreach (var c in pcs.Hand.Cards.ToList())
+            await CardPileCmd.Add(c, PileType.Discard);
+        foreach (var c in pcs.DrawPile.Cards.ToList())
+            await CardPileCmd.Add(c, PileType.Discard);
+        await CardPileCmd.Add(combatState.CreateCard<PackmasterStrike>(player), PileType.Draw);
+        await CardPileCmd.Add(combatState.CreateCard<PackmasterStrike>(player), PileType.Draw);
+        await CardPileCmd.Add(combatState.CreateCard<PackmasterDefend>(player), PileType.Draw);
+        var sow = combatState.CreateCard<SowTheSeeds>(player);
+        await CardPileCmd.Add(sow, PileType.Hand);
+        AutoTestAssert.True(sow.TryManualPlay(null), "Play SowTheSeeds");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(3, pcs.Hand.Cards.Count, "SowTheSeeds added 1 Fertilizer + fetched 2 distinct-type cards");
+        AutoTestAssert.Equal(1, pcs.Hand.Cards.Count(c => c is Fertilizer), "SowTheSeeds added 1 Fertilizer to Hand");
+        var fetched = pcs.Hand.Cards.Where(c => c is not Fertilizer).ToList();
+        AutoTestAssert.Equal(2, fetched.Select(c => c.Type).Distinct().Count(), "SowTheSeeds fetched 2 cards of DIFFERENT CardTypes");
+
+        // === TURN 2: SupplyChainPower + cross-turn OutToMarketPower (Unpowered!) + Turn-2 distinct-type reset + SoilResiliency < 3 types & Duplication ===
+        await EndTurnAndWaitForRoundAsync(player, 2);
+        AutoTestAssert.Equal(1, pcs.Hand.Cards.Count(c => c is Fertilizer), "SupplyChainPower added 1 Fertilizer to Hand at start of Turn 2");
+        await PlayerCmd.GainEnergy(15, player);
+
+        // Turn 1 ended with Skill (SowTheSeeds), player has +15 Strength.
+        // Playing HarvestRadishes (Attack) as Turn 2's 1st card:
+        // - Cross-turn OutToMarketPower(2) triggers with ValueProp.Unpowered -> enemy 2 loses EXACT 2 HP (NOT 17 with +15 Strength!).
+        // - Distinct types played this turn == 0 -> HarvestRadishes applies 0 additional Weak!
+        int weakBeforeT2 = enemy.GetPowerAmount<WeakPower>();
+        int e2HpBeforeT2 = enemy2.CurrentHp + enemy2.Block;
+        var radishesT2 = combatState.CreateCard<HarvestRadishes>(player);
+        await CardPileCmd.Add(radishesT2, PileType.Hand);
+        AutoTestAssert.True(radishesT2.TryManualPlay(enemy), "Play HarvestRadishes as Turn 2 #1 (Attack after Turn 1 Skill)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(weakBeforeT2, enemy.GetPowerAmount<WeakPower>(), "HarvestRadishes applied 0 Weak when 0 types played this turn");
+        AutoTestAssert.Equal(e2HpBeforeT2 - 2, enemy2.CurrentHp + enemy2.Block, "Cross-turn OutToMarketPower dealt unscaled 2 Unpowered damage (ignored +15 Strength)");
+
+        // 2nd OutToMarket (Power after Attack) while already holding OutToMarketPower(2): arms pre-existing 2 (NOT stacked 3!).
+        e2HpBeforeT2 = enemy2.CurrentHp + enemy2.Block;
+        var outToMarket2 = combatState.CreateCard<OutToMarket>(player);
+        await CardPileCmd.Add(outToMarket2, PileType.Hand);
+        AutoTestAssert.True(outToMarket2.TryManualPlay(null), "Play 2nd OutToMarket (Power after Attack)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(3, player.Creature.GetPowerAmount<OutToMarketPower>(), "OutToMarketPower stacked 2 -> 3");
+        AutoTestAssert.Equal(e2HpBeforeT2 - 2, enemy2.CurrentHp + enemy2.Block, "2nd OutToMarket dealt pre-existing 2 damage (not newly stacked 3)");
+
+        // SoilResiliency negative branch (< 3 distinct types this turn: only Attack + Power = 2) -> Strength var stays 1!
+        // Also test DuplicationPower at UsesLeft == 2 -> decrements once (2 -> 1) and goes to Discard (not Exhaust)!
+        var soilLow = combatState.CreateCard<SoilResiliency>(player);
+        await CardPileCmd.Add(soilLow, PileType.Hand);
+        AutoTestAssert.True(soilLow.TryManualPlay(null), "Play SoilResiliency #1 with only 2 types this turn");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(1, soilLow.DynamicVars.Strength.IntValue, "SoilResiliency did NOT double with < 3 types played this turn");
+        AutoTestAssert.Equal(2, soilLow.DynamicVars["UsesLeft"].IntValue, "SoilResiliency UsesLeft 3 -> 2");
+
+        await CardPileCmd.Add(soilLow, PileType.Hand);
+        await PowerCmd.Apply<DuplicationPower>(new ThrowingPlayerChoiceContext(), player.Creature, 1m, player.Creature, null);
+        AutoTestAssert.True(soilLow.TryManualPlay(null), "Play duplicated SoilResiliency at UsesLeft == 2");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(1, soilLow.DynamicVars["UsesLeft"].IntValue, "Duplicated SoilResiliency decremented UsesLeft once (2 -> 1)");
+        AutoTestAssert.True(pcs.DiscardPile.Cards.Contains(soilLow), "Duplicated SoilResiliency went to Discard instead of exhausting early");
     }
 
     private static async Task WaitUntilAsync(Func<bool> predicate, int timeoutMs = 15000)

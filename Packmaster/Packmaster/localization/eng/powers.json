@@ -79,5 +79,11 @@
   "PACKMASTER-ENIGMANCY_POWER.smartDescription": "At the start of your turn, gain [blue]{Amount}[/blue] Energy and reduce this gain by [blue]1[/blue].",
   "PACKMASTER-DIVINE_MIGHT_POWER.title": "Divine Might",
   "PACKMASTER-DIVINE_MIGHT_POWER.description": "When Divine Might is played again, gain 2 Energy, draw 2 cards, and gain 10 temporary Strength.",
-  "PACKMASTER-DIVINE_MIGHT_POWER.smartDescription": "When [gold]Divine Might[/gold] is played again, gain [blue]2[/blue] Energy, draw [blue]2[/blue] cards, and gain [blue]10[/blue] [gold]Strength[/gold] this turn."
+  "PACKMASTER-DIVINE_MIGHT_POWER.smartDescription": "When [gold]Divine Might[/gold] is played again, gain [blue]2[/blue] Energy, draw [blue]2[/blue] cards, and gain [blue]10[/blue] [gold]Strength[/gold] this turn.",
+  "PACKMASTER-OUT_TO_MARKET_POWER.title": "Out to Market",
+  "PACKMASTER-OUT_TO_MARKET_POWER.description": "Whenever you play a card with a different type than the last, deal damage to ALL enemies.",
+  "PACKMASTER-OUT_TO_MARKET_POWER.smartDescription": "Whenever you play a card with a different type than the last, deal [blue]{Amount}[/blue] damage to ALL enemies.",
+  "PACKMASTER-SUPPLY_CHAIN_POWER.title": "Supply Chain",
+  "PACKMASTER-SUPPLY_CHAIN_POWER.description": "At the start of your turn, add Fertilizers to your Hand.",
+  "PACKMASTER-SUPPLY_CHAIN_POWER.smartDescription": "At the start of your turn, add [blue]{Amount}[/blue] [gold]{Amount:plural:Fertilizer|Fertilizers}[/gold] to your [gold]Hand[/gold]."
 }
