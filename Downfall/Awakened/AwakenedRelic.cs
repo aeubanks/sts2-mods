@@ -10,14 +10,14 @@ public abstract class AwakenedRelic : DownfallRelic
 {
     protected override string CharacterKey => TheAwakenedOne.CharKey;
 
-    public override Task AfterCardPlayed(PlayerChoiceContext choiceContext, CardPlay cardPlay)
+    public override async Task AfterCardPlayed(PlayerChoiceContext choiceContext, CardPlay cardPlay)
     {
         if (cardPlay.Card.Owner == Owner
             && cardPlay.Card.Type == CardType.Power
             && Owner.Creature.CombatState is { } combatState)
         {
-            AwakenedSpellbook.TryCheckAwakening(combatState, Owner);
+            await AwakenedSpellbook.TryCheckAwakeningAsync(combatState, Owner, choiceContext);
         }
-        return base.AfterCardPlayed(choiceContext, cardPlay);
+        await base.AfterCardPlayed(choiceContext, cardPlay);
     }
 }

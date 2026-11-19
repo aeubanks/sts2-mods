@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using Downfall.Awakened.Cards;
+using Downfall.Awakened.Powers;
 using MegaCrit.Sts2.Core.CardSelection;
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Commands;
@@ -98,7 +99,11 @@ internal static class AwakenedSpellbook
     public static IReadOnlyList<CardModel> GetRemainingQueue(ICombatState? combatState, Player? owner) =>
         combatState is not null && owner is not null ? GetState(combatState, owner).Queue : [];
 
-    public static void TryCheckAwakening(ICombatState combatState, Player owner, bool force = false)
+    public static async Task TryCheckAwakeningAsync(
+        ICombatState combatState,
+        Player owner,
+        PlayerChoiceContext choiceContext,
+        bool force = false)
     {
         var state = GetState(combatState, owner);
         if (state.IsAwakened)
@@ -118,6 +123,20 @@ internal static class AwakenedSpellbook
                 }
             }
         }
+
+        foreach (var listener in owner.Creature.Powers.OfType<IAwakenListener>().ToList())
+        {
+            if (CombatManager.Instance.IsOverOrEnding || !owner.Creature.IsAlive)
+                break;
+            await listener.OnAwakenedAsync(choiceContext);
+        }
+
+        foreach (var listener in owner.Relics.OfType<IAwakenListener>().ToList())
+        {
+            if (CombatManager.Instance.IsOverOrEnding || !owner.Creature.IsAlive)
+                break;
+            await listener.OnAwakenedAsync(choiceContext);
+        }
     }
 
     public static async Task<CardModel?> ConjureAsync(
@@ -129,7 +148,13 @@ internal static class AwakenedSpellbook
         if (!owner.Creature.IsAlive || CombatManager.Instance.IsOverOrEnding)
             return null;
 
-        TryCheckAwakening(combatState, owner);
+        if (owner.Creature.GetPower<IntensifyDebuffPower>() is { } burnout)
+        {
+            burnout.TriggerFlash();
+            return null;
+        }
+
+        await TryCheckAwakeningAsync(combatState, owner, new ThrowingPlayerChoiceContext());
         var state = GetState(combatState, owner);
         if (state.Queue.Count == 0)
         {
@@ -167,7 +192,13 @@ internal static class AwakenedSpellbook
         if (!owner.Creature.IsAlive || CombatManager.Instance.IsOverOrEnding)
             return null;
 
-        TryCheckAwakening(combatState, owner);
+        if (owner.Creature.GetPower<IntensifyDebuffPower>() is { } burnout)
+        {
+            burnout.TriggerFlash();
+            return null;
+        }
+
+        await TryCheckAwakeningAsync(combatState, owner, choiceContext);
         var state = GetState(combatState, owner);
         if (state.Queue.Count == 0)
         {
@@ -217,7 +248,7 @@ internal static class AwakenedSpellbook
         if (!owner.Creature.IsAlive || CombatManager.Instance.IsOverOrEnding || copies <= 0)
             return null;
 
-        TryCheckAwakening(combatState, owner);
+        await TryCheckAwakeningAsync(combatState, owner, choiceContext);
         var state = GetState(combatState, owner);
 
         var pool = new List<CardModel>(DefaultSpells);

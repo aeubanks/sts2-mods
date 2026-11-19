@@ -92,14 +92,14 @@ public abstract class AwakenedCard(
         return 0;
     }
 
-    public override Task AfterCardPlayed(PlayerChoiceContext choiceContext, CardPlay cardPlay)
+    public override async Task AfterCardPlayed(PlayerChoiceContext choiceContext, CardPlay cardPlay)
     {
         if (cardPlay.Card.Owner == Owner
             && cardPlay.Card.Type == CardType.Power
             && CombatState is not null)
         {
-            AwakenedSpellbook.TryCheckAwakening(CombatState, Owner);
+            await AwakenedSpellbook.TryCheckAwakeningAsync(CombatState, Owner, choiceContext);
         }
-        return base.AfterCardPlayed(choiceContext, cardPlay);
+        await base.AfterCardPlayed(choiceContext, cardPlay);
     }
 }
