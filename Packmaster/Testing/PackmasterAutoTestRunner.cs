@@ -36,6 +36,7 @@ using Packmaster.Cards.EvenOdd;
 using Packmaster.Cards.HighEnergy;
 using Packmaster.Cards.Quiet;
 using Packmaster.Cards.Shaman;
+using Packmaster.Cards.Warden;
 using Packmaster.Cards.Warlock;
 using Packmaster.Character;
 using Packmaster.Config;
@@ -122,6 +123,7 @@ internal static class PackmasterAutoTestRunner
                 ("BatterPackInCombat", TestBatterPackInCombat),
                 ("EnergyAndEchoPackInCombat", TestEnergyAndEchoPackInCombat),
                 ("ShamanPackInCombat", TestShamanPackInCombat),
+                ("WardenPackInCombat", TestWardenPackInCombat),
             ];
 
             foreach (var (name, run) in tests)
@@ -296,6 +298,8 @@ internal static class PackmasterAutoTestRunner
         }
         AutoTestAssert.True(new LocString("gameplay_ui", "PACKMASTER-ECHO_KEYWORD.title").Exists(), "Missing Echo keyword title loc");
         AutoTestAssert.True(new LocString("gameplay_ui", "PACKMASTER-ECHO_KEYWORD.description").Exists(), "Missing Echo keyword desc loc");
+        AutoTestAssert.True(new LocString("cards", "PACKMASTER-PIERCE_VEIL.selectionScreenPrompt").Exists(), "Missing PierceVeil selectionScreenPrompt loc");
+        AutoTestAssert.True(new LocString("cards", "PACKMASTER-STALL.selectionScreenPrompt").Exists(), "Missing Stall selectionScreenPrompt loc");
 
         // Validate relics.
         var relics = relicPool.AllRelics.ToList();
@@ -2875,6 +2879,270 @@ internal static class PackmasterAutoTestRunner
         moddersFull.potion!.EnqueueManualUse(player.Creature);
         await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
         AutoTestAssert.Equal(10, pcs.Hand.Cards.Count, "ModdersDelight cleanly respected 10-card hand limit");
+    }
+
+    private static async Task TestWardenPackInCombat()
+    {
+        var (player, _, combatState) = await StartCombatAsync("PMWARD01");
+        var pcs = AutoTestAssert.NotNull(player.PlayerCombatState, "PlayerCombatState");
+        var enemy = AutoTestAssert.NotNull(combatState.HittableEnemies.FirstOrDefault(), "First hittable enemy");
+
+        await CreatureCmd.GainMaxHp(enemy, 1000m);
+
+        foreach (var c in pcs.Hand.Cards.ToList())
+            await CardPileCmd.Add(c, PileType.Discard);
+        await PlayerCmd.GainEnergy(20, player);
+
+        var savedSelector = _activeCardSelector;
+
+        // 1. Stall (8 Block + put up to 2 cards from Hand on top of DrawPile) + RiskOfBlades (1 hit if Skill on top, 3 hits if Attack on top!).
+        var topDefend = combatState.CreateCard<PackmasterDefend>(player);
+        await CardPileCmd.Add(topDefend, PileType.Draw, CardPilePosition.Top);
+        var risk1 = combatState.CreateCard<RiskOfBlades>(player);
+        await CardPileCmd.Add(risk1, PileType.Hand);
+        int hpBeforeRisk1 = enemy.CurrentHp + enemy.Block;
+        AutoTestAssert.True(risk1.TryManualPlay(enemy), "Play RiskOfBlades with Skill on top of draw pile");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(hpBeforeRisk1 - 6, enemy.CurrentHp + enemy.Block, "RiskOfBlades dealt 1x 6 damage when top draw is Skill");
+
+        var stall = combatState.CreateCard<Stall>(player);
+        var topStrike = combatState.CreateCard<PackmasterStrike>(player);
+        await CardPileCmd.Add(stall, PileType.Hand);
+        await CardPileCmd.Add(topStrike, PileType.Hand);
+        int blockBeforeStall = player.Creature.Block;
+        _activeCardSelector = new TakeNCardSelector(1);
+        try
+        {
+            AutoTestAssert.True(stall.TryManualPlay(null), "Play Stall putting Strike on top of draw pile");
+            await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        }
+        finally
+        {
+            _activeCardSelector = savedSelector;
+        }
+        AutoTestAssert.Equal(blockBeforeStall + 8, player.Creature.Block, "Stall gained 8 Block");
+        AutoTestAssert.True(ReferenceEquals(pcs.DrawPile.Cards.FirstOrDefault(), topStrike), "Stall placed Strike on top of DrawPile (index 0)");
+
+        var risk2 = combatState.CreateCard<RiskOfBlades>(player);
+        await CardPileCmd.Add(risk2, PileType.Hand);
+        int hpBeforeRisk2 = enemy.CurrentHp + enemy.Block;
+        AutoTestAssert.True(risk2.TryManualPlay(enemy), "Play RiskOfBlades with Attack on top of draw pile");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(hpBeforeRisk2 - 18, enemy.CurrentHp + enemy.Block, "RiskOfBlades dealt 3x 6 = 18 damage when top draw is Attack");
+
+        // 2. PierceVeil (8 dmg + choose 1 of top 2 cards of DrawPile into Hand).
+        var pierceVeil = combatState.CreateCard<PierceVeil>(player);
+        await CardPileCmd.Add(pierceVeil, PileType.Hand);
+        int hpBeforePierce = enemy.CurrentHp + enemy.Block;
+        _activeCardSelector = new TakeNCardSelector(1);
+        try
+        {
+            AutoTestAssert.True(pierceVeil.TryManualPlay(enemy), "Play PierceVeil");
+            await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        }
+        finally
+        {
+            _activeCardSelector = savedSelector;
+        }
+        AutoTestAssert.Equal(hpBeforePierce - 8, enemy.CurrentHp + enemy.Block, "PierceVeil dealt 8 damage");
+        AutoTestAssert.True(pcs.Hand.Cards.Contains(topStrike), "PierceVeil moved top Strike from DrawPile into Hand");
+
+        // 3. Crossroads (Scry 2 + auto-play top card of DrawPile + Exhaust).
+        // Put [fodderStrike (top), autoDefend (2nd)] on top of DrawPile and Scry-discard 1 so fodderStrike is discarded and autoDefend auto-plays for +5 Block!
+        var autoDefend = combatState.CreateCard<PackmasterDefend>(player);
+        var fodderStrike = combatState.CreateCard<PackmasterStrike>(player);
+        await CardPileCmd.Add(autoDefend, PileType.Draw, CardPilePosition.Top);
+        await CardPileCmd.Add(fodderStrike, PileType.Draw, CardPilePosition.Top);
+        var crossroads = combatState.CreateCard<Crossroads>(player);
+        await CardPileCmd.Add(crossroads, PileType.Hand);
+        int blockBeforeCross = player.Creature.Block;
+        _activeCardSelector = new TakeNCardSelector(1);
+        try
+        {
+            AutoTestAssert.True(crossroads.TryManualPlay(null), "Play Crossroads");
+            await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        }
+        finally
+        {
+            _activeCardSelector = savedSelector;
+        }
+        AutoTestAssert.True(pcs.DiscardPile.Cards.Contains(fodderStrike), "Crossroads Scry discarded top fodderStrike");
+        AutoTestAssert.Equal(blockBeforeCross + 5, player.Creature.Block, "Crossroads auto-played 2nd card (autoDefend) for 5 Block");
+        AutoTestAssert.True(pcs.ExhaustPile.Cards.Contains(crossroads), "Crossroads exhausted");
+
+        // 4. ForceBolt (unupgraded discards on 1st play) & ForceBolt+ (Persist 2: returns to Hand on 1st play, discards on 2nd!).
+        var forceBoltBase = combatState.CreateCard<ForceBolt>(player);
+        await CardPileCmd.Add(forceBoltBase, PileType.Hand);
+        AutoTestAssert.True(forceBoltBase.TryManualPlay(enemy), "Play unupgraded ForceBolt");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.True(pcs.DiscardPile.Cards.Contains(forceBoltBase), "Unupgraded ForceBolt went to Discard on 1st play");
+        AutoTestAssert.Equal(1, enemy.GetPowerAmount<VulnerablePower>(), "Unupgraded ForceBolt applied 1 Vulnerable");
+
+        var forceBolt = combatState.CreateCard<ForceBolt>(player);
+        CardCmd.Upgrade(forceBolt);
+        await CardPileCmd.Add(forceBolt, PileType.Hand);
+        AutoTestAssert.True(forceBolt.TryManualPlay(enemy), "Play ForceBolt+ #1");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.True(pcs.Hand.Cards.Contains(forceBolt), "ForceBolt+ returned to Hand on 1st play");
+        AutoTestAssert.Equal(2, enemy.GetPowerAmount<VulnerablePower>(), "ForceBolt+ #1 applied 1 Vulnerable");
+
+        AutoTestAssert.True(forceBolt.TryManualPlay(enemy), "Play ForceBolt+ #2");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.True(pcs.DiscardPile.Cards.Contains(forceBolt), "ForceBolt+ went to Discard on 2nd play");
+        AutoTestAssert.Equal(3, enemy.GetPowerAmount<VulnerablePower>(), "ForceBolt+ #2 applied 1 Vulnerable");
+
+        // 5. Anticipation (max cost of 2 drawn) & Anticipation+ (sum of costs of 2 drawn, including Unplayable=0 & X-cost=Energy!).
+        await CardPileCmd.Add(combatState.CreateCard<PackmasterStrike>(player), PileType.Draw, CardPilePosition.Top); // 1 cost (2nd drawn)
+        await CardPileCmd.Add(combatState.CreateCard<RiskOfBlades>(player), PileType.Draw, CardPilePosition.Top);     // 2 cost (1st drawn)
+        var anticipation = combatState.CreateCard<Anticipation>(player);
+        await CardPileCmd.Add(anticipation, PileType.Hand);
+        AutoTestAssert.True(anticipation.TryManualPlay(null), "Play unupgraded Anticipation (max of 2 and 1 = +2 Str)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(2, player.Creature.GetPowerAmount<StrengthPower>(), "Anticipation granted max(2,1) = +2 Strength");
+
+        // Set Energy to 4 before playing Anticipation+ (cost 1 -> 3 remaining) drawing Weight (Unplayable=0) + LastResort (X-cost=3) -> +3 Strength!
+        if (pcs.Energy < 4)
+            await PlayerCmd.GainEnergy(4 - pcs.Energy, player);
+        else if (pcs.Energy > 4)
+            await PlayerCmd.LoseEnergy(pcs.Energy - 4, player);
+        await CardPileCmd.Add(combatState.CreateCard<Weight>(player), PileType.Draw, CardPilePosition.Top);      // Unplayable -> 0
+        await CardPileCmd.Add(combatState.CreateCard<LastResort>(player), PileType.Draw, CardPilePosition.Top);  // CostsX -> current Energy (3)
+        var anticipationPlus = combatState.CreateCard<Anticipation>(player);
+        CardCmd.Upgrade(anticipationPlus);
+        await CardPileCmd.Add(anticipationPlus, PileType.Hand);
+        AutoTestAssert.True(anticipationPlus.TryManualPlay(null), "Play upgraded Anticipation+ drawing Weight (0) + LastResort (X=3)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(5, player.Creature.GetPowerAmount<StrengthPower>(), "Anticipation+ granted 0 + 3 (X-cost) = +3 Strength (total 5)");
+        await PlayerCmd.GainEnergy(15, player);
+
+        // 6. Recurrence (shuffle clone of every other card in Hand into DrawPile, preserving upgrades, Exhaust).
+        foreach (var c in pcs.Hand.Cards.ToList())
+            await CardPileCmd.Add(c, PileType.Discard);
+        var upgradedForClone = combatState.CreateCard<ForceBolt>(player);
+        CardCmd.Upgrade(upgradedForClone);
+        var recurrence = combatState.CreateCard<Recurrence>(player);
+        await CardPileCmd.Add(upgradedForClone, PileType.Hand);
+        await CardPileCmd.Add(recurrence, PileType.Hand);
+        int drawBeforeRecurrence = pcs.DrawPile.Cards.Count;
+        AutoTestAssert.True(recurrence.TryManualPlay(null), "Play Recurrence");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.True(pcs.ExhaustPile.Cards.Contains(recurrence), "Recurrence exhausted");
+        AutoTestAssert.Equal(drawBeforeRecurrence + 1, pcs.DrawPile.Cards.Count, "Recurrence cloned 1 other card in Hand into DrawPile");
+        AutoTestAssert.True(pcs.DrawPile.Cards.Any(c => c is ForceBolt && c.IsUpgraded && !ReferenceEquals(c, upgradedForClone)),
+            "Recurrence clone preserved upgrade and is distinct instance");
+
+        // 7. DivineMight (1st play -> DivineMightPower; 2nd play -> remove power + Ascend: +2 Energy, draw 2, +10 temp Str!).
+        var dm1 = combatState.CreateCard<DivineMight>(player);
+        var dm2 = combatState.CreateCard<DivineMight>(player);
+        await CardPileCmd.Add(dm1, PileType.Hand);
+        await CardPileCmd.Add(dm2, PileType.Hand);
+        AutoTestAssert.True(dm1.TryManualPlay(enemy), "Play DivineMight #1");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<DivineMightPower>(), "DivineMight #1 applied DivineMightPower");
+
+        int energyBeforeDm2 = pcs.Energy;
+        int handBeforeDm2 = pcs.Hand.Cards.Count;
+        int strBeforeDm2 = player.Creature.GetPowerAmount<StrengthPower>();
+        AutoTestAssert.True(dm2.TryManualPlay(enemy), "Play DivineMight #2 (Ascend!)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<DivineMightPower>(), "DivineMight #2 removed DivineMightPower");
+        AutoTestAssert.Equal(energyBeforeDm2 - 3 + 2, pcs.Energy, "DivineMight Ascend refunded +2 Energy");
+        AutoTestAssert.Equal(handBeforeDm2 - 1 + 2, pcs.Hand.Cards.Count, "DivineMight Ascend drew 2 cards");
+        AutoTestAssert.Equal(strBeforeDm2 + 10, player.Creature.GetPowerAmount<StrengthPower>(), "DivineMight Ascend granted +10 temp Strength");
+        AutoTestAssert.Equal(10, player.Creature.GetPowerAmount<FlexPotionPower>(), "DivineMight Ascend applied FlexPotionPower(10)");
+
+        // 8. Prediction (with Dexterity +2): test BOTH immediate-block and deferred BlockNextTurnPower branches explicitly across Turns 1-3!
+        await PowerCmd.Apply<DexterityPower>(new ThrowingPlayerChoiceContext(), player.Creature, 2m, player.Creature, null);
+        bool testedImmediatePrediction = false;
+        bool testedDeferredPrediction = false;
+        bool deferredBlockExpectedNextTurn = false;
+
+        async Task ExercisePredictionForCurrentIntentAsync(string turnLabel)
+        {
+            bool anyAttacking = combatState.HittableEnemies.Any(e => e.Monster?.IntendsToAttack == true);
+            if (anyAttacking && !testedImmediatePrediction)
+            {
+                var pred = combatState.CreateCard<Prediction>(player);
+                await CardPileCmd.Add(pred, PileType.Hand);
+                int blockBefore = player.Creature.Block;
+                AutoTestAssert.True(pred.TryManualPlay(null), $"Play Prediction on {turnLabel} (attacking)");
+                await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+                AutoTestAssert.Equal(blockBefore + 10, player.Creature.Block, "Prediction gained 8+2 Dex = 10 Block immediately when enemy attacks");
+                AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<BlockNextTurnPower>(), "Prediction did not apply BlockNextTurnPower when enemy attacks");
+                testedImmediatePrediction = true;
+            }
+            else if (!anyAttacking && !testedDeferredPrediction)
+            {
+                var pred = combatState.CreateCard<Prediction>(player);
+                await CardPileCmd.Add(pred, PileType.Hand);
+                int blockBefore = player.Creature.Block;
+                AutoTestAssert.True(pred.TryManualPlay(null), $"Play Prediction on {turnLabel} (non-attacking)");
+                await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+                AutoTestAssert.Equal(blockBefore, player.Creature.Block, "Prediction deferred Block when no enemy attacks");
+                AutoTestAssert.Equal(10, player.Creature.GetPowerAmount<BlockNextTurnPower>(), "Prediction applied Dexterity-scaled BlockNextTurnPower(10)");
+                testedDeferredPrediction = true;
+                deferredBlockExpectedNextTurn = true;
+            }
+        }
+
+        await ExercisePredictionForCurrentIntentAsync("Turn 1");
+
+        // 9. Enigmancy (Scry 5 + EnigmancyPower(2)): Turn 2 gains +2 Energy (dec -> 1), Turn 3 gains +1 Energy (dec -> 0), Turn 4 gains 0!
+        var enigmancy = combatState.CreateCard<Enigmancy>(player);
+        await CardPileCmd.Add(enigmancy, PileType.Hand);
+        _activeCardSelector = new TakeNCardSelector(0);
+        try
+        {
+            AutoTestAssert.True(enigmancy.TryManualPlay(null), "Play Enigmancy");
+            await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        }
+        finally
+        {
+            _activeCardSelector = savedSelector;
+        }
+        AutoTestAssert.Equal(2, player.Creature.GetPowerAmount<EnigmancyPower>(), "EnigmancyPower(2) applied");
+
+        // === TURN 2: Enigmancy +2 Energy (5 total, power -> 1), DivineMight temp Strength expired (back to 5), ForceBolt+ Persist reset! ===
+        await EndTurnAndWaitForRoundAsync(player, 2);
+        AutoTestAssert.Equal(5, pcs.Energy, "Turn-2 Energy = 3 base + 2 EnigmancyPower");
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<EnigmancyPower>(), "EnigmancyPower decremented 2 -> 1");
+        AutoTestAssert.Equal(5, player.Creature.GetPowerAmount<StrengthPower>(), "DivineMight +10 temporary Strength expired at end of Turn 1");
+        if (deferredBlockExpectedNextTurn)
+        {
+            AutoTestAssert.Equal(10, player.Creature.Block, "Prediction BlockNextTurnPower granted 10 Block at start of Turn 2");
+            deferredBlockExpectedNextTurn = false;
+        }
+
+        // Verify ForceBolt+ Persist reset on Turn 2!
+        await CardPileCmd.Add(forceBolt, PileType.Hand);
+        AutoTestAssert.True(forceBolt.TryManualPlay(enemy), "Play ForceBolt+ #1 on Turn 2");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.True(pcs.Hand.Cards.Contains(forceBolt), "ForceBolt+ Persist reset on Turn 2 and returned to Hand");
+
+        await ExercisePredictionForCurrentIntentAsync("Turn 2");
+
+        // === TURN 3: Enigmancy +1 Energy (4 total, power -> 0 removed!) ===
+        await EndTurnAndWaitForRoundAsync(player, 3);
+        AutoTestAssert.Equal(4, pcs.Energy, "Turn-3 Energy = 3 base + 1 EnigmancyPower");
+        AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<EnigmancyPower>(), "EnigmancyPower removed after reaching 0");
+        if (deferredBlockExpectedNextTurn)
+        {
+            AutoTestAssert.Equal(10, player.Creature.Block, "Prediction BlockNextTurnPower granted 10 Block at start of Turn 3");
+            deferredBlockExpectedNextTurn = false;
+        }
+
+        await ExercisePredictionForCurrentIntentAsync("Turn 3");
+
+        // === TURN 4: Enigmancy gone -> 3 base Energy! ===
+        await EndTurnAndWaitForRoundAsync(player, 4);
+        AutoTestAssert.Equal(3, pcs.Energy, "Turn-4 Energy = 3 base (EnigmancyPower expired)");
+        if (deferredBlockExpectedNextTurn)
+        {
+            AutoTestAssert.Equal(10, player.Creature.Block, "Prediction BlockNextTurnPower granted 10 Block at start of Turn 4");
+            deferredBlockExpectedNextTurn = false;
+        }
+        AutoTestAssert.True(testedImmediatePrediction, "Verified Prediction immediate-block branch");
+        AutoTestAssert.True(testedDeferredPrediction, "Verified Prediction deferred BlockNextTurnPower branch");
     }
 
     private static async Task WaitUntilAsync(Func<bool> predicate, int timeoutMs = 15000)

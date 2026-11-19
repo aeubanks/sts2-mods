@@ -6,6 +6,7 @@ using Packmaster.Cards.EvenOdd;
 using Packmaster.Cards.HighEnergy;
 using Packmaster.Cards.Quiet;
 using Packmaster.Cards.Shaman;
+using Packmaster.Cards.Warden;
 using Packmaster.Cards.Warlock;
 
 namespace Packmaster.Packs;
@@ -21,6 +22,7 @@ public static class PackDefinitions
     public const string BatterId = "Batter";
     public const string EnergyAndEchoId = "EnergyAndEcho";
     public const string ShamanId = "Shaman";
+    public const string WardenId = "Warden";
 
     public static void RegisterAll()
     {
@@ -175,6 +177,23 @@ public static class PackDefinitions
                 typeof(Pyromastery),
                 typeof(ReadTheFlames),
                 typeof(SnowMelt),
+            ]));
+
+        PackRegistry.Register(new PackDefinition(
+            Id: WardenId,
+            AlwaysInclude: false,
+            CardTypes:
+            [
+                typeof(Anticipation),
+                typeof(Crossroads),
+                typeof(DivineMight),
+                typeof(Enigmancy),
+                typeof(ForceBolt),
+                typeof(PierceVeil),
+                typeof(Prediction),
+                typeof(Recurrence),
+                typeof(RiskOfBlades),
+                typeof(Stall),
             ]));
     }
 }

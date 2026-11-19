@@ -73,5 +73,11 @@
   "PACKMASTER-FREEZE_AND_BURN_POWER.smartDescription": "At the start of your next turn, deal [blue]{Amount}[/blue] damage to ALL enemies.",
   "PACKMASTER-FUELED_BY_EMBERS_POWER.title": "Fueled by Embers",
   "PACKMASTER-FUELED_BY_EMBERS_POWER.description": "At the start of your turn, draw cards and add Fading Embers to your Hand and Draw Pile.",
-  "PACKMASTER-FUELED_BY_EMBERS_POWER.smartDescription": "At the start of your turn, draw [blue]{Amount}[/blue] {Amount:plural:card|cards} and add [blue]{Amount}[/blue] [gold]{Amount:plural:Fading Ember|Fading Embers}[/gold] to your [gold]Hand[/gold] and [gold]Draw Pile[/gold]."
+  "PACKMASTER-FUELED_BY_EMBERS_POWER.smartDescription": "At the start of your turn, draw [blue]{Amount}[/blue] {Amount:plural:card|cards} and add [blue]{Amount}[/blue] [gold]{Amount:plural:Fading Ember|Fading Embers}[/gold] to your [gold]Hand[/gold] and [gold]Draw Pile[/gold].",
+  "PACKMASTER-ENIGMANCY_POWER.title": "Enigmancy",
+  "PACKMASTER-ENIGMANCY_POWER.description": "At the start of your turn, gain Energy and reduce this gain by 1.",
+  "PACKMASTER-ENIGMANCY_POWER.smartDescription": "At the start of your turn, gain [blue]{Amount}[/blue] Energy and reduce this gain by [blue]1[/blue].",
+  "PACKMASTER-DIVINE_MIGHT_POWER.title": "Divine Might",
+  "PACKMASTER-DIVINE_MIGHT_POWER.description": "When Divine Might is played again, gain 2 Energy, draw 2 cards, and gain 10 temporary Strength.",
+  "PACKMASTER-DIVINE_MIGHT_POWER.smartDescription": "When [gold]Divine Might[/gold] is played again, gain [blue]2[/blue] Energy, draw [blue]2[/blue] cards, and gain [blue]10[/blue] [gold]Strength[/gold] this turn."
 }
