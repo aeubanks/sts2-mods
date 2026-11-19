@@ -25,6 +25,7 @@ public static class MainFile
 
         ModConfigRegistry.Register(ModId, new PackmasterConfig());
         PackDefinitions.RegisterAll();
+        PackRunState.Initialize();
 
         var harmony = new Harmony(ModId);
         harmony.PatchAll(assembly);

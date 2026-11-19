@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using BaseLib.Patches.Saves;
 using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Random;
 using MegaCrit.Sts2.Core.Runs;
@@ -9,23 +10,58 @@ namespace Packmaster.Packs;
 
 public static class PackRunState
 {
-    private static readonly ConditionalWeakTable<RunState, HashSet<string>> _byRun = new();
+    private const string SaveKey = "packmaster_active_packs";
+    private static readonly ConditionalWeakTable<IRunState, HashSet<string>> _persistedByRun = new();
+    private static bool _saveRegistered;
 
-    public static IReadOnlySet<string>? GetActivePackIdsForCurrentRun()
+    public static void Initialize()
+    {
+        if (_saveRegistered)
+            return;
+        _saveRegistered = true;
+
+        ExtendedSaveTypes.RegisterSavedValue<IRunState, string>(
+            SaveKey,
+            getter: runState => _persistedByRun.TryGetValue(runState, out var set) && set.Count > 0
+                ? string.Join(",", set.OrderBy(id => id, StringComparer.Ordinal))
+                : null,
+            setter: (runState, raw) =>
+            {
+                if (string.IsNullOrWhiteSpace(raw))
+                    return;
+
+                var validIds = raw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                    .Where(id => PackRegistry.Get(id) is not null)
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                if (validIds.Count > 0)
+                {
+                    _persistedByRun.AddOrUpdate(runState, validIds);
+                }
+            },
+            serializer: (val, writer) => writer.WriteString(val ?? string.Empty),
+            deserializer: reader => reader.ReadString());
+    }
+
+    public static bool HasPersistedActivePacks(IRunState? state) =>
+        state is not null && _persistedByRun.TryGetValue(state, out var set) && set.Count > 0;
+
+    public static IReadOnlySet<string>? GetActivePackIdsForCurrentRun() =>
+        GetActivePackIds(RunManager.Instance.DebugOnlyGetState());
+
+    public static IReadOnlySet<string>? GetActivePackIds(IRunState? state)
     {
         if (PackmasterConfig.AllPacksMode || PackRegistry.AllPacks.Count == 0)
             return null;
 
-        var state = RunManager.Instance.DebugOnlyGetState();
         if (state is null || !state.Players.Any(p => p.Character is ThePackmaster))
             return null;
 
-        return _byRun.GetValue(state, static runState =>
-        {
-            var rolled = RollPackIdsForSeed(runState.Rng.StringSeed, PackmasterConfig.PacksPerRun);
-            MainFile.Logger.Info($"Active Packmaster packs ({rolled.Count}): {string.Join(", ", rolled)}");
-            return new HashSet<string>(rolled, StringComparer.OrdinalIgnoreCase);
-        });
+        if (_persistedByRun.TryGetValue(state, out var persisted) && persisted.Count > 0)
+            return persisted;
+
+        // Non-persisting deterministic fallback when queried before an explicit draft (e.g., debug/test combat).
+        var rolled = RollPackIdsForSeed(state.Rng.StringSeed, PackmasterConfig.PacksPerRun);
+        return new HashSet<string>(rolled, StringComparer.OrdinalIgnoreCase);
     }
 
     public static IReadOnlyList<string> RollPackIdsForSeed(string seed, int targetCount)
@@ -56,10 +92,18 @@ public static class PackRunState
         return chosen;
     }
 
-    public static void SetActivePacksForRun(RunState state, IEnumerable<string> packIds)
+    public static void SetActivePacksForRun(IRunState state, IEnumerable<string> packIds)
     {
-        _byRun.AddOrUpdate(state, new HashSet<string>(packIds, StringComparer.OrdinalIgnoreCase));
+        var set = new HashSet<string>(packIds, StringComparer.OrdinalIgnoreCase);
+        if (set.Count == 0)
+        {
+            _persistedByRun.Remove(state);
+            return;
+        }
+
+        _persistedByRun.AddOrUpdate(state, set);
+        MainFile.Logger.Info($"Persisted Packmaster active packs ({set.Count}): {string.Join(", ", set)}");
     }
 
-    public static void Reset() => _byRun.Clear();
+    public static void Reset() => _persistedByRun.Clear();
 }

@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Godot;
 using MegaCrit.Sts2.Core.AutoSlay.Helpers;
 using MegaCrit.Sts2.Core.CardSelection;
@@ -13,6 +14,7 @@ using MegaCrit.Sts2.Core.Localization;
 using MegaCrit.Sts2.Core.Map;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Models.Powers;
+using MegaCrit.Sts2.Core.Multiplayer.Serialization;
 using MegaCrit.Sts2.Core.Nodes;
 using MegaCrit.Sts2.Core.Random;
 using MegaCrit.Sts2.Core.Rooms;
@@ -87,6 +89,7 @@ internal static class PackmasterAutoTestRunner
             [
                 ("ModelDbAssetsAndLocIntegrity", TestModelDbAssetsAndLocIntegrity),
                 ("PackSystemAndCardPoolFiltering", TestPackSystemAndCardPoolFiltering),
+                ("PackRunStateSaveLoadPersistence", TestPackRunStateSaveLoadPersistence),
                 ("StartRunAndPlayStarterCombat", TestStartRunAndPlayStarterCombat),
                 ("CoreSetCardsInCombat", TestCoreSetCardsInCombat),
                 ("QuietPackInCombat", TestQuietPackInCombat),
@@ -1944,6 +1947,91 @@ internal static class PackmasterAutoTestRunner
         AutoTestAssert.True(homerunNoCrit.TryManualPlay(enemy), "Play non-crit Homerun as 1st card of Turn 2");
         await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
         AutoTestAssert.Equal(effectiveHpBefore - (16 + strOnTurn2), enemy.CurrentHp + enemy.Block, "Homerun dealt non-crit 16+Str damage with 0 prior cards");
+    }
+
+    private static async Task TestPackRunStateSaveLoadPersistence()
+    {
+        bool savedAllPacks = PackmasterConfig.AllPacksMode;
+        PackmasterConfig.AllPacksMode = false;
+        try
+        {
+            var player = Player.CreateForNewRun<ThePackmaster>(new UnlockState(SaveManager.Instance.Progress), 1uL);
+            var runState = await NGame.Instance!.StartNewSingleplayerRun(
+                player,
+                shouldSave: false,
+                ActModel.GetDefaultList(),
+                Array.Empty<ModifierModel>(),
+                "PMSAVE01",
+                GameMode.Standard,
+                isCustomGame: false);
+
+            // Lazy fallback query must NOT persist anything yet!
+            AutoTestAssert.True(!PackRunState.HasPersistedActivePacks(runState), "Fresh run has no persisted packs before explicit draft");
+            var fallback = AutoTestAssert.NotNull(PackRunState.GetActivePackIds(runState), "Lazy fallback pack set");
+            AutoTestAssert.True(!PackRunState.HasPersistedActivePacks(runState), "Querying fallback did not mark packs as persisted");
+            AutoTestAssert.True(fallback.Contains(PackDefinitions.CoreSetId), "Fallback includes CoreSet");
+
+            // 0. Unpersisted (pre-draft) JSON + Packet round-trip must succeed cleanly without persisting!
+            var typeInfo = JsonSerializationUtility.GetTypeInfo<SerializableRun>();
+            var preDraftSave = RunManager.Instance.ToSave(null);
+            string preDraftJson = JsonSerializer.Serialize(preDraftSave, typeInfo);
+            var preDraftJsonLoaded = RunState.FromSerializable(
+                AutoTestAssert.NotNull(JsonSerializer.Deserialize(preDraftJson, typeInfo), "Pre-draft JSON save"));
+            AutoTestAssert.True(!PackRunState.HasPersistedActivePacks(preDraftJsonLoaded), "Pre-draft JSON round-trip stays unpersisted");
+
+            var preWriter = new PacketWriter();
+            preDraftSave.Serialize(preWriter);
+            var preReader = new PacketReader();
+            preReader.Reset(preWriter.Buffer);
+            var prePacketSave = new SerializableRun();
+            prePacketSave.Deserialize(preReader);
+            var preDraftPacketLoaded = RunState.FromSerializable(prePacketSave);
+            AutoTestAssert.True(!PackRunState.HasPersistedActivePacks(preDraftPacketLoaded), "Pre-draft Packet round-trip stays unpersisted");
+
+            // Explicitly persist a distinct subset (different from the 7-pack fallback!).
+            string[] customPacks = [PackDefinitions.CoreSetId, PackDefinitions.QuietId, PackDefinitions.BatterId];
+            PackRunState.SetActivePacksForRun(runState, customPacks);
+            AutoTestAssert.True(PackRunState.HasPersistedActivePacks(runState), "Persisted flag set after SetActivePacksForRun");
+
+            var save = RunManager.Instance.ToSave(null);
+
+            // 1. Real JSON round-trip via StS 2's JsonSerializationUtility!
+            string json = JsonSerializer.Serialize(save, typeInfo);
+            AutoTestAssert.True(json.Contains("packmaster_active_packs"), "Serialized run JSON contains packmaster_active_packs extended save data");
+            var jsonSave = AutoTestAssert.NotNull(
+                JsonSerializer.Deserialize(json, typeInfo),
+                "Deserialized SerializableRun from JSON");
+            var loadedFromJson = RunState.FromSerializable(jsonSave);
+            AutoTestAssert.True(PackRunState.HasPersistedActivePacks(loadedFromJson), "Loaded RunState from JSON has persisted packs");
+            var jsonPacks = AutoTestAssert.NotNull(PackRunState.GetActivePackIds(loadedFromJson), "Active packs from JSON-loaded RunState");
+            AutoTestAssert.Equal(3, jsonPacks.Count, "JSON-loaded pack count matches saved custom subset");
+            AutoTestAssert.True(customPacks.All(jsonPacks.Contains), "JSON-loaded packs match exact saved IDs");
+
+            // 1b. Stale/removed pack ID in JSON is cleanly filtered out while valid packs survive!
+            string staleJson = json.Replace(PackDefinitions.BatterId, "RemovedPack");
+            var staleLoaded = RunState.FromSerializable(
+                AutoTestAssert.NotNull(JsonSerializer.Deserialize(staleJson, typeInfo), "Deserialized stale JSON save"));
+            var stalePacks = AutoTestAssert.NotNull(PackRunState.GetActivePackIds(staleLoaded), "Active packs after filtering stale ID");
+            AutoTestAssert.Equal(2, stalePacks.Count, "Stale pack ID filtered out leaving 2 valid packs");
+            AutoTestAssert.True(stalePacks.Contains(PackDefinitions.CoreSetId) && stalePacks.Contains(PackDefinitions.QuietId), "Valid packs survived stale ID filtering");
+
+            // 2. Real multiplayer PacketWriter / PacketReader round-trip!
+            var writer = new PacketWriter();
+            save.Serialize(writer);
+            var reader = new PacketReader();
+            reader.Reset(writer.Buffer);
+            var packetSave = new SerializableRun();
+            packetSave.Deserialize(reader);
+            var loadedFromPacket = RunState.FromSerializable(packetSave);
+            AutoTestAssert.True(PackRunState.HasPersistedActivePacks(loadedFromPacket), "Loaded RunState from Packet has persisted packs");
+            var packetPacks = AutoTestAssert.NotNull(PackRunState.GetActivePackIds(loadedFromPacket), "Active packs from Packet-loaded RunState");
+            AutoTestAssert.Equal(3, packetPacks.Count, "Packet-loaded pack count matches saved custom subset");
+            AutoTestAssert.True(customPacks.All(packetPacks.Contains), "Packet-loaded packs match exact saved IDs");
+        }
+        finally
+        {
+            PackmasterConfig.AllPacksMode = savedAllPacks;
+        }
     }
 
     private static async Task WaitUntilAsync(Func<bool> predicate, int timeoutMs = 15000)
