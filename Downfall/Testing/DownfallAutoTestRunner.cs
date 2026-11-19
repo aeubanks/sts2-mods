@@ -134,6 +134,7 @@ internal static class DownfallAutoTestRunner
                 ("HermitCommonCardsInCombat", HermitTests.TestCommonCardsInCombat),
                 ("HermitUncommonBatch1InCombat", HermitTests.TestUncommonBatch1InCombat),
                 ("HermitUncommonBatch2InCombat", HermitTests.TestUncommonBatch2InCombat),
+                ("HermitRareCardsInCombat", HermitTests.TestRareCardsInCombat),
             ];
 
             foreach (var (name, run) in tests)
@@ -476,6 +477,7 @@ internal static class DownfallAutoTestRunner
         AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-DEAD_ON_KEYWORD.title").Exists(), "Missing Dead On title loc");
         AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-DEAD_ON_KEYWORD.description").Exists(), "Missing Dead On desc loc");
         AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-COALESCENCE.selectionScreenPrompt").Exists(), "Missing Coalescence prompt loc");
+        AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-ADAPT.selectionScreenPrompt").Exists(), "Missing Adapt prompt loc");
         AutoTestAssert.True(new LocString("cards", "DOWNFALL-COVET.selectionScreenPrompt").Exists(), "Missing Covet selectionScreenPrompt loc");
         AutoTestAssert.True(new LocString("cards", "DOWNFALL-BODY_ARMOR.selectionScreenPrompt").Exists(), "Missing BodyArmor selectionScreenPrompt loc");
         AutoTestAssert.True(new LocString("cards", "DOWNFALL-CHEAT.selectionScreenPrompt").Exists(), "Missing Cheat selectionScreenPrompt loc");

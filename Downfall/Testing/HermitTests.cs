@@ -1033,4 +1033,272 @@ internal static class HermitTests
         AutoTestAssert.Equal(e2Before, enemy2.CurrentHp, "Off-center ImpendingDoom did not damage enemy2");
         AutoTestAssert.Equal(0, enemy1.GetPowerAmount<BruisePower>(), "Bruise wore off after Horror expired");
     }
+
+    public static async Task TestRareCardsInCombat()
+    {
+        var (player, _, combatState) = await DownfallAutoTestRunner.StartCombatAsync<TheHermit>("DFHRMR1");
+        var pcs = AutoTestAssert.NotNull(player.PlayerCombatState, "PlayerCombatState");
+        var enemy1 = AutoTestAssert.NotNull(combatState.HittableEnemies.FirstOrDefault(), "First enemy");
+        var enemy2 = await CreatureCmd.Add<MegaCrit.Sts2.Core.Models.Monsters.Nibbit>(combatState);
+        var ctx = new ThrowingPlayerChoiceContext();
+
+        await CreatureCmd.GainMaxHp(enemy1, 800m);
+        await CreatureCmd.GainMaxHp(enemy2, 800m);
+
+        async Task ResetHandAndEnergy()
+        {
+            foreach (var c in pcs.Hand.Cards.ToList())
+                await CardPileCmd.Add(c, PileType.Discard);
+            if (pcs.Energy < 10)
+                await PlayerCmd.GainEnergy(10 - pcs.Energy, player);
+        }
+
+        // 1. BlackWind: deals damage equal to missing HP (25), exhausts.
+        await ResetHandAndEnergy();
+        await CreatureCmd.Damage(ctx, player.Creature, 25m, ValueProp.Unblockable | ValueProp.Unpowered, null, null, null);
+        int missingHp = player.Creature.MaxHp - player.Creature.CurrentHp;
+        AutoTestAssert.Equal(25, missingHp, "Player missing 25 HP");
+        var blackWind = combatState.CreateCard<BlackWind>(player);
+        await CardPileCmd.Add(blackWind, PileType.Hand);
+        int hpBefore = enemy1.CurrentHp;
+        AutoTestAssert.True(blackWind.TryManualPlay(enemy1), "Play BlackWind");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(hpBefore - 25, enemy1.CurrentHp, "BlackWind dealt 25 missing-HP damage");
+        AutoTestAssert.True(PileType.Exhaust.GetPile(player).Cards.Contains(blackWind), "BlackWind exhausted");
+
+        // 2. Reprieve: heals 10 HP, exhausts.
+        await ResetHandAndEnergy();
+        var reprieve = combatState.CreateCard<Reprieve>(player);
+        await CardPileCmd.Add(reprieve, PileType.Hand);
+        int playerHpBefore = player.Creature.CurrentHp;
+        AutoTestAssert.True(reprieve.TryManualPlay(null), "Play Reprieve");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(playerHpBefore + 10, player.Creature.CurrentHp, "Reprieve healed 10 HP");
+        AutoTestAssert.True(PileType.Exhaust.GetPile(player).Cards.Contains(reprieve), "Reprieve exhausted");
+
+        // 3. FinalCanter: deals 10 damage per Curse in hand (2 Curses -> 20), exhausts.
+        await ResetHandAndEnergy();
+        var fc = combatState.CreateCard<FinalCanter>(player);
+        await CardPileCmd.Add(fc, PileType.Hand);
+        await CardPileCmd.Add(combatState.CreateCard<StsCards.Clumsy>(player), PileType.Hand);
+        await CardPileCmd.Add(combatState.CreateCard<StsCards.Injury>(player), PileType.Hand);
+        hpBefore = enemy1.CurrentHp;
+        AutoTestAssert.True(fc.TryManualPlay(enemy1), "Play FinalCanter with 2 Curses");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(hpBefore - 20, enemy1.CurrentHp, "FinalCanter dealt 2*10 = 20 damage");
+        AutoTestAssert.True(PileType.Exhaust.GetPile(player).Cards.Contains(fc), "FinalCanter exhausted");
+
+        // 4. FromBeyond: deals 5 HP loss to a random enemy per card in Exhaust Pile!
+        await ResetHandAndEnergy();
+        int exhaustCount = PileType.Exhaust.GetPile(player).Cards.Count;
+        AutoTestAssert.True(exhaustCount >= 3, $"Expected >=3 exhausted cards, got {exhaustCount}");
+        await CreatureCmd.GainBlock(enemy1, 50m, ValueProp.Unpowered, null);
+        await CreatureCmd.GainBlock(enemy2, 50m, ValueProp.Unpowered, null);
+        int totalHpBefore = enemy1.CurrentHp + enemy2.CurrentHp;
+        var fromBeyond = combatState.CreateCard<FromBeyond>(player);
+        await CardPileCmd.Add(fromBeyond, PileType.Hand);
+        AutoTestAssert.True(fromBeyond.TryManualPlay(null), "Play FromBeyond");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(totalHpBefore - exhaustCount * 5, enemy1.CurrentHp + enemy2.CurrentHp,
+            $"FromBeyond dealt {exhaustCount}*5 HP loss ignoring enemy Block");
+        await CreatureCmd.LoseBlock(ctx, enemy1, enemy1.Block, null);
+        await CreatureCmd.LoseBlock(ctx, enemy2, enemy2.Block, null);
+
+        // 5. Gambit: puts 2 random Attacks from Discard Pile into Hand costing 1 less this turn, exhausts.
+        await ResetHandAndEnergy();
+        foreach (var c in PileType.Discard.GetPile(player).Cards.ToList())
+            await CardPileCmd.Add(c, PileType.Draw);
+        var discAtk1 = combatState.CreateCard<HermitStrike>(player);
+        var discAtk2 = combatState.CreateCard<Headshot>(player);
+        var discSkill = combatState.CreateCard<HermitDefend>(player);
+        await CardPileCmd.Add(discAtk1, PileType.Discard);
+        await CardPileCmd.Add(discAtk2, PileType.Discard);
+        await CardPileCmd.Add(discSkill, PileType.Discard);
+        var gambit = combatState.CreateCard<Gambit>(player);
+        await CardPileCmd.Add(gambit, PileType.Hand);
+        AutoTestAssert.True(gambit.TryManualPlay(null), "Play Gambit");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.True(pcs.Hand.Cards.Contains(discAtk1) && pcs.Hand.Cards.Contains(discAtk2), "Gambit pulled both Attacks from Discard");
+        AutoTestAssert.True(!pcs.Hand.Cards.Contains(discSkill), "Gambit ignored Skill in Discard");
+        AutoTestAssert.Equal(0, discAtk1.EnergyCost.GetWithModifiers(CostModifiers.All), "Gambit reduced Attack cost 1 -> 0");
+        AutoTestAssert.Equal(0, discAtk2.EnergyCost.GetWithModifiers(CostModifiers.All), "Gambit reduced Attack cost 1 -> 0");
+
+        // 6. HeroicBravado: gains 1 Rugged, increases its own cost 1 -> 3 this combat.
+        await ResetHandAndEnergy();
+        var bravado = combatState.CreateCard<HeroicBravado>(player);
+        await CardPileCmd.Add(bravado, PileType.Hand);
+        AutoTestAssert.True(bravado.TryManualPlay(null), "Play HeroicBravado");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<RuggedPower>(), "HeroicBravado granted 1 Rugged");
+        AutoTestAssert.Equal(3, bravado.EnergyCost.GetWithModifiers(CostModifiers.All), "HeroicBravado cost increased 1 -> 3");
+        await PowerCmd.Remove<RuggedPower>(player.Creature);
+
+        // 7. HighNoon: playing a Strike or Defend draws 1 card; non-Strike/Defend does not!
+        await ResetHandAndEnergy();
+        var highNoon = combatState.CreateCard<HighNoon>(player);
+        var hnStrike = combatState.CreateCard<HermitStrike>(player);
+        var hnDefend = combatState.CreateCard<HermitDefend>(player);
+        var hnOther = combatState.CreateCard<Glare>(player);
+        await CardPileCmd.Add(highNoon, PileType.Hand);
+        await CardPileCmd.Add(hnStrike, PileType.Hand);
+        await CardPileCmd.Add(hnDefend, PileType.Hand);
+        await CardPileCmd.Add(hnOther, PileType.Hand);
+        AutoTestAssert.True(highNoon.TryManualPlay(null), "Play HighNoon");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        int handCount = pcs.Hand.Cards.Count;
+        AutoTestAssert.True(hnStrike.TryManualPlay(enemy1), "Play Strike with HighNoon");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(handCount, pcs.Hand.Cards.Count, "HighNoon drew 1 card on Strike play");
+        AutoTestAssert.True(hnDefend.TryManualPlay(null), "Play Defend with HighNoon");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(handCount, pcs.Hand.Cards.Count, "HighNoon drew 1 card on Defend play");
+        AutoTestAssert.True(hnOther.TryManualPlay(enemy1), "Play non-Strike/Defend with HighNoon");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(handCount - 1, pcs.Hand.Cards.Count, "HighNoon did NOT draw on non-Strike/Defend");
+        await PowerCmd.Remove<HighNoonPower>(player.Creature);
+        await PowerCmd.Remove<WeakPower>(enemy1);
+        await PowerCmd.Remove<VulnerablePower>(enemy1);
+
+        // 8. Magnum: discards 6 cards when >6 in hand (exercises FromHandForDiscard), deals 6*6 = 36 damage!
+        await ResetHandAndEnergy();
+        var magnum = combatState.CreateCard<Magnum>(player);
+        await CardPileCmd.Add(magnum, PileType.Hand);
+        for (int i = 0; i < 7; i++)
+            await CardPileCmd.Add(combatState.CreateCard<HermitDefend>(player), PileType.Hand);
+        hpBefore = enemy1.CurrentHp;
+        AutoTestAssert.True(magnum.TryManualPlay(enemy1), "Play Magnum with 7 other cards");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(1, pcs.Hand.Cards.Count, "Magnum discarded 6 of 7 other cards, leaving 1");
+        AutoTestAssert.Equal(hpBefore - 36, enemy1.CurrentHp, "Magnum dealt 6*6 = 36 damage");
+
+        // 9. Purgatory: deals 24 AOE damage to both enemies.
+        await ResetHandAndEnergy();
+        var purgatory = combatState.CreateCard<Purgatory>(player);
+        await CardPileCmd.Add(purgatory, PileType.Hand);
+        int e1Before = enemy1.CurrentHp;
+        int e2Before = enemy2.CurrentHp;
+        AutoTestAssert.True(purgatory.TryManualPlay(null), "Play Purgatory");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(e1Before - 24, enemy1.CurrentHp, "Purgatory dealt 24 to enemy1");
+        AutoTestAssert.Equal(e2Before - 24, enemy2.CurrentHp, "Purgatory dealt 24 to enemy2");
+
+        // 10. Roughhouse (Dead On): deals 24 damage and gains 20 Block!
+        await ResetHandAndEnergy();
+        var roughhouse = combatState.CreateCard<Roughhouse>(player);
+        await CardPileCmd.Add(roughhouse, PileType.Hand);
+        int blockBefore = player.Creature.Block;
+        hpBefore = enemy1.CurrentHp;
+        AutoTestAssert.True(roughhouse.TryManualPlay(enemy1), "Play Dead On Roughhouse");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(hpBefore - 24, enemy1.CurrentHp, "Roughhouse dealt 24 damage");
+        AutoTestAssert.Equal(blockBefore + 20, player.Creature.Block, "Dead On Roughhouse gained 20 Block");
+
+        // 11. RoundhouseKick: deals 13 AOE damage, exhausts, stuns non-attacking CalcifiedCultist, does NOT stun attacking Nibbit!
+        await ResetHandAndEnergy();
+        var cultist = await CreatureCmd.Add<MegaCrit.Sts2.Core.Models.Monsters.CalcifiedCultist>(combatState);
+        await CreatureCmd.GainMaxHp(cultist, 200m);
+        AutoTestAssert.True(cultist.Monster is { IntendsToAttack: false }, "CalcifiedCultist starts with non-attacking intent");
+        bool enemy1Attacking = enemy1.Monster?.IntendsToAttack ?? false;
+        var rhk = combatState.CreateCard<RoundhouseKick>(player);
+        await CardPileCmd.Add(rhk, PileType.Hand);
+        e1Before = enemy1.CurrentHp;
+        e2Before = enemy2.CurrentHp;
+        int cultistBefore = cultist.CurrentHp;
+        AutoTestAssert.True(rhk.TryManualPlay(null), "Play RoundhouseKick");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(e1Before - 13, enemy1.CurrentHp, "RoundhouseKick dealt 13 to enemy1");
+        AutoTestAssert.Equal(e2Before - 13, enemy2.CurrentHp, "RoundhouseKick dealt 13 to enemy2");
+        AutoTestAssert.Equal(cultistBefore - 13, cultist.CurrentHp, "RoundhouseKick dealt 13 to CalcifiedCultist");
+        AutoTestAssert.Equal("STUNNED", cultist.Monster?.NextMove?.Id, "RoundhouseKick stunned non-attacking CalcifiedCultist");
+        if (enemy1Attacking)
+            AutoTestAssert.True(enemy1.Monster?.NextMove?.Id != "STUNNED", "RoundhouseKick did NOT stun attacking enemy1");
+        AutoTestAssert.True(PileType.Exhaust.GetPile(player).Cards.Contains(rhk), "RoundhouseKick exhausted");
+        // Kill cultist cleanly so it doesn't interfere with later assertions.
+        await CreatureCmd.Kill(cultist);
+
+        // 12. DeadOrAlive: X-cost at 2 energy -> kills low-HP enemy2 -> gains +15 Bounty Gold, exhausts!
+        await ResetHandAndEnergy();
+        await CreatureCmd.Damage(ctx, enemy2, enemy2.CurrentHp - 10, ValueProp.Unblockable | ValueProp.Unpowered, null, null, null);
+        await PlayerCmd.SetEnergy(2, player);
+        int goldBefore = player.Gold;
+        var doa = combatState.CreateCard<DeadOrAlive>(player);
+        await CardPileCmd.Add(doa, PileType.Hand);
+        AutoTestAssert.True(doa.TryManualPlay(enemy2), "Play DeadOrAlive X=2 for Fatal kill");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.True(enemy2.IsDead, "DeadOrAlive killed enemy2");
+        AutoTestAssert.Equal(goldBefore + 15, player.Gold, "Fatal DeadOrAlive granted 15 Bounty Gold");
+        AutoTestAssert.True(PileType.Exhaust.GetPile(player).Cards.Contains(doa), "DeadOrAlive exhausted");
+
+        // 13. Dissolve + Adapt + EternalForm + FatalDesire + OverwhelmingPower across turn transition!
+        await ResetHandAndEnergy();
+        if (player.Creature.Block > 0)
+            await CreatureCmd.LoseBlock(ctx, player.Creature, player.Creature.Block, null);
+        var dissolve = combatState.CreateCard<Dissolve>(player);
+        var adapt = combatState.CreateCard<Adapt>(player);
+        var eternal = combatState.CreateCard<EternalForm>(player);
+        var fatalDesire = combatState.CreateCard<FatalDesire>(player);
+        var overwhelming = combatState.CreateCard<OverwhelmingPower>(player);
+        await CardPileCmd.Add(dissolve, PileType.Hand);
+        await CardPileCmd.Add(adapt, PileType.Hand);
+        await CardPileCmd.Add(eternal, PileType.Hand);
+        await CardPileCmd.Add(fatalDesire, PileType.Hand);
+        await CardPileCmd.Add(overwhelming, PileType.Hand);
+
+        AutoTestAssert.True(dissolve.TryManualPlay(null), "Play Dissolve");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(18, player.Creature.Block, "Dissolve gained 18 Block");
+        AutoTestAssert.Equal(2, player.Creature.GetPowerAmount<BlurPower>(), "Dissolve applied 2 BlurPower");
+
+        AutoTestAssert.True(adapt.TryManualPlay(null), "Play Adapt");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.True(eternal.TryManualPlay(null), "Play EternalForm");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.True(fatalDesire.TryManualPlay(null), "Play FatalDesire");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+
+        int energyBeforeOverwhelming = pcs.Energy;
+        AutoTestAssert.True(overwhelming.TryManualPlay(null), "Play OverwhelmingPower");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(energyBeforeOverwhelming - 1 + 3, pcs.Energy, "OverwhelmingPower gained 3 Energy");
+        AutoTestAssert.Equal(4, player.Creature.GetPowerAmount<OverwhelmingPowerPower>(), "OverwhelmingPower applied 4 debuff");
+
+        // Prepare known 1-cost cards on top of draw pile for EternalForm + FatalDesire + Adapt on Round 2!
+        var drawTarget = combatState.CreateCard<HermitStrike>(player);
+        for (int i = 0; i < 7; i++)
+            await CardPileCmd.Add(combatState.CreateCard<HermitDefend>(player), PileType.Draw, CardPilePosition.Top);
+        await CardPileCmd.Add(drawTarget, PileType.Draw, CardPilePosition.Top);
+
+        // Give player huge Block so enemy1 attack doesn't touch HP, isolating OverwhelmingPower's 4 HP loss!
+        await CreatureCmd.GainBlock(player.Creature, 50m, ValueProp.Unpowered, null);
+        await PlayerCmd.SetEnergy(0, player);
+        playerHpBefore = player.Creature.CurrentHp;
+
+        using (DownfallAutoTestRunner.PreferCards(c => ReferenceEquals(c, drawTarget)))
+        {
+            await DownfallAutoTestRunner.EndTurnAndWaitForRoundAsync(player, 2);
+        }
+
+        // OverwhelmingPower dealt 4 HP loss because Turn 1 ended with 0 Energy!
+        AutoTestAssert.Equal(playerHpBefore - 4, player.Creature.CurrentHp, "OverwhelmingPower dealt 4 HP loss at 0 Energy");
+        // Dissolve BlurPower preserved Block into Round 2 (and decremented 2 -> 1)!
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<BlurPower>(), "BlurPower decremented 2 -> 1");
+        AutoTestAssert.True(player.Creature.Block >= 30, $"BlurPower preserved Block into Round 2 (got {player.Creature.Block})");
+        // Adapt exhausted drawTarget!
+        AutoTestAssert.True(PileType.Exhaust.GetPile(player).Cards.Contains(drawTarget), "AdaptPower exhausted chosen card on Turn 2");
+        // FatalDesire drew 2 extra cards (5 + 2 = 7 drawn, -1 exhausted by Adapt + 1 Injury = 7 in hand)!
+        AutoTestAssert.Equal(7, pcs.Hand.Cards.Count, "FatalDesire drew 2 extra cards (+1 Injury -1 Adapt = 7 in hand)");
+        AutoTestAssert.True(pcs.Hand.Cards.Any(c => c is StsCards.Injury), "FatalDesirePower added Injury to hand");
+        // EternalPower discounted ONLY the first 4 playable cards drawn (1 Strike exhausted + 3 Defends = 3 zero-cost Defends, 3 one-cost Defends)!
+        int zeroCostDefends = pcs.Hand.Cards.OfType<HermitDefend>().Count(d => d.EnergyCost.GetWithModifiers(CostModifiers.All) == 0);
+        int oneCostDefends = pcs.Hand.Cards.OfType<HermitDefend>().Count(d => d.EnergyCost.GetWithModifiers(CostModifiers.All) == 1);
+        AutoTestAssert.Equal(3, zeroCostDefends, "EternalPower discounted exactly 4 drawn cards (drawTarget + 3 Defends)");
+        AutoTestAssert.Equal(3, oneCostDefends, "EternalPower stopped discounting after the 4th card (3 Defends still cost 1)");
+
+        // End Round 2 WITH Energy > 0 -> OverwhelmingPower must NOT deal HP loss!
+        await PlayerCmd.SetEnergy(3, player);
+        await CreatureCmd.GainBlock(player.Creature, 50m, ValueProp.Unpowered, null);
+        playerHpBefore = player.Creature.CurrentHp;
+        await DownfallAutoTestRunner.EndTurnAndWaitForRoundAsync(player, 3);
+        AutoTestAssert.Equal(playerHpBefore, player.Creature.CurrentHp, "OverwhelmingPower did NOT deal HP loss with >0 Energy");
+    }
 }
