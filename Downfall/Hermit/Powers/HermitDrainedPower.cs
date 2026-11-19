@@ -1,4 +1,4 @@
-using Downfall.Awakened.Powers;
+using Downfall.Awakened;
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Commands;
 using MegaCrit.Sts2.Core.Entities.Players;
@@ -29,7 +29,7 @@ public sealed class HermitDrainedPower : HermitPower
             Flash();
             await PlayerCmd.LoseEnergy(lost, player);
             await PowerCmd.Remove(this);
-            await ManaburnPower.NotifyPlayerEnergyDrainedAsync(combatState, new ThrowingPlayerChoiceContext(), lost);
+            await AwakenedSpellbook.NotifyEnergyDrainedAsync(player, combatState, new ThrowingPlayerChoiceContext(), lost);
         }
     }
 }

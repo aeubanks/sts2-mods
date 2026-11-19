@@ -61,5 +61,8 @@
   "DOWNFALL-SNIPE_POWER.smartDescription": "Your next {Amount:plural:[gold]Dead On[/gold] effect|[blue]{}[/blue] [gold]Dead On[/gold] effects} this turn {Amount:plural:triggers|trigger} twice.",
   "DOWNFALL-TAKE_AIM_POWER.title": "Take Aim",
   "DOWNFALL-TAKE_AIM_POWER.description": "At the start of your turn, [gold]Concentrate[/gold].",
-  "DOWNFALL-TAKE_AIM_POWER.smartDescription": "At the start of your turn, [gold]Concentrate[/gold]."
+  "DOWNFALL-TAKE_AIM_POWER.smartDescription": "At the start of your turn, [gold]Concentrate[/gold].",
+  "DOWNFALL-VOID_REFUND_POWER.title": "Clarion Call",
+  "DOWNFALL-VOID_REFUND_POWER.description": "The next time you are Drained, gain [gold]Energy[/gold].",
+  "DOWNFALL-VOID_REFUND_POWER.smartDescription": "The next time you are Drained, gain [blue]{Amount}[/blue] [gold]Energy[/gold]."
 }

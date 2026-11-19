@@ -33,6 +33,8 @@ public abstract class AwakenedCard(
         new LocString("gameplay_ui", "DOWNFALL-CONJURE_KEYWORD.title"),
         new LocString("gameplay_ui", "DOWNFALL-CONJURE_KEYWORD.description"));
 
+    protected virtual IEnumerable<IHoverTip> CardHoverTips => [];
+
     protected override IEnumerable<IHoverTip> ExtraHoverTips
     {
         get
@@ -41,6 +43,8 @@ public abstract class AwakenedCard(
                 yield return ChantHoverTip;
             if (UsesConjure)
                 yield return ConjureHoverTip;
+            foreach (var tip in CardHoverTips)
+                yield return tip;
         }
     }
 

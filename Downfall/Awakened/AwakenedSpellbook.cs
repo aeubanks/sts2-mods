@@ -4,6 +4,7 @@ using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Commands;
 using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Entities.Players;
+using MegaCrit.Sts2.Core.GameActions.Multiplayer;
 using MegaCrit.Sts2.Core.Models;
 
 namespace Downfall.Awakened;
@@ -137,5 +138,33 @@ internal static class AwakenedSpellbook
         }
 
         return card;
+    }
+
+    public static async Task NotifyEnergyDrainedAsync(
+        Player player,
+        ICombatState? combatState,
+        PlayerChoiceContext choiceContext,
+        int energyLost)
+    {
+        if (combatState is null || energyLost <= 0 || CombatManager.Instance.IsOverOrEnding)
+            return;
+
+        foreach (var listener in player.Creature.Powers.OfType<IEnergyDrainListener>().ToList())
+        {
+            await listener.OnEnergyDrainedAsync(choiceContext, energyLost);
+        }
+
+        foreach (var listener in player.Relics.OfType<IEnergyDrainListener>().ToList())
+        {
+            await listener.OnEnergyDrainedAsync(choiceContext, energyLost);
+        }
+
+        foreach (var enemy in combatState.HittableEnemies.ToList())
+        {
+            foreach (var listener in enemy.Powers.OfType<IEnergyDrainListener>().ToList())
+            {
+                await listener.OnEnergyDrainedAsync(choiceContext, energyLost);
+            }
+        }
     }
 }
