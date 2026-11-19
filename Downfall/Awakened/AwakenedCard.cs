@@ -20,6 +20,17 @@ public abstract class AwakenedCard(
     : DownfallCard(cost, type, rarity, target, showInCardLibrary)
 {
     private bool _chantActivated;
+    private CardPlay? _lastTriggeredChantPlay;
+
+    protected override void DeepCloneFields()
+    {
+        base.DeepCloneFields();
+        _chantActivated = false;
+        _lastTriggeredChantPlay = null;
+    }
+
+    internal bool DidTriggerChantOnPlay(CardPlay cardPlay) =>
+        ReferenceEquals(_lastTriggeredChantPlay, cardPlay);
 
     protected override string CharacterKey => TheAwakenedOne.CharKey;
 
@@ -85,6 +96,7 @@ public abstract class AwakenedCard(
         if (_chantActivated || WasLastCardPlayedPower(Owner, CombatState, cardPlay))
         {
             _chantActivated = true;
+            _lastTriggeredChantPlay = cardPlay;
             var rising = Owner.Creature.GetPower<RisingChantPower>();
             return rising?.TryConsumeDoubleChant() == true ? 2 : 1;
         }

@@ -142,6 +142,7 @@ internal static class DownfallAutoTestRunner
                 ("AwakenedUncommonBatch1InCombat", AwakenedTests.TestUncommonBatch1InCombat),
                 ("AwakenedUncommonBatch2InCombat", AwakenedTests.TestUncommonBatch2InCombat),
                 ("AwakenedRareCardsInCombat", AwakenedTests.TestRareCardsInCombat),
+                ("AwakenedRelicsAndPotionsInCombat", AwakenedTests.TestRelicsAndPotionsInCombat),
             ];
 
             foreach (var (name, run) in tests)
@@ -504,6 +505,7 @@ internal static class DownfallAutoTestRunner
         AutoTestAssert.True(new LocString("cards", "DOWNFALL-FOURTH_DIMENSION.selectionScreenPrompt").Exists(), "Missing FourthDimension selectionScreenPrompt loc");
         AutoTestAssert.True(new LocString("cards", "DOWNFALL-PROCESSION.selectionScreenPrompt").Exists(), "Missing Procession selectionScreenPrompt loc");
         AutoTestAssert.True(new LocString("potions", "DOWNFALL-ECLIPSE.selectionScreenPrompt").Exists(), "Missing Eclipse selectionScreenPrompt loc");
+        AutoTestAssert.True(new LocString("relics", "DOWNFALL-MOON_TALISMAN.selectionScreenPrompt").Exists(), "Missing MoonTalisman selectionScreenPrompt loc");
 
         return Task.CompletedTask;
     }

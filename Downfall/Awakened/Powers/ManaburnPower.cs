@@ -1,3 +1,4 @@
+using Downfall.Awakened.Relics;
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Commands;
 using MegaCrit.Sts2.Core.Entities.Powers;
@@ -18,11 +19,21 @@ public sealed class ManaburnPower : AwakenedPower, IEnergyDrainListener
         if (!Owner.IsAlive || Amount <= 0 || energyLost <= 0 || CombatManager.Instance.IsOverOrEnding)
             return;
 
+        int damage = Amount * energyLost;
+        var paperCrow = CombatState?.Players
+            .SelectMany(p => p.Relics.OfType<StrengthBooster>())
+            .FirstOrDefault();
+        if (paperCrow is not null)
+        {
+            paperCrow.TriggerFlash();
+            damage += damage / 4;
+        }
+
         Flash();
         await CreatureCmd.Damage(
             choiceContext,
             Owner,
-            Amount * energyLost,
+            damage,
             ValueProp.Unblockable | ValueProp.Unpowered,
             dealer: null,
             cardSource: null,

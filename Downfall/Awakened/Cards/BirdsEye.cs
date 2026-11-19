@@ -15,7 +15,7 @@ public sealed class BirdsEye()
 
         if (IsUpgraded)
         {
-            AwakenedSpellbook.RefreshSpells(CombatState, Owner);
+            await AwakenedSpellbook.RefreshSpellsAsync(CombatState, Owner, choiceContext);
         }
 
         await AwakenedSpellbook.ChooseSpellToConjureAsync(choiceContext, Owner, CombatState, SelectionScreenPrompt);

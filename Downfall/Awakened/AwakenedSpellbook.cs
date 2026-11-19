@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using Downfall.Awakened.Cards;
 using Downfall.Awakened.Powers;
+using Downfall.Awakened.Relics;
 using MegaCrit.Sts2.Core.CardSelection;
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Commands;
@@ -86,11 +87,65 @@ internal static class AwakenedSpellbook
         state.Queue.Insert(insertIndex, canonicalSpell);
     }
 
-    public static void RefreshSpells(ICombatState combatState, Player owner)
+    public static async Task RefreshSpellsAsync(
+        ICombatState combatState,
+        Player owner,
+        PlayerChoiceContext choiceContext)
     {
         var state = GetState(combatState, owner);
         state.Queue.Clear();
         RefillQueue(state, owner);
+        await NotifySpellbookRefreshedAsync(owner, choiceContext);
+    }
+
+    private static async Task NotifySpellbookRefreshedAsync(Player owner, PlayerChoiceContext choiceContext)
+    {
+        foreach (var doll in owner.Relics.OfType<ShreddedDoll>().ToList())
+        {
+            if (CombatManager.Instance.IsOverOrEnding || !owner.Creature.IsAlive)
+                break;
+            await doll.OnSpellbookRefreshedAsync(choiceContext);
+        }
+    }
+
+    public static async Task<CardModel?> ConjureSpecificAndRegisterAsync(
+        Player owner,
+        ICombatState combatState,
+        CardModel canonicalSpell,
+        PileType destination = PileType.Hand,
+        CardPilePosition position = CardPilePosition.Top)
+    {
+        if (!owner.Creature.IsAlive || CombatManager.Instance.IsOverOrEnding)
+            return null;
+
+        var state = GetState(combatState, owner);
+        // Populate Cycle 1 before registering canonicalSpell so it isn't duplicated in Cycle 1.
+        if (state.Queue.Count == 0)
+        {
+            RefillQueue(state, owner);
+        }
+        if (!state.ExtraSpells.Contains(canonicalSpell))
+        {
+            state.ExtraSpells.Add(canonicalSpell);
+        }
+
+        if (owner.Creature.GetPower<IntensifyDebuffPower>() is { } burnout)
+        {
+            burnout.TriggerFlash();
+            return null;
+        }
+
+        await TryCheckAwakeningAsync(combatState, owner, new ThrowingPlayerChoiceContext());
+        state.ConjuresThisCombat++;
+
+        var card = combatState.CreateCard(canonicalSpell, owner);
+        if (state.IsAwakened && card.IsUpgradable)
+        {
+            CardCmd.Upgrade(card);
+        }
+
+        await CardPileCmd.AddGeneratedCardToCombat(card, destination, owner, position);
+        return card;
     }
 
     public static int GetRemainingQueueCount(ICombatState? combatState, Player? owner) =>
@@ -176,6 +231,7 @@ internal static class AwakenedSpellbook
         if (state.Queue.Count == 0)
         {
             RefillQueue(state, owner);
+            await NotifySpellbookRefreshedAsync(owner, new ThrowingPlayerChoiceContext());
         }
 
         return card;
@@ -233,6 +289,7 @@ internal static class AwakenedSpellbook
         if (state.Queue.Count == 0)
         {
             RefillQueue(state, owner);
+            await NotifySpellbookRefreshedAsync(owner, choiceContext);
         }
 
         return chosen;

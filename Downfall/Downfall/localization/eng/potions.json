@@ -5,5 +5,13 @@
   "DOWNFALL-ECLIPSE.description": "Put [blue]{Cards}[/blue] {Cards:plural:card|cards} from your [gold]Exhaust Pile[/gold] into your [gold]Hand[/gold]. {Cards:plural:It costs|They cost} [blue]0[/blue] this turn.",
   "DOWNFALL-ECLIPSE.selectionScreenPrompt": "Choose a card from your Exhaust Pile to return to your Hand.",
   "DOWNFALL-TONIC.title": "Tonic",
-  "DOWNFALL-TONIC.description": "Gain [blue]{RuggedPower}[/blue] [gold]Rugged[/gold]."
+  "DOWNFALL-TONIC.description": "Gain [blue]{RuggedPower}[/blue] [gold]Rugged[/gold].",
+  "DOWNFALL-CULTISTS_DELIGHT.title": "Cultist's Delight",
+  "DOWNFALL-CULTISTS_DELIGHT.description": "Whenever you play a [gold]Power[/gold] card this combat, gain [blue]{StrengthPower}[/blue] [gold]Strength[/gold]. Add a random [gold]Power[/gold] to your [gold]Hand[/gold] that costs [blue]0[/blue] this turn.",
+  "DOWNFALL-PHASE_SKIP.title": "Ascendant's Drink",
+  "DOWNFALL-PHASE_SKIP.description": "[gold]Awaken[/gold] immediately and [gold]Upgrade[/gold] all cards for the rest of combat.",
+  "DOWNFALL-SACRAMENTAL_WINE.title": "Sacramental Wine",
+  "DOWNFALL-SACRAMENTAL_WINE.description": "Whenever you play a [gold]Power[/gold] card this combat, gain [blue]{Block}[/blue] [gold]Block[/gold]. Add a random [gold]Power[/gold] to your [gold]Hand[/gold] that costs [blue]0[/blue] this turn.",
+  "DOWNFALL-SNECKO_POWERS_POTION.title": "Snecko Essence",
+  "DOWNFALL-SNECKO_POWERS_POTION.description": "Choose [blue]1[/blue] of [blue]3[/blue] random off-class [gold]Powers[/gold] and add {Cards:plural:it|[blue]{}[/blue] copies} to your [gold]Hand[/gold]. {Cards:plural:It costs|They cost} [blue]0[/blue] this turn."
 }

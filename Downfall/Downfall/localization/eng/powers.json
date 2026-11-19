@@ -130,5 +130,8 @@
   "DOWNFALL-INTENSIFY_DEBUFF_POWER.smartDescription": "You cannot [gold]Conjure[/gold] for {Amount:plural:the rest of this turn|the next [blue]{}[/blue] turns}.",
   "DOWNFALL-SPELLBINDER_POWER.title": "Spellbinder",
   "DOWNFALL-SPELLBINDER_POWER.description": "At the start of your turn, [gold]Conjure[/gold].",
-  "DOWNFALL-SPELLBINDER_POWER.smartDescription": "At the start of your turn, [gold]Conjure[/gold]{Amount:plural:| [blue]{}[/blue] times}."
+  "DOWNFALL-SPELLBINDER_POWER.smartDescription": "At the start of your turn, [gold]Conjure[/gold]{Amount:plural:| [blue]{}[/blue] times}.",
+  "DOWNFALL-SACRAMENT_POWER.title": "Sacraments",
+  "DOWNFALL-SACRAMENT_POWER.description": "Whenever you play a [gold]Power[/gold], gain [gold]Block[/gold].",
+  "DOWNFALL-SACRAMENT_POWER.smartDescription": "Whenever you play a [gold]Power[/gold], gain [blue]{Amount}[/blue] [gold]Block[/gold]."
 }

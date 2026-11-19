@@ -1,4 +1,5 @@
 using BaseLib.Abstracts;
+using MegaCrit.Sts2.Core.Helpers;
 
 namespace Downfall.Core;
 
@@ -6,7 +7,7 @@ namespace Downfall.Core;
 public abstract class DownfallRelic : CustomRelicModel
 {
     protected abstract string CharacterKey { get; }
-    protected abstract string IconKey { get; }
+    protected virtual string IconKey => StringHelper.Slugify(GetType().Name).ToLowerInvariant();
 
     public override string PackedIconPath => $"res://Downfall/images/{CharacterKey}/relics/{IconKey}.png";
     protected override string PackedIconOutlinePath => $"res://Downfall/images/{CharacterKey}/relics/{IconKey}_outline.png";

@@ -1,5 +1,6 @@
 using Downfall.Awakened;
 using Downfall.Awakened.Cards;
+using Downfall.Awakened.Potions;
 using Downfall.Awakened.Powers;
 using Downfall.Awakened.Relics;
 using Downfall.Hermit.Powers;
@@ -7,12 +8,18 @@ using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Combat.History.Entries;
 using MegaCrit.Sts2.Core.Commands;
 using MegaCrit.Sts2.Core.Entities.Cards;
+using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Entities.Relics;
 using MegaCrit.Sts2.Core.GameActions.Multiplayer;
+using MegaCrit.Sts2.Core.Map;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Models.Potions;
 using MegaCrit.Sts2.Core.Models.Powers;
+using MegaCrit.Sts2.Core.Nodes;
+using MegaCrit.Sts2.Core.Rooms;
 using MegaCrit.Sts2.Core.Runs;
+using MegaCrit.Sts2.Core.Saves;
+using MegaCrit.Sts2.Core.Unlocks;
 using MegaCrit.Sts2.Core.ValueProps;
 using StsCards = MegaCrit.Sts2.Core.Models.Cards;
 
@@ -932,7 +939,7 @@ internal static class AwakenedTests
         }
         AutoTestAssert.Equal(cBeforeInscribePlus + 1, AwakenedSpellbook.GetConjuresThisCombat(combatState, player), "Inscribe+ Conjured 1 Spell");
         AutoTestAssert.True(pcs.Hand.Cards.OfType<AwakenedSpellCard>().Any(), "Inscribe+ added Conjured Spell to Hand");
-        AwakenedSpellbook.RefreshSpells(combatState, player);
+        await AwakenedSpellbook.RefreshSpellsAsync(combatState, player, ctx);
         AutoTestAssert.Equal(4 + 4, AwakenedSpellbook.GetRemainingQueueCount(combatState, player), "Inscribed copies (2 + 2) persisted across RefreshSpells (total 8)");
 
         // 15. KnifesEdge: gains 2 Strength and adds 2 Voids to Discard Pile.
@@ -1915,5 +1922,397 @@ internal static class AwakenedTests
         }
         AutoTestAssert.True(!CombatManager.Instance.IsInProgress, "Combat finished after killing all enemies");
         AutoTestAssert.Equal(Math.Min(player.Creature.MaxHp, hpBeforeVictory + 8), player.Creature.CurrentHp, "Rebirth AfterCombatEnd healed player by +8 HP on combat victory");
+    }
+
+    public static async Task TestRelicsAndPotionsInCombat()
+    {
+        // Start a fresh run so we can obtain pre-combat relics (MoonTalisman, ShreddedDoll, ShardOfNowak, ZenerDeck)
+        // and verify real BeforeCombatStart / AfterPlayerTurnStart hooks upon entering combat!
+        var player = Player.CreateForNewRun<TheAwakenedOne>(new UnlockState(SaveManager.Instance.Progress), 1uL);
+        var runState = await NGame.Instance!.StartNewSingleplayerRun(
+            player,
+            shouldSave: false,
+            ActModel.GetDefaultList(),
+            Array.Empty<ModifierModel>(),
+            "DFAWK06",
+            GameMode.Standard,
+            isCustomGame: false);
+
+        // 1. MoonTalisman: IsAllowed true; pick the 2nd AwakenedStrike from Deck so we can also test earlier-card index shift!
+        AutoTestAssert.True(ModelDb.Relic<MoonTalisman>().IsAllowed(runState), "MoonTalisman.IsAllowed is true with eligible Deck cards");
+        var starterStrikes = player.Deck.Cards.OfType<AwakenedStrike>().ToList();
+        AutoTestAssert.True(starterStrikes.Count >= 2, "At least 2 AwakenedStrikes in starter Deck");
+        var earlierDeckStrike = starterStrikes[0];
+        var blessedDeckStrike = starterStrikes[1];
+        MoonTalisman moonTalisman;
+        using (DownfallAutoTestRunner.PreferCards(c => ReferenceEquals(c, blessedDeckStrike)))
+        {
+            moonTalisman = await RelicCmd.Obtain<MoonTalisman>(player);
+        }
+        AutoTestAssert.True(moonTalisman.IsBlessedCard(blessedDeckStrike), "MoonTalisman blessed selected Deck Strike");
+
+        // Removing an earlier Deck card must shift BlessedDeckIndex and keep the blessed Strike blessed!
+        int idxBeforeShift = moonTalisman.BlessedDeckIndex;
+        await CardPileCmd.RemoveFromDeck(earlierDeckStrike);
+        AutoTestAssert.Equal(idxBeforeShift - 1, moonTalisman.BlessedDeckIndex, "Removing earlier Deck card shifted MoonTalisman.BlessedDeckIndex down by 1");
+        AutoTestAssert.True(moonTalisman.IsBlessedCard(blessedDeckStrike), "MoonTalisman still blesses the same Strike after earlier removal");
+        AutoTestAssert.Equal(RelicStatus.Normal, moonTalisman.Status, "MoonTalisman stayed Normal after unrelated removal");
+
+        // 2. ZenerDeck obtained BEFORE ShreddedDoll (exercises Must-Fix #1: no duplicate ESP in Cycle 1)!
+        await RelicCmd.Obtain<ZenerDeck>(player);
+
+        // 3. ShreddedDoll: IsAllowed true with RippedDoll, replaces RippedDoll, then IsAllowed false!
+        AutoTestAssert.True(ModelDb.Relic<ShreddedDoll>().IsAllowed(runState), "ShreddedDoll.IsAllowed is true while owning RippedDoll");
+        AutoTestAssert.True(player.Relics.OfType<RippedDoll>().Any(), "Starter RippedDoll present before ShreddedDoll");
+        await RelicCmd.Obtain<ShreddedDoll>(player);
+        AutoTestAssert.True(!player.Relics.OfType<RippedDoll>().Any(), "ShreddedDoll replaced RippedDoll");
+        AutoTestAssert.True(player.Relics.OfType<ShreddedDoll>().Any(), "ShreddedDoll obtained");
+        AutoTestAssert.True(!ModelDb.Relic<ShreddedDoll>().IsAllowed(runState), "ShreddedDoll.IsAllowed is false once RippedDoll is gone");
+
+        // 4. ShardOfNowak (+3 Strength at combat start)!
+        await RelicCmd.Obtain<ShardOfNowak>(player);
+
+        var encounter = ModelDb.Encounter<MegaCrit.Sts2.Core.Models.Encounters.NibbitsWeak>().ToMutable();
+        await RunManager.Instance.EnterRoomDebug(RoomType.Monster, MapPointType.Monster, encounter, showTransition: false);
+        var combatRoom = AutoTestAssert.NotNull(runState.CurrentRoom as CombatRoom, "Entered CombatRoom");
+        var combatState = AutoTestAssert.NotNull(combatRoom.CombatState, "CombatState active");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+
+        var pcs = AutoTestAssert.NotNull(player.PlayerCombatState, "PlayerCombatState");
+        var enemy1 = AutoTestAssert.NotNull(combatState.HittableEnemies.FirstOrDefault(), "First enemy");
+        var enemy2 = await CreatureCmd.Add<MegaCrit.Sts2.Core.Models.Monsters.Nibbit>(combatState);
+        var ctx = new ThrowingPlayerChoiceContext();
+
+        await CreatureCmd.GainMaxHp(enemy1, 1200m);
+        await CreatureCmd.GainMaxHp(enemy2, 1200m);
+
+        // Verify start-of-combat relics fired cleanly AND ZenerDeck did NOT duplicate ESP in Cycle 1!
+        AutoTestAssert.Equal(3, player.Creature.GetPowerAmount<StrengthPower>(), "ShardOfNowak granted +3 Strength at combat start");
+        AutoTestAssert.True(pcs.Hand.Cards.OfType<EspSpell>().Any(), "ZenerDeck Conjured ESP into Hand at combat start");
+        AutoTestAssert.Equal(0, AwakenedSpellbook.GetRemainingQueue(combatState, player).OfType<EspSpell>().Count(),
+            "ZenerDeck did NOT duplicate ESP in Cycle 1 remaining queue");
+        AutoTestAssert.Equal(2, AwakenedSpellbook.GetConjuresThisCombat(combatState, player), "ZenerDeck (1) + ShreddedDoll Turn 1 (1) = 2 Conjures at combat start");
+
+        async Task ResetHandAndEnergy(int energy = 10)
+        {
+            foreach (var c in pcs.Hand.Cards.ToList())
+                await CardPileCmd.Add(c, PileType.Discard);
+            if (pcs.Energy > energy)
+                await PlayerCmd.LoseEnergy(pcs.Energy - energy, player);
+            else if (pcs.Energy < energy)
+                await PlayerCmd.GainEnergy(energy - pcs.Energy, player);
+            if (player.Creature.Block > 0)
+                await CreatureCmd.LoseBlock(ctx, player.Creature, player.Creature.Block, null);
+        }
+
+        // 4. ShardOfNowak keeps +3 Strength on fully blocked hit, loses +3 on first HP loss, and does NOT lose Strength twice!
+        await CreatureCmd.GainBlock(player.Creature, 10m, ValueProp.Unpowered, null);
+        await CreatureCmd.Damage(ctx, player.Creature, 5m, ValueProp.Unpowered, enemy1, null, null);
+        AutoTestAssert.Equal(3, player.Creature.GetPowerAmount<StrengthPower>(), "ShardOfNowak kept +3 Strength on fully blocked hit");
+        await CreatureCmd.Damage(ctx, player.Creature, 1m, ValueProp.Unblockable | ValueProp.Unpowered, null, null, null);
+        AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<StrengthPower>(), "ShardOfNowak removed +3 Strength after losing HP");
+        await CreatureCmd.Damage(ctx, player.Creature, 1m, ValueProp.Unblockable | ValueProp.Unpowered, null, null, null);
+        AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<StrengthPower>(), "ShardOfNowak did NOT remove Strength twice");
+
+        // 5. MoonTalisman: playing blessed card's combat copy Conjures; unblessed Strike does NOT; removing Deck card disables!
+        await ResetHandAndEnergy();
+        var blessedCombatCopy = AutoTestAssert.NotNull(
+            pcs.AllCards.FirstOrDefault(c => ReferenceEquals(c.DeckVersion, blessedDeckStrike)),
+            "Combat copy of blessed Strike exists");
+        var unblessedStrike = combatState.CreateCard<AwakenedStrike>(player);
+        await CardPileCmd.Add(blessedCombatCopy, PileType.Hand);
+        await CardPileCmd.Add(unblessedStrike, PileType.Hand);
+
+        int conjBefore = AwakenedSpellbook.GetConjuresThisCombat(combatState, player);
+        AutoTestAssert.True(blessedCombatCopy.TryManualPlay(enemy1), "Play MoonTalisman-blessed Strike");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(conjBefore + 1, AwakenedSpellbook.GetConjuresThisCombat(combatState, player), "MoonTalisman Conjured when blessed Strike was played");
+
+        conjBefore = AwakenedSpellbook.GetConjuresThisCombat(combatState, player);
+        AutoTestAssert.True(unblessedStrike.TryManualPlay(enemy1), "Play unblessed Strike");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(conjBefore, AwakenedSpellbook.GetConjuresThisCombat(combatState, player), "MoonTalisman did NOT Conjure on unblessed Strike");
+
+        // Removing blessed card from Deck disables MoonTalisman and stops future Conjures!
+        await CardPileCmd.RemoveFromDeck(blessedDeckStrike);
+        AutoTestAssert.Equal(RelicStatus.Disabled, moonTalisman.Status, "Removing blessed card from Deck disabled MoonTalisman");
+        await ResetHandAndEnergy();
+        await CardPileCmd.Add(blessedCombatCopy, PileType.Hand);
+        conjBefore = AwakenedSpellbook.GetConjuresThisCombat(combatState, player);
+        AutoTestAssert.True(blessedCombatCopy.TryManualPlay(enemy1), "Play former blessed Strike after Deck removal");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(conjBefore, AwakenedSpellbook.GetConjuresThisCombat(combatState, player), "Disabled MoonTalisman did NOT Conjure");
+
+        // 6. ShreddedDoll: 1st Spellbook refresh via BirdsEye+ grants +1 Ritual (and refreshes ESP into Cycle 2); 2nd refresh grants 0!
+        await ResetHandAndEnergy();
+        var birdsEye1 = combatState.CreateCard<BirdsEye>(player);
+        CardCmd.Upgrade(birdsEye1);
+        var birdsEye2 = combatState.CreateCard<BirdsEye>(player);
+        CardCmd.Upgrade(birdsEye2);
+        await CardPileCmd.Add(birdsEye1, PileType.Hand);
+        await CardPileCmd.Add(birdsEye2, PileType.Hand);
+        AutoTestAssert.True(birdsEye1.TryManualPlay(null), "Play BirdsEye+ #1 (1st Spellbook refresh)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<RitualPower>(), "ShreddedDoll granted +1 Ritual on 1st Spellbook refresh");
+        AutoTestAssert.True(
+            pcs.Hand.Cards.OfType<EspSpell>().Any() || AwakenedSpellbook.GetRemainingQueue(combatState, player).OfType<EspSpell>().Any(),
+            "ZenerDeck registered ESP into refreshed Spellbook Cycle 2+");
+        AutoTestAssert.True(birdsEye2.TryManualPlay(null), "Play BirdsEye+ #2 (2nd Spellbook refresh)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<RitualPower>(), "ShreddedDoll did NOT grant Ritual on 2nd Spellbook refresh");
+        if (player.Creature.GetPower<RitualPower>() is { } ritClean1) await PowerCmd.Remove(ritClean1);
+
+        // 7. WhiteRibbon + CursedBlessing:
+        //    - Inactive Chant (Victuals after non-Power) grants 4 Block from WhiteRibbon, does NOT advance CursedBlessing!
+        //    - Non-Chant card (AwakenedStrike) does NOT trigger WhiteRibbon!
+        //    - 3 ACTIVE Chants (Ceremony -> Victuals x3) trigger CursedBlessing (+1 Ritual) once; 4th active Chant does NOT!
+        await RelicCmd.Obtain<WhiteRibbon>(player);
+        var cursedBlessing = await RelicCmd.Obtain<CursedBlessing>(player);
+
+        await ResetHandAndEnergy();
+        var nonChantStrike = combatState.CreateCard<AwakenedStrike>(player);
+        await CardPileCmd.Add(nonChantStrike, PileType.Hand);
+        AutoTestAssert.True(nonChantStrike.TryManualPlay(enemy1), "Play non-Chant Strike");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(0, player.Creature.Block, "WhiteRibbon did NOT trigger on non-Chant Strike");
+
+        var inactiveVictuals = combatState.CreateCard<Victuals>(player);
+        await CardPileCmd.Add(inactiveVictuals, PileType.Hand);
+        AutoTestAssert.True(inactiveVictuals.TryManualPlay(null), "Play Victuals with Chant inactive");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(4, player.Creature.Block, "WhiteRibbon granted 4 Block even when Chant was inactive");
+        AutoTestAssert.Equal(0, cursedBlessing.DisplayAmount, "CursedBlessing ignored inactive Chant play");
+
+        for (int i = 1; i <= 4; i++)
+        {
+            await ResetHandAndEnergy();
+            var cer = combatState.CreateCard<Ceremony>(player);
+            var activeVict = combatState.CreateCard<Victuals>(player);
+            await CardPileCmd.Add(cer, PileType.Hand);
+            await CardPileCmd.Add(activeVict, PileType.Hand);
+            AutoTestAssert.True(cer.TryManualPlay(null), $"Play Ceremony #{i} to activate Chant");
+            await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+            AutoTestAssert.True(activeVict.TryManualPlay(null), $"Play active-Chant Victuals #{i}");
+            await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        }
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<RitualPower>(), "CursedBlessing granted +1 Ritual exactly once after 3 active Chants");
+        AutoTestAssert.Equal(RelicStatus.Disabled, cursedBlessing.Status, "CursedBlessing disabled after triggering");
+        if (player.Creature.GetPower<RitualPower>() is { } ritClean2) await PowerCmd.Remove(ritClean2);
+        if (player.Creature.GetPower<StrengthPower>() is { } strClean1) await PowerCmd.Remove(strClean1);
+
+        // 8. CurvedSword (Zetsumei): every 4 Spells played adds a Ceremony to Hand and resets counter (1->2->3->0)!
+        var curvedSword = await RelicCmd.Obtain<CurvedSword>(player);
+        await ResetHandAndEnergy();
+        for (int i = 1; i <= 4; i++)
+        {
+            var spell = combatState.CreateCard<Cryostasis>(player);
+            await CardPileCmd.Add(spell, PileType.Hand);
+            AutoTestAssert.True(spell.TryManualPlay(null), $"Play Cryostasis #{i} for CurvedSword");
+            await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+            if (i < 4)
+            {
+                AutoTestAssert.Equal(i, curvedSword.DisplayAmount, $"CurvedSword DisplayAmount == {i}");
+                AutoTestAssert.Equal(0, pcs.Hand.Cards.OfType<Ceremony>().Count(), $"CurvedSword did not trigger on Spell #{i}");
+            }
+        }
+        AutoTestAssert.Equal(0, curvedSword.DisplayAmount, "CurvedSword DisplayAmount reset to 0 on 4th Spell");
+        AutoTestAssert.Equal(1, pcs.Hand.Cards.OfType<Ceremony>().Count(), "CurvedSword added Ceremony to Hand on 4th Spell");
+
+        // 9. EyeOfTheOccult: Thunderbolt & Darkleech switch TargetType to AllEnemies and hit ALL enemies with TryManualPlay(null)!
+        await RelicCmd.Obtain<EyeOfTheOccult>(player);
+        await ResetHandAndEnergy();
+        var aoeBolt = combatState.CreateCard<Thunderbolt>(player);
+        AutoTestAssert.Equal(TargetType.AllEnemies, aoeBolt.TargetType, "EyeOfTheOccult switched Thunderbolt TargetType to AllEnemies");
+        await CardPileCmd.Add(aoeBolt, PileType.Hand);
+        int e1Hp = enemy1.CurrentHp;
+        int e2Hp = enemy2.CurrentHp;
+        AutoTestAssert.True(aoeBolt.TryManualPlay(null), "Play EyeOfTheOccult Thunderbolt with null target");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(e1Hp - 12, enemy1.CurrentHp, "EyeOfTheOccult Thunderbolt dealt 12 to enemy1");
+        AutoTestAssert.Equal(e2Hp - 12, enemy2.CurrentHp, "EyeOfTheOccult Thunderbolt dealt 12 to enemy2");
+
+        var aoeLeech = combatState.CreateCard<Darkleech>(player);
+        AutoTestAssert.Equal(TargetType.AllEnemies, aoeLeech.TargetType, "EyeOfTheOccult switched Darkleech TargetType to AllEnemies");
+        await CardPileCmd.Add(aoeLeech, PileType.Hand);
+        AutoTestAssert.True(aoeLeech.TryManualPlay(null), "Play EyeOfTheOccult Darkleech with null target");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(1, enemy1.GetPowerAmount<VulnerablePower>(), "EyeOfTheOccult Darkleech applied 1 Vulnerable to enemy1");
+        AutoTestAssert.Equal(1, enemy2.GetPowerAmount<VulnerablePower>(), "EyeOfTheOccult Darkleech applied 1 Vulnerable to enemy2");
+        AutoTestAssert.Equal(4, enemy1.GetPowerAmount<ManaburnPower>(), "EyeOfTheOccult Darkleech applied 4 Manaburn to enemy1");
+        AutoTestAssert.Equal(4, enemy2.GetPowerAmount<ManaburnPower>(), "EyeOfTheOccult Darkleech applied 4 Manaburn to enemy2");
+        if (enemy1.GetPower<VulnerablePower>() is { } v1) await PowerCmd.Remove(v1);
+        if (enemy2.GetPower<VulnerablePower>() is { } v2) await PowerCmd.Remove(v2);
+
+        // 10. TomeOfPortalmancy: player-created Voids apply +2 Manaburn AOE each; enemy-created Void applies 0!
+        await RelicCmd.Obtain<TomeOfPortalmancy>(player);
+        await ResetHandAndEnergy();
+        var knifes = combatState.CreateCard<KnifesEdge>(player);
+        await CardPileCmd.Add(knifes, PileType.Hand);
+        AutoTestAssert.True(knifes.TryManualPlay(null), "Play KnifesEdge (creates 2 Voids) with TomeOfPortalmancy");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(8, enemy1.GetPowerAmount<ManaburnPower>(), "TomeOfPortalmancy added 2x2 = +4 Manaburn to enemy1 (4 -> 8)");
+        AutoTestAssert.Equal(8, enemy2.GetPowerAmount<ManaburnPower>(), "TomeOfPortalmancy added 2x2 = +4 Manaburn to enemy2 (4 -> 8)");
+
+        var enemyVoid = combatState.CreateCard<StsCards.Void>(player);
+        await CardPileCmd.AddGeneratedCardToCombat(enemyVoid, PileType.Discard, creator: null);
+        AutoTestAssert.Equal(8, enemy1.GetPowerAmount<ManaburnPower>(), "Enemy-created Void did NOT trigger TomeOfPortalmancy");
+        if (player.Creature.GetPower<StrengthPower>() is { } strClean2) await PowerCmd.Remove(strClean2);
+
+        // 11. StrengthBooster (+25% Manaburn damage) + AbyssBlade (1st Void drain per turn refunds +1 Energy & draws 1):
+        await RelicCmd.Obtain<StrengthBooster>(player);
+        var abyssBlade = await RelicCmd.Obtain<AbyssBlade>(player);
+        await PowerCmd.Apply<ManaburnPower>(ctx, enemy1, 4m, player.Creature, null); // enemy1 now has 12 Manaburn -> 12 + 3 = 15 dmg!
+
+        await ResetHandAndEnergy(energy: 5);
+        await CardPileCmd.Add(combatState.CreateCard<AwakenedDefend>(player), PileType.Draw, CardPilePosition.Top);
+        var drainVoid1 = combatState.CreateCard<StsCards.Void>(player);
+        await CardPileCmd.Add(drainVoid1, PileType.Draw, CardPilePosition.Top);
+        e1Hp = enemy1.CurrentHp;
+        await CardPileCmd.Draw(ctx, 1m, player);
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(e1Hp - 15, enemy1.CurrentHp, "StrengthBooster boosted 12 Manaburn by +25% to 15 damage");
+        AutoTestAssert.Equal(5, pcs.Energy, "AbyssBlade refunded 1 Energy on 1st Drain this turn (5 - 1 + 1 = 5)");
+        AutoTestAssert.Equal(2, pcs.Hand.Cards.Count, "AbyssBlade drew 1 extra card on 1st Drain (Void + Defend = 2)");
+        AutoTestAssert.Equal(RelicStatus.Disabled, abyssBlade.Status, "AbyssBlade disabled after 1st Drain this turn");
+
+        // 2nd Drain on the same turn must NOT trigger AbyssBlade again!
+        var drainVoid2 = combatState.CreateCard<StsCards.Void>(player);
+        await CardPileCmd.Add(drainVoid2, PileType.Draw, CardPilePosition.Top);
+        int handBefore2ndDrain = pcs.Hand.Cards.Count;
+        await CardPileCmd.Draw(ctx, 1m, player);
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(4, pcs.Energy, "AbyssBlade did NOT refund Energy on 2nd Drain this turn (5 -> 4)");
+        AutoTestAssert.Equal(handBefore2ndDrain + 1, pcs.Hand.Cards.Count, "AbyssBlade did NOT draw extra card on 2nd Drain");
+
+        // 12. HexxBomb (Manabomb): when an enemy with Manaburn dies, transfer its Manaburn to a random living enemy!
+        await RelicCmd.Obtain<HexxBomb>(player);
+        var enemy3 = await CreatureCmd.Add<MegaCrit.Sts2.Core.Models.Monsters.Nibbit>(combatState);
+        await PowerCmd.Apply<ManaburnPower>(ctx, enemy3, 7m, player.Creature, null);
+        int totalMbBefore = enemy1.GetPowerAmount<ManaburnPower>() + enemy2.GetPowerAmount<ManaburnPower>();
+        await CreatureCmd.Damage(ctx, enemy3, enemy3.CurrentHp + 50, ValueProp.Unblockable | ValueProp.Unpowered, player.Creature, null, null);
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.True(enemy3.IsDead, "enemy3 died for HexxBomb check");
+        AutoTestAssert.Equal(totalMbBefore + 7, enemy1.GetPowerAmount<ManaburnPower>() + enemy2.GetPowerAmount<ManaburnPower>(),
+            "HexxBomb transferred 7 Manaburn from dying enemy3 to a living enemy");
+
+        // 13. CawingCask + ALL 4 Awakened Potions (SacramentalWine + SacramentPower, CultistsDelight, SneckoPowersPotion, PhaseSkip):
+        await RelicCmd.Obtain<CawingCask>(player);
+        foreach (var existing in player.Potions.ToList())
+            await PotionCmd.Discard(existing);
+
+        // (a) SacramentalWine + SacramentPower
+        await ResetHandAndEnergy();
+        var wine = ModelDb.Potion<SacramentalWine>().ToMutable();
+        await PotionCmd.TryToProcure(wine, player);
+        await wine.OnUseWrapper(ctx, player.Creature);
+        AutoTestAssert.Equal(3, player.Creature.GetPowerAmount<SacramentPower>(), "SacramentalWine applied SacramentPower(3)");
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<RitualPower>(), "CawingCask granted +1 Ritual on potion #1");
+        var winePowerCard = AutoTestAssert.NotNull(
+            pcs.Hand.Cards.FirstOrDefault(c => c.Type == CardType.Power),
+            "SacramentalWine added a Power card to Hand");
+        AutoTestAssert.Equal(0, winePowerCard.EnergyCost.GetWithModifiers(CostModifiers.All), "SacramentalWine Power costs 0 this turn");
+
+        var sacCeremony = combatState.CreateCard<Ceremony>(player);
+        await CardPileCmd.Add(sacCeremony, PileType.Hand);
+        AutoTestAssert.True(sacCeremony.TryManualPlay(null), "Play Ceremony to trigger SacramentPower");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(3, player.Creature.Block, "SacramentPower granted 3 Block on Power play");
+
+        // (b) CultistsDelight
+        await ResetHandAndEnergy();
+        if (player.Creature.GetPower<StrengthPower>() is { } strClean3) await PowerCmd.Remove(strClean3);
+        var delight = ModelDb.Potion<CultistsDelight>().ToMutable();
+        await PotionCmd.TryToProcure(delight, player);
+        await delight.OnUseWrapper(ctx, player.Creature);
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<AwakenedCuriosityPower>(), "CultistsDelight applied AwakenedCuriosityPower(1)");
+        AutoTestAssert.Equal(2, player.Creature.GetPowerAmount<RitualPower>(), "CawingCask granted +1 Ritual on potion #2 (1 -> 2)");
+        var delightPowerCard = AutoTestAssert.NotNull(
+            pcs.Hand.Cards.FirstOrDefault(c => c.Type == CardType.Power),
+            "CultistsDelight added a Power card to Hand");
+        AutoTestAssert.Equal(0, delightPowerCard.EnergyCost.GetWithModifiers(CostModifiers.All), "CultistsDelight Power costs 0 this turn");
+
+        // (c) SneckoPowersPotion
+        await ResetHandAndEnergy();
+        var sneckoPot = ModelDb.Potion<SneckoPowersPotion>().ToMutable();
+        await PotionCmd.TryToProcure(sneckoPot, player);
+        await sneckoPot.OnUseWrapper(ctx, player.Creature);
+        AutoTestAssert.Equal(3, player.Creature.GetPowerAmount<RitualPower>(), "CawingCask granted +1 Ritual on potion #3 (2 -> 3)");
+        var offClassPower = AutoTestAssert.NotNull(
+            pcs.Hand.Cards.FirstOrDefault(c => c.Type == CardType.Power),
+            "SneckoPowersPotion added an off-class Power to Hand");
+        AutoTestAssert.True(offClassPower.Pool != player.Character.CardPool, "SneckoPowersPotion card is strictly off-class");
+        AutoTestAssert.Equal(0, offClassPower.EnergyCost.GetWithModifiers(CostModifiers.All), "SneckoPowersPotion Power costs 0 this turn");
+
+        // (d) PhaseSkip: Awakens immediately and Upgrades all upgradable cards in combat!
+        await ResetHandAndEnergy();
+        AutoTestAssert.True(!AwakenedSpellbook.IsAwakened(combatState, player), "Player is NOT yet Awakened before PhaseSkip");
+        var unupgradedCheck = combatState.CreateCard<AwakenedStrike>(player);
+        await CardPileCmd.Add(unupgradedCheck, PileType.Hand);
+        AutoTestAssert.True(!unupgradedCheck.IsUpgraded, "Check Strike starts unupgraded");
+        var phaseSkip = ModelDb.Potion<PhaseSkip>().ToMutable();
+        await PotionCmd.TryToProcure(phaseSkip, player);
+        await phaseSkip.OnUseWrapper(ctx, player.Creature);
+        AutoTestAssert.True(AwakenedSpellbook.IsAwakened(combatState, player), "PhaseSkip Awakened immediately");
+        AutoTestAssert.True(unupgradedCheck.IsUpgraded, "PhaseSkip upgraded cards in combat");
+        AutoTestAssert.Equal(4, player.Creature.GetPowerAmount<RitualPower>(), "CawingCask granted +1 Ritual on potion #4 (3 -> 4)");
+
+        // Clean up Ritual/Curiosity/Sacrament/Strength/Manaburn for crisp cross-turn assertions.
+        if (player.Creature.GetPower<RitualPower>() is { } ritClean3) await PowerCmd.Remove(ritClean3);
+        if (player.Creature.GetPower<AwakenedCuriosityPower>() is { } curClean) await PowerCmd.Remove(curClean);
+        if (player.Creature.GetPower<SacramentPower>() is { } sacClean) await PowerCmd.Remove(sacClean);
+        if (player.Creature.GetPower<StrengthPower>() is { } strClean4) await PowerCmd.Remove(strClean4);
+        if (enemy1.GetPower<ManaburnPower>() is { } mbClean1) await PowerCmd.Remove(mbClean1);
+        if (enemy2.GetPower<ManaburnPower>() is { } mbClean2) await PowerCmd.Remove(mbClean2);
+
+        // 14. Cross-turn tests: DeadBird + MiniBlackHole + VioletPlumage + AbyssBlade reset!
+        await RelicCmd.Obtain<DeadBird>(player);
+        await RelicCmd.Obtain<MiniBlackHole>(player);
+        var violetPlumage = await RelicCmd.Obtain<VioletPlumage>(player);
+
+        // Make enemy2 strictly lower HP than enemy1!
+        if (enemy2.CurrentHp >= enemy1.CurrentHp)
+        {
+            await CreatureCmd.Damage(ctx, enemy2, enemy2.CurrentHp - enemy1.CurrentHp + 20, ValueProp.Unblockable | ValueProp.Unpowered, null, null, null);
+        }
+        // Negative Strength (-10) to verify DeadBird's minimum damage floor = 4!
+        await PowerCmd.Apply<StrengthPower>(ctx, player.Creature, -10m, player.Creature, null);
+        await PowerCmd.Apply<StrengthPower>(ctx, enemy1, -50m, enemy1, null);
+        await PowerCmd.Apply<StrengthPower>(ctx, enemy2, -50m, enemy2, null);
+
+        // End Turn 1 with 2 excess Energy (VioletPlumage triggers!) AND Powers were already played this turn (MiniBlackHole does NOT!).
+        await ResetHandAndEnergy(energy: 2);
+        for (int i = 0; i < 10; i++)
+            await CardPileCmd.Add(combatState.CreateCard<AwakenedDefend>(player), PileType.Draw, CardPilePosition.Top);
+        e1Hp = enemy1.CurrentHp;
+        e2Hp = enemy2.CurrentHp;
+        int conjBeforeR2 = AwakenedSpellbook.GetConjuresThisCombat(combatState, player);
+        await DownfallAutoTestRunner.EndTurnAndWaitForRoundAsync(player, 2);
+
+        AutoTestAssert.Equal(e1Hp, enemy1.CurrentHp, "DeadBird ignored higher-HP enemy1");
+        AutoTestAssert.Equal(e2Hp - 4, enemy2.CurrentHp, "DeadBird dealt floor 4 damage to lowest-HP enemy2 even at -10 Strength");
+        AutoTestAssert.Equal(RelicStatus.Disabled, violetPlumage.Status, "VioletPlumage disabled after firing once");
+        AutoTestAssert.Equal(RelicStatus.Normal, abyssBlade.Status, "AbyssBlade reset to Normal on Turn 2");
+        AutoTestAssert.Equal(conjBeforeR2 + 1, AwakenedSpellbook.GetConjuresThisCombat(combatState, player), "ShreddedDoll Conjured on Turn 2 start");
+        // Hand should have 5 (normal draw) + 3 (VioletPlumage) + 1 (ShreddedDoll Conjure) = 9 cards (0 from MiniBlackHole)!
+        AutoTestAssert.Equal(9, pcs.Hand.Cards.Count, "Turn 2 Hand = 5 base + 3 VioletPlumage + 1 ShreddedDoll Conjure (MiniBlackHole did NOT fire after Turn 1 Powers)");
+
+        // Turn 2: +5 Strength (DeadBird deals 4+5=9!), play NO Powers (MiniBlackHole fires!), keep 2 excess Energy (VioletPlumage must NOT fire again!),
+        // AND apply HermitDrainedPower(1) to verify AbyssBlade resets in BeforeSideTurnStart BEFORE AfterEnergyReset on Round 3!
+        if (player.Creature.GetPower<StrengthPower>() is { } negStr) await PowerCmd.Remove(negStr);
+        await PowerCmd.Apply<StrengthPower>(ctx, player.Creature, 5m, player.Creature, null);
+        await PowerCmd.Apply<HermitDrainedPower>(ctx, player.Creature, 1m, player.Creature, null);
+        await ResetHandAndEnergy(energy: 2);
+        for (int i = 0; i < 10; i++)
+            await CardPileCmd.Add(combatState.CreateCard<AwakenedDefend>(player), PileType.Draw, CardPilePosition.Top);
+        e1Hp = enemy1.CurrentHp;
+        e2Hp = enemy2.CurrentHp;
+        await DownfallAutoTestRunner.EndTurnAndWaitForRoundAsync(player, 3);
+
+        AutoTestAssert.Equal(e1Hp, enemy1.CurrentHp, "DeadBird still targeted lowest-HP enemy2 on Turn 2");
+        AutoTestAssert.Equal(e2Hp - 9, enemy2.CurrentHp, "DeadBird dealt 4 + 5 Strength = 9 damage on Turn 2");
+        AutoTestAssert.Equal(player.MaxEnergy, pcs.Energy, "AbyssBlade refunded HermitDrainedPower Energy drain at Round 3 start");
+        AutoTestAssert.Equal(RelicStatus.Disabled, abyssBlade.Status, "AbyssBlade disabled after refunding Round 3 HermitDrainedPower");
+        // Hand should have 5 (normal draw) + 1 (MiniBlackHole) + 1 (ShreddedDoll Conjure) + 1 (AbyssBlade draw) = 8 cards (VioletPlumage did NOT fire twice)!
+        AutoTestAssert.Equal(8, pcs.Hand.Cards.Count, "Turn 3 Hand = 5 base + 1 MiniBlackHole + 1 ShreddedDoll Conjure + 1 AbyssBlade draw (VioletPlumage did NOT fire a 2nd time)");
     }
 }
