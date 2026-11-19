@@ -5,6 +5,7 @@ using Packmaster.Cards.EnergyAndEcho;
 using Packmaster.Cards.EvenOdd;
 using Packmaster.Cards.HighEnergy;
 using Packmaster.Cards.Quiet;
+using Packmaster.Cards.Shaman;
 using Packmaster.Cards.Warlock;
 
 namespace Packmaster.Packs;
@@ -19,6 +20,7 @@ public static class PackDefinitions
     public const string HighEnergyId = "HighEnergy";
     public const string BatterId = "Batter";
     public const string EnergyAndEchoId = "EnergyAndEcho";
+    public const string ShamanId = "Shaman";
 
     public static void RegisterAll()
     {
@@ -156,6 +158,23 @@ public static class PackDefinitions
                 typeof(Slowing),
                 typeof(TearApart),
                 typeof(Voices),
+            ]));
+
+        PackRegistry.Register(new PackDefinition(
+            Id: ShamanId,
+            AlwaysInclude: false,
+            CardTypes:
+            [
+                typeof(FieryMantle),
+                typeof(FlameBlast),
+                typeof(Flare),
+                typeof(FreezeAndBurn),
+                typeof(Frostfire),
+                typeof(FueledByEmbers),
+                typeof(IceWall),
+                typeof(Pyromastery),
+                typeof(ReadTheFlames),
+                typeof(SnowMelt),
             ]));
     }
 }

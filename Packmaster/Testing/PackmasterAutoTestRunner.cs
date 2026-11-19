@@ -12,6 +12,7 @@ using MegaCrit.Sts2.Core.Factories;
 using MegaCrit.Sts2.Core.GameActions;
 using MegaCrit.Sts2.Core.GameActions.Multiplayer;
 using MegaCrit.Sts2.Core.Helpers;
+using MegaCrit.Sts2.Core.HoverTips;
 using MegaCrit.Sts2.Core.Localization;
 using MegaCrit.Sts2.Core.Map;
 using MegaCrit.Sts2.Core.Models;
@@ -34,6 +35,7 @@ using Packmaster.Cards.EnergyAndEcho;
 using Packmaster.Cards.EvenOdd;
 using Packmaster.Cards.HighEnergy;
 using Packmaster.Cards.Quiet;
+using Packmaster.Cards.Shaman;
 using Packmaster.Cards.Warlock;
 using Packmaster.Character;
 using Packmaster.Config;
@@ -117,6 +119,7 @@ internal static class PackmasterAutoTestRunner
                 ("HighEnergyPackInCombat", TestHighEnergyPackInCombat),
                 ("BatterPackInCombat", TestBatterPackInCombat),
                 ("EnergyAndEchoPackInCombat", TestEnergyAndEchoPackInCombat),
+                ("ShamanPackInCombat", TestShamanPackInCombat),
             ];
 
             foreach (var (name, run) in tests)
@@ -2065,8 +2068,8 @@ internal static class PackmasterAutoTestRunner
         bool savedAllPacks = PackmasterConfig.AllPacksMode;
         int savedPacksPerRun = PackmasterConfig.PacksPerRun;
         PackmasterConfig.AllPacksMode = false;
-        // With 7 registered packs and PacksPerRun = 5: CoreSet (1) + 1 random + 3 interactive choice picks = 5 packs!
-        PackmasterConfig.PacksPerRun = 5;
+        // With >= 9 registered packs and default PacksPerRun = 7: CoreSet (1) + 3 random + 3 interactive picks (3 options each) = 7 packs!
+        PackmasterConfig.PacksPerRun = 7;
         try
         {
             var player = Player.CreateForNewRun<ThePackmaster>(new UnlockState(SaveManager.Instance.Progress), 1uL);
@@ -2110,10 +2113,10 @@ internal static class PackmasterAutoTestRunner
                 await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
             }
 
-            // Draft complete! Packs persisted, exact count = 5 (CoreSet + 1 random + 3 picked), and Neow now shows normal blessings!
+            // Draft complete! Packs persisted, exact count = 7 (CoreSet + 3 random + 3 picked), and Neow now shows normal blessings!
             AutoTestAssert.True(PackRunState.HasPersistedActivePacks(runState), "Active packs persisted after final pick");
             var activePacks = AutoTestAssert.NotNull(PackRunState.GetActivePackIds(runState), "Final drafted pack set");
-            AutoTestAssert.Equal(5, activePacks.Count, "Final drafted pack count matches PacksPerRun (5)");
+            AutoTestAssert.Equal(7, activePacks.Count, "Final drafted pack count matches default PacksPerRun (7)");
             AutoTestAssert.True(activePacks.Contains(PackDefinitions.CoreSetId), "Final drafted packs include CoreSet");
             AutoTestAssert.True(pickedIds.All(activePacks.Contains), "Final drafted packs include all 3 interactively picked packs");
             AutoTestAssert.True(neow.CurrentOptions.Count > 0, "Neow now presents normal blessing options");
@@ -2536,6 +2539,189 @@ internal static class PackmasterAutoTestRunner
         AutoTestAssert.Equal(energyBeforeTear - 1, pcs.Energy, "TearApart lethal net Energy = -2 cost + 1 kill refund = -1");
         AutoTestAssert.True(pcs.Hand.Cards.OfType<TearApart>().Any(c => c.Keywords.Contains(CardKeyword.Exhaust) && c.Keywords.Contains(CardKeyword.Ethereal)),
             "TearApart Echo added to hand after lethal kill");
+    }
+
+    private static async Task TestShamanPackInCombat()
+    {
+        var (player, _, combatState) = await StartCombatAsync("PMSHAM01");
+        var pcs = AutoTestAssert.NotNull(player.PlayerCombatState, "PlayerCombatState");
+        var enemy = AutoTestAssert.NotNull(combatState.HittableEnemies.FirstOrDefault(), "First hittable enemy");
+        var enemy2 = await CreatureCmd.Add<MegaCrit.Sts2.Core.Models.Monsters.Nibbit>(combatState);
+
+        await CreatureCmd.GainMaxHp(enemy, 800m);
+        await CreatureCmd.GainMaxHp(enemy2, 800m);
+
+        foreach (var c in pcs.Hand.Cards.ToList())
+            await CardPileCmd.Add(c, PileType.Discard);
+        await PlayerCmd.GainEnergy(15, player);
+
+        // 1. Flare (0 cost -> 2 dmg + 2 Ignite).
+        var flare = combatState.CreateCard<Flare>(player);
+        await CardPileCmd.Add(flare, PileType.Hand);
+        int hpBeforeFlare = enemy.CurrentHp + enemy.Block;
+        AutoTestAssert.True(flare.TryManualPlay(enemy), "Play Flare");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(hpBeforeFlare - 2, enemy.CurrentHp + enemy.Block, "Flare dealt 2 damage");
+        AutoTestAssert.Equal(2, enemy.GetPowerAmount<IgnitePower>(), "Flare applied 2 Ignite");
+
+        // 2. Pyromastery (0 cost -> +1 bonus Ignite per application).
+        var pyromastery = combatState.CreateCard<Pyromastery>(player);
+        await CardPileCmd.Add(pyromastery, PileType.Hand);
+        AutoTestAssert.True(pyromastery.TryManualPlay(null), "Play Pyromastery");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<PyromasteryPower>(), "PyromasteryPower(1) applied");
+
+        // 3. FlameBlast #1 (no Vulnerable -> 4+1 = 5 Ignite, then 2 Vulnerable -> total 7 Ignite).
+        var flameBlast1 = combatState.CreateCard<FlameBlast>(player);
+        await CardPileCmd.Add(flameBlast1, PileType.Hand);
+        AutoTestAssert.True(flameBlast1.TryManualPlay(enemy), "Play FlameBlast #1 (no Vulnerable)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(7, enemy.GetPowerAmount<IgnitePower>(), "FlameBlast #1 applied 4+1 = 5 Ignite (total 7)");
+        AutoTestAssert.Equal(2, enemy.GetPowerAmount<VulnerablePower>(), "FlameBlast #1 applied 2 Vulnerable");
+
+        // 4. FlameBlast #2 (has Vulnerable -> applies 4+1 TWICE = +10 Ignite -> total 17 Ignite!).
+        var flameBlast2 = combatState.CreateCard<FlameBlast>(player);
+        await CardPileCmd.Add(flameBlast2, PileType.Hand);
+        AutoTestAssert.True(flameBlast2.TryManualPlay(enemy), "Play FlameBlast #2 (with Vulnerable)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(17, enemy.GetPowerAmount<IgnitePower>(), "FlameBlast #2 applied 5x2 = 10 Ignite (total 17)");
+
+        // 5. FadingEmber (0 cost Token, Exhaust -> 2+1 = 3 Ignite -> total 20 Ignite).
+        var ember = combatState.CreateCard<FadingEmber>(player);
+        await CardPileCmd.Add(ember, PileType.Hand);
+        AutoTestAssert.True(ember.TryManualPlay(enemy), "Play FadingEmber");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(20, enemy.GetPowerAmount<IgnitePower>(), "FadingEmber applied 2+1 = 3 Ignite (total 20)");
+        AutoTestAssert.True(pcs.ExhaustPile.Cards.Contains(ember), "FadingEmber exhausted");
+
+        // 6. Frostfire (0 cost Exhaust -> 1+1 = 2 Ignite & 1 Weak to ALL enemies).
+        var frostfire = combatState.CreateCard<Frostfire>(player);
+        await CardPileCmd.Add(frostfire, PileType.Hand);
+        AutoTestAssert.True(frostfire.TryManualPlay(null), "Play Frostfire");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(22, enemy.GetPowerAmount<IgnitePower>(), "Frostfire applied 2 Ignite to enemy 1 (total 22)");
+        AutoTestAssert.Equal(2, enemy2.GetPowerAmount<IgnitePower>(), "Frostfire applied 2 Ignite to enemy 2");
+        AutoTestAssert.Equal(1, enemy.GetPowerAmount<WeakPower>(), "Frostfire applied 1 Weak to enemy 1");
+        AutoTestAssert.Equal(1, enemy2.GetPowerAmount<WeakPower>(), "Frostfire applied 1 Weak to enemy 2");
+        AutoTestAssert.True(pcs.ExhaustPile.Cards.Contains(frostfire), "Frostfire exhausted");
+
+        // 7. ReadTheFlames (draw 3, Scry 2 via BaseLib ScryCmd, shuffle FadingEmber into draw pile).
+        var readFlames = combatState.CreateCard<ReadTheFlames>(player);
+        AutoTestAssert.True(
+            readFlames.HoverTips.Any(t => t is HoverTip ht && (ht.Title?.Contains("Scry", StringComparison.OrdinalIgnoreCase) ?? false)),
+            "ReadTheFlames includes BaseLib Scry HoverTip");
+        // Ensure >= 6 cards in draw pile so Draw 3 + Scry 2 deterministically inspects 2 cards and discards 1!
+        while (pcs.DrawPile.Cards.Count < 6)
+        {
+            await CardPileCmd.Add(combatState.CreateCard<PackmasterStrike>(player), PileType.Draw);
+        }
+        await CardPileCmd.Add(readFlames, PileType.Hand);
+        int handBeforeRead = pcs.Hand.Cards.Count;
+        int discardBeforeRead = pcs.DiscardPile.Cards.Count;
+        int drawEmbersBefore = pcs.DrawPile.Cards.Count(c => c is FadingEmber);
+        var savedSelector = _activeCardSelector;
+        _activeCardSelector = new TakeNCardSelector(1);
+        try
+        {
+            AutoTestAssert.True(readFlames.TryManualPlay(null), "Play ReadTheFlames");
+            await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        }
+        finally
+        {
+            _activeCardSelector = savedSelector;
+        }
+        AutoTestAssert.Equal(handBeforeRead - 1 + 3, pcs.Hand.Cards.Count, "ReadTheFlames drew 3 cards");
+        // Discard grew by +1 (ReadTheFlames itself) + 1 (Scry discarded 1 card) = +2!
+        AutoTestAssert.Equal(discardBeforeRead + 2, pcs.DiscardPile.Cards.Count, "ReadTheFlames Scry 2 discarded 1 card");
+        AutoTestAssert.Equal(drawEmbersBefore + 1, pcs.DrawPile.Cards.Count(c => c is FadingEmber), "ReadTheFlames shuffled 1 FadingEmber into draw pile");
+
+        // 8. SnowMelt (Ethereal; upgrade removes Ethereal -> draw 2 + DrawCardsNextTurnPower(2)).
+        var snowMelt = combatState.CreateCard<SnowMelt>(player);
+        AutoTestAssert.True(snowMelt.Keywords.Contains(CardKeyword.Ethereal), "Unupgraded SnowMelt is Ethereal");
+        CardCmd.Upgrade(snowMelt);
+        AutoTestAssert.True(!snowMelt.Keywords.Contains(CardKeyword.Ethereal), "Upgraded SnowMelt+ removes Ethereal");
+        await CardPileCmd.Add(snowMelt, PileType.Hand);
+        AutoTestAssert.True(snowMelt.TryManualPlay(null), "Play SnowMelt+");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(2, player.Creature.GetPowerAmount<DrawCardsNextTurnPower>(), "SnowMelt applied DrawCardsNextTurnPower(2)");
+
+        // 9. IceWall (7 Block + BlockNextTurnPower(7) + Dazed on TOP of draw pile!).
+        var iceWall = combatState.CreateCard<IceWall>(player);
+        await CardPileCmd.Add(iceWall, PileType.Hand);
+        int blockBeforeIceWall = player.Creature.Block;
+        AutoTestAssert.True(iceWall.TryManualPlay(null), "Play IceWall");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(blockBeforeIceWall + 7, player.Creature.Block, "IceWall gained 7 Block");
+        AutoTestAssert.Equal(7, player.Creature.GetPowerAmount<BlockNextTurnPower>(), "IceWall applied BlockNextTurnPower(7)");
+        AutoTestAssert.True(pcs.DrawPile.Cards.FirstOrDefault() is MegaCrit.Sts2.Core.Models.Cards.Dazed, "IceWall placed Dazed on top of draw pile");
+
+        // 10. FieryMantle (12 Block + FieryMantlePower(2)), FreezeAndBurn (ALL enemies -2 temp Str + FreezeAndBurnPower(10)), FueledByEmbers (Innate on upgrade + FueledByEmbersPower(1)).
+        var fieryMantle = combatState.CreateCard<FieryMantle>(player);
+        var freezeAndBurn = combatState.CreateCard<FreezeAndBurn>(player);
+        var fueledByEmbers = combatState.CreateCard<FueledByEmbers>(player);
+        CardCmd.Upgrade(fueledByEmbers);
+        AutoTestAssert.True(fueledByEmbers.Keywords.Contains(CardKeyword.Innate), "Upgraded FueledByEmbers+ is Innate");
+        await CardPileCmd.Add(fieryMantle, PileType.Hand);
+        await CardPileCmd.Add(freezeAndBurn, PileType.Hand);
+        await CardPileCmd.Add(fueledByEmbers, PileType.Hand);
+
+        AutoTestAssert.True(fieryMantle.TryManualPlay(null), "Play FieryMantle");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(2, player.Creature.GetPowerAmount<FieryMantlePower>(), "FieryMantlePower(2) applied");
+
+        AutoTestAssert.True(freezeAndBurn.TryManualPlay(null), "Play FreezeAndBurn");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(-2, enemy.GetPowerAmount<StrengthPower>(), "FreezeAndBurn reduced enemy 1 Strength by 2");
+        AutoTestAssert.Equal(-2, enemy2.GetPowerAmount<StrengthPower>(), "FreezeAndBurn reduced enemy 2 Strength by 2");
+        AutoTestAssert.Equal(10, player.Creature.GetPowerAmount<FreezeAndBurnPower>(), "FreezeAndBurnPower(10) applied");
+        AutoTestAssert.True(pcs.ExhaustPile.Cards.Contains(freezeAndBurn), "FreezeAndBurn exhausted");
+
+        AutoTestAssert.True(fueledByEmbers.TryManualPlay(null), "Play FueledByEmbers+");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<FueledByEmbersPower>(), "FueledByEmbersPower(1) applied");
+
+        // Also apply 3 Ignite to the player to verify player-side Ignite deals unblockable HP loss at end of player turn!
+        await PowerCmd.Apply<IgnitePower>(new ThrowingPlayerChoiceContext(), player.Creature, 3m, enemy, null);
+        int playerHpBeforeTurn2 = player.Creature.CurrentHp;
+
+        // Record enemy HP before Turn 2:
+        // On player turn end: player takes 3 Ignite HP loss through Block!
+        // On enemy turn: enemy 1 takes 22 Ignite HP loss (does NOT decay!), enemy 2 takes 2 Ignite HP loss.
+        // Enemies attack player -> FieryMantlePower triggers (+2+1 = +3 Ignite on attacker!) and expires!
+        // Enemy temp Strength restores to 0 at end of enemy turn!
+        // On Turn 2 start:
+        // - IceWall BlockNextTurnPower grants 7 Block!
+        // - FreezeAndBurnPower deals 10 AoE attack damage (enemy 1 has Vulnerable -> 15 dmg, enemy 2 -> 10 dmg) and removes itself!
+        // - FueledByEmbersPower draws +1, adds 1 FadingEmber to hand and 1 to draw pile!
+        int enemy1HpBeforeTurn2 = enemy.CurrentHp;
+        int enemy2HpBeforeTurn2 = enemy2.CurrentHp;
+        await EndTurnAndWaitForRoundAsync(player, 2);
+
+        AutoTestAssert.Equal(playerHpBeforeTurn2 - 3, player.Creature.CurrentHp, "Player IgnitePower dealt 3 unblockable HP loss through Block at end of turn");
+        AutoTestAssert.Equal(7, player.Creature.Block, "IceWall BlockNextTurnPower granted 7 Block on Turn 2");
+        AutoTestAssert.True(pcs.Hand.Cards.Any(c => c is MegaCrit.Sts2.Core.Models.Cards.Dazed), "IceWall Dazed on top of draw pile was drawn on Turn 2");
+        AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<FieryMantlePower>(), "FieryMantlePower expired after enemy turn");
+        AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<FreezeAndBurnPower>(), "FreezeAndBurnPower removed after firing");
+        AutoTestAssert.Equal(0, enemy.GetPowerAmount<PiercingWailPower>(), "Enemy 1 PiercingWailPower expired after enemy turn");
+        AutoTestAssert.Equal(0, enemy2.GetPowerAmount<PiercingWailPower>(), "Enemy 2 PiercingWailPower expired after enemy turn");
+        AutoTestAssert.Equal(0, enemy.GetPowerAmount<StrengthPower>(), "Enemy 1 temporary Strength restored after enemy turn");
+        AutoTestAssert.True(enemy2.GetPowerAmount<StrengthPower>() >= 0, "Enemy 2 temporary Strength restored after enemy turn (may also gain Strength from Hiss)");
+        // Enemy 1 took 22 Ignite HP loss + 15 FreezeAndBurn (10 * 1.5 Vulnerable) = 37 HP loss!
+        AutoTestAssert.Equal(enemy1HpBeforeTurn2 - 37, enemy.CurrentHp, "Enemy 1 took 22 Ignite + 15 Vulnerable FreezeAndBurn = 37 damage");
+        // Enemy 2 took 2 Ignite HP loss + 10 FreezeAndBurn = 12 HP loss!
+        AutoTestAssert.Equal(enemy2HpBeforeTurn2 - 12, enemy2.CurrentHp, "Enemy 2 took 2 Ignite + 10 FreezeAndBurn = 12 damage");
+        // Ignite did NOT decay, and at least one enemy attacked triggering FieryMantle (+3 Ignite)!
+        AutoTestAssert.True(enemy.GetPowerAmount<IgnitePower>() >= 22, "Enemy 1 Ignite did not decay (>= 22)");
+        AutoTestAssert.True(enemy.GetPowerAmount<IgnitePower>() == 25 || enemy2.GetPowerAmount<IgnitePower>() == 5,
+            "FieryMantle applied 2+1 = 3 Ignite to attacking enemy");
+        int totalNonExhaustEmbers = pcs.Hand.Cards.Count(c => c is FadingEmber)
+            + pcs.DrawPile.Cards.Count(c => c is FadingEmber)
+            + pcs.DiscardPile.Cards.Count(c => c is FadingEmber);
+        AutoTestAssert.Equal(3, totalNonExhaustEmbers, "Total non-exhaust FadingEmbers == 3 (1 ReadTheFlames + 1 hand + 1 draw from FueledByEmbers)");
+        AutoTestAssert.True(pcs.Hand.Cards.Any(c => c is FadingEmber), "FueledByEmbers added FadingEmber to hand");
+        AutoTestAssert.True(pcs.DrawPile.Cards.Any(c => c is FadingEmber), "FueledByEmbers shuffled FadingEmber into draw pile");
+        // Hand should have base 5 + 2 (SnowMelt) + 1 (FueledByEmbers draw) + 1 (FueledByEmbers hand ember) = 9 cards!
+        AutoTestAssert.Equal(9, pcs.Hand.Cards.Count, "Turn-2 hand size = 5 base + 2 SnowMelt + 1 FueledByEmbers draw + 1 FadingEmber = 9");
     }
 
     private static async Task WaitUntilAsync(Func<bool> predicate, int timeoutMs = 15000)

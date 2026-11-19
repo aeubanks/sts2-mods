@@ -58,5 +58,20 @@
   "PACKMASTER-PANACHER_POWER.smartDescription": "After [blue]{Countdown}[/blue] more {Countdown:plural:card is|cards are} created, deal [blue]{Amount}[/blue] damage to ALL enemies.",
   "PACKMASTER-SLOWING_POWER.title": "Slowing",
   "PACKMASTER-SLOWING_POWER.description": "At the start of your turn, gain Energy.",
-  "PACKMASTER-SLOWING_POWER.smartDescription": "At the start of your turn, gain [blue]{Amount}[/blue] Energy."
+  "PACKMASTER-SLOWING_POWER.smartDescription": "At the start of your turn, gain [blue]{Amount}[/blue] Energy.",
+  "PACKMASTER-IGNITE_POWER.title": "Ignite",
+  "PACKMASTER-IGNITE_POWER.description": "At the start of its turn, loses HP.",
+  "PACKMASTER-IGNITE_POWER.smartDescription": "{OnPlayer:At the end of your turn, lose [blue]{Amount}[/blue] HP.|At the start of its turn, loses [blue]{Amount}[/blue] HP.}",
+  "PACKMASTER-PYROMASTERY_POWER.title": "Pyromastery",
+  "PACKMASTER-PYROMASTERY_POWER.description": "Whenever you apply Ignite, apply additional Ignite.",
+  "PACKMASTER-PYROMASTERY_POWER.smartDescription": "Whenever you apply [gold]Ignite[/gold], apply an additional [blue]{Amount}[/blue] [gold]Ignite[/gold].",
+  "PACKMASTER-FIERY_MANTLE_POWER.title": "Fiery Mantle",
+  "PACKMASTER-FIERY_MANTLE_POWER.description": "Whenever you are attacked this turn, apply Ignite to the attacker.",
+  "PACKMASTER-FIERY_MANTLE_POWER.smartDescription": "Whenever you are attacked this turn, apply [blue]{Amount}[/blue] [gold]Ignite[/gold] to the attacker.",
+  "PACKMASTER-FREEZE_AND_BURN_POWER.title": "Freeze and Burn",
+  "PACKMASTER-FREEZE_AND_BURN_POWER.description": "At the start of your next turn, deal attack damage to ALL enemies.",
+  "PACKMASTER-FREEZE_AND_BURN_POWER.smartDescription": "At the start of your next turn, deal [blue]{Amount}[/blue] damage to ALL enemies.",
+  "PACKMASTER-FUELED_BY_EMBERS_POWER.title": "Fueled by Embers",
+  "PACKMASTER-FUELED_BY_EMBERS_POWER.description": "At the start of your turn, draw cards and add Fading Embers to your Hand and Draw Pile.",
+  "PACKMASTER-FUELED_BY_EMBERS_POWER.smartDescription": "At the start of your turn, draw [blue]{Amount}[/blue] {Amount:plural:card|cards} and add [blue]{Amount}[/blue] [gold]{Amount:plural:Fading Ember|Fading Embers}[/gold] to your [gold]Hand[/gold] and [gold]Draw Pile[/gold]."
 }

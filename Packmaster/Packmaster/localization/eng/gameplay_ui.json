@@ -16,6 +16,8 @@
   "PACKMASTER-PACK_BATTER.description": "Line up devastating Critical Hits and snowball off massive unblocked attacks.",
   "PACKMASTER-PACK_ENERGYANDECHO.title": "Energy and Echo",
   "PACKMASTER-PACK_ENERGYANDECHO.description": "Flood your turns with extra Energy and replay Echoing cards until you run dry.",
+  "PACKMASTER-PACK_SHAMAN.title": "Shaman",
+  "PACKMASTER-PACK_SHAMAN.description": "Command fire and frost with relentless Ignite burns, Scry, and next-turn payoffs.",
   "PACKMASTER-ECHO_KEYWORD.title": "Echo",
   "PACKMASTER-ECHO_KEYWORD.description": "Add a copy of this card with [gold]Exhaust[/gold] and [gold]Ethereal[/gold] to your [gold]Hand[/gold].",
   "PACKMASTER-DRAFT_PAGE.description": "Choose your Packmaster Packs ([gold]{Pick}/{Total}[/gold]).\nActive Packs: {ActiveList}",
