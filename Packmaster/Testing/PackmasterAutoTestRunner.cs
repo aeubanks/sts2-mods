@@ -90,6 +90,7 @@ internal static class PackmasterAutoTestRunner
                 ("ModelDbAssetsAndLocIntegrity", TestModelDbAssetsAndLocIntegrity),
                 ("PackSystemAndCardPoolFiltering", TestPackSystemAndCardPoolFiltering),
                 ("PackRunStateSaveLoadPersistence", TestPackRunStateSaveLoadPersistence),
+                ("NeowInteractivePackDraft", TestNeowInteractivePackDraft),
                 ("StartRunAndPlayStarterCombat", TestStartRunAndPlayStarterCombat),
                 ("CoreSetCardsInCombat", TestCoreSetCardsInCombat),
                 ("QuietPackInCombat", TestQuietPackInCombat),
@@ -323,6 +324,8 @@ internal static class PackmasterAutoTestRunner
         foreach (var key in settingsLocKeys)
             AutoTestAssert.True(new LocString("settings_ui", key).Exists(), $"Missing settings_ui loc key: {key}");
         AutoTestAssert.True(new LocString("gameplay_ui", "PACKMASTER-PACK_CARD_TYPE").Exists(), "Missing PACKMASTER-PACK_CARD_TYPE loc key");
+        AutoTestAssert.True(new LocString("gameplay_ui", "PACKMASTER-DRAFT_PAGE.description").Exists(), "Missing PACKMASTER-DRAFT_PAGE.description loc key");
+        AutoTestAssert.True(new LocString("gameplay_ui", "PACKMASTER-DRAFT_OPTION.description").Exists(), "Missing PACKMASTER-DRAFT_OPTION.description loc key");
 
         return Task.CompletedTask;
     }
@@ -2031,6 +2034,129 @@ internal static class PackmasterAutoTestRunner
         finally
         {
             PackmasterConfig.AllPacksMode = savedAllPacks;
+        }
+    }
+
+    private static async Task TestNeowInteractivePackDraft()
+    {
+        bool savedAllPacks = PackmasterConfig.AllPacksMode;
+        int savedPacksPerRun = PackmasterConfig.PacksPerRun;
+        PackmasterConfig.AllPacksMode = false;
+        // With 7 registered packs and PacksPerRun = 5: CoreSet (1) + 1 random + 3 interactive choice picks = 5 packs!
+        PackmasterConfig.PacksPerRun = 5;
+        try
+        {
+            var player = Player.CreateForNewRun<ThePackmaster>(new UnlockState(SaveManager.Instance.Progress), 1uL);
+            var runState = await NGame.Instance!.StartNewSingleplayerRun(
+                player,
+                shouldSave: false,
+                ActModel.GetDefaultList(),
+                Array.Empty<ModifierModel>(),
+                "PMDRAFT1",
+                GameMode.Standard,
+                isCustomGame: false);
+
+            await RunManager.Instance.EnterRoomDebug(
+                RoomType.Event,
+                MapPointType.Ancient,
+                ModelDb.Event<MegaCrit.Sts2.Core.Models.Events.Neow>(),
+                showTransition: false);
+
+            var eventRoom = AutoTestAssert.NotNull(runState.CurrentRoom as EventRoom, "Entered Neow EventRoom");
+            var neow = AutoTestAssert.NotNull(eventRoom.LocalMutableEvent as MegaCrit.Sts2.Core.Models.Events.Neow, "Act 1 Floor 1 event is Neow");
+
+            // Draft should NOT be persisted yet; Neow should be presenting Pick 1/3 pack options!
+            AutoTestAssert.True(!PackRunState.HasPersistedActivePacks(runState), "Active packs not persisted until final pick");
+            AutoTestAssert.Equal(3, neow.CurrentOptions.Count, "Pick 1 presents 3 candidate packs");
+            AutoTestAssert.True(neow.CurrentOptions.All(o => o.TextKey.StartsWith("PACKMASTER_DRAFT_1_")), "Pick 1 options are Packmaster draft options");
+
+            // Drive all 3 picks via the REAL UI click path (EventSynchronizer.ChooseLocalOption)!
+            var pickedIds = new List<string>();
+            for (int pick = 1; pick <= 3; pick++)
+            {
+                var opt = neow.CurrentOptions[0];
+                string prefix = $"PACKMASTER_DRAFT_{pick}_";
+                AutoTestAssert.True(opt.TextKey.StartsWith(prefix), $"Pick {pick} option key starts with {prefix}");
+                string optTitle = opt.Title.GetFormattedText();
+                string optDesc = opt.Description.GetFormattedText();
+                AutoTestAssert.True(!string.IsNullOrWhiteSpace(optTitle) && !optTitle.Contains('{'), $"Pick {pick} title rendered cleanly: {optTitle}");
+                AutoTestAssert.True(!string.IsNullOrWhiteSpace(optDesc) && !optDesc.Contains('{') && !optDesc.Contains('}'), $"Pick {pick} description rendered cleanly: {optDesc}");
+
+                pickedIds.Add(opt.TextKey[prefix.Length..]);
+                RunManager.Instance.EventSynchronizer.ChooseLocalOption(0);
+                await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+            }
+
+            // Draft complete! Packs persisted, exact count = 5 (CoreSet + 1 random + 3 picked), and Neow now shows normal blessings!
+            AutoTestAssert.True(PackRunState.HasPersistedActivePacks(runState), "Active packs persisted after final pick");
+            var activePacks = AutoTestAssert.NotNull(PackRunState.GetActivePackIds(runState), "Final drafted pack set");
+            AutoTestAssert.Equal(5, activePacks.Count, "Final drafted pack count matches PacksPerRun (5)");
+            AutoTestAssert.True(activePacks.Contains(PackDefinitions.CoreSetId), "Final drafted packs include CoreSet");
+            AutoTestAssert.True(pickedIds.All(activePacks.Contains), "Final drafted packs include all 3 interactively picked packs");
+            AutoTestAssert.True(neow.CurrentOptions.Count > 0, "Neow now presents normal blessing options");
+            AutoTestAssert.True(neow.CurrentOptions.All(o => !o.TextKey.StartsWith("PACKMASTER_DRAFT_")), "Neow options are no longer draft options");
+
+            // 4th click: pick a real vanilla Neow blessing via EventSynchronizer to confirm room transitions & finishes cleanly!
+            RunManager.Instance.EventSynchronizer.ChooseLocalOption(0);
+            await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+            AutoTestAssert.True(neow.IsFinished || neow.CurrentOptions.Any(o => o.IsProceed), "Vanilla Neow blessing completed cleanly after Packmaster draft");
+
+            // Re-entering Neow on the same RunState (already persisted) must skip draft straight to vanilla blessings!
+            await RunManager.Instance.EnterRoomDebug(
+                RoomType.Event,
+                MapPointType.Ancient,
+                ModelDb.Event<MegaCrit.Sts2.Core.Models.Events.Neow>(),
+                showTransition: false);
+            var neowAgain = AutoTestAssert.NotNull(((EventRoom)runState.CurrentRoom!).LocalMutableEvent as MegaCrit.Sts2.Core.Models.Events.Neow, "Re-entered Neow");
+            AutoTestAssert.True(neowAgain.CurrentOptions.All(o => !o.TextKey.StartsWith("PACKMASTER_DRAFT_")), "Already-persisted run skips draft straight to vanilla Neow");
+
+            // AllPacksMode == true skips draft completely (does not persist or show draft options).
+            CleanupRun();
+            PackmasterConfig.AllPacksMode = true;
+            var allPacksPlayer = Player.CreateForNewRun<ThePackmaster>(new UnlockState(SaveManager.Instance.Progress), 1uL);
+            var allPacksRun = await NGame.Instance!.StartNewSingleplayerRun(
+                allPacksPlayer,
+                shouldSave: false,
+                ActModel.GetDefaultList(),
+                Array.Empty<ModifierModel>(),
+                "PMDRAFT2",
+                GameMode.Standard,
+                isCustomGame: false);
+            await RunManager.Instance.EnterRoomDebug(
+                RoomType.Event,
+                MapPointType.Ancient,
+                ModelDb.Event<MegaCrit.Sts2.Core.Models.Events.Neow>(),
+                showTransition: false);
+            var allPacksNeow = AutoTestAssert.NotNull(((EventRoom)allPacksRun.CurrentRoom!).LocalMutableEvent as MegaCrit.Sts2.Core.Models.Events.Neow, "AllPacksMode Neow");
+            AutoTestAssert.True(allPacksNeow.CurrentOptions.All(o => !o.TextKey.StartsWith("PACKMASTER_DRAFT_")), "AllPacksMode skips Neow draft");
+            AutoTestAssert.True(!PackRunState.HasPersistedActivePacks(allPacksRun), "AllPacksMode does not persist active packs");
+
+            // PacksPerRun >= AllPacks.Count skips draft and persists all registered packs.
+            CleanupRun();
+            PackmasterConfig.AllPacksMode = false;
+            PackmasterConfig.PacksPerRun = PackRegistry.AllPacks.Count;
+            var fullPlayer = Player.CreateForNewRun<ThePackmaster>(new UnlockState(SaveManager.Instance.Progress), 1uL);
+            var fullRun = await NGame.Instance!.StartNewSingleplayerRun(
+                fullPlayer,
+                shouldSave: false,
+                ActModel.GetDefaultList(),
+                Array.Empty<ModifierModel>(),
+                "PMDRAFT3",
+                GameMode.Standard,
+                isCustomGame: false);
+            await RunManager.Instance.EnterRoomDebug(
+                RoomType.Event,
+                MapPointType.Ancient,
+                ModelDb.Event<MegaCrit.Sts2.Core.Models.Events.Neow>(),
+                showTransition: false);
+            var fullNeow = AutoTestAssert.NotNull(((EventRoom)fullRun.CurrentRoom!).LocalMutableEvent as MegaCrit.Sts2.Core.Models.Events.Neow, "Full-pack Neow");
+            AutoTestAssert.True(fullNeow.CurrentOptions.All(o => !o.TextKey.StartsWith("PACKMASTER_DRAFT_")), "PacksPerRun >= AllPacks.Count skips draft");
+            AutoTestAssert.Equal(PackRegistry.AllPacks.Count, PackRunState.GetActivePackIds(fullRun)?.Count, "PacksPerRun >= AllPacks.Count persists all registered packs");
+        }
+        finally
+        {
+            PackmasterConfig.AllPacksMode = savedAllPacks;
+            PackmasterConfig.PacksPerRun = savedPacksPerRun;
         }
     }
 

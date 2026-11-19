@@ -13,5 +13,7 @@
   "PACKMASTER-PACK_HIGHENERGY.title": "High Energy",
   "PACKMASTER-PACK_HIGHENERGY.description": "Generate massive bursts of Energy and unleash devastating high-cost plays.",
   "PACKMASTER-PACK_BATTER.title": "Batter",
-  "PACKMASTER-PACK_BATTER.description": "Line up devastating Critical Hits and snowball off massive unblocked attacks."
+  "PACKMASTER-PACK_BATTER.description": "Line up devastating Critical Hits and snowball off massive unblocked attacks.",
+  "PACKMASTER-DRAFT_PAGE.description": "Choose your Packmaster Packs ([gold]{Pick}/{Total}[/gold]).\nActive Packs: {ActiveList}",
+  "PACKMASTER-DRAFT_OPTION.description": "{PackDesc}\n[gold]Draft Pack {Pick}/{Total}[/gold] — Active: {ActiveList}"
 }
