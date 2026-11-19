@@ -13,5 +13,13 @@
   "DOWNFALL-SACRAMENTAL_WINE.title": "Sacramental Wine",
   "DOWNFALL-SACRAMENTAL_WINE.description": "Whenever you play a [gold]Power[/gold] card this combat, gain [blue]{Block}[/blue] [gold]Block[/gold]. Add a random [gold]Power[/gold] to your [gold]Hand[/gold] that costs [blue]0[/blue] this turn.",
   "DOWNFALL-SNECKO_POWERS_POTION.title": "Snecko Essence",
-  "DOWNFALL-SNECKO_POWERS_POTION.description": "Choose [blue]1[/blue] of [blue]3[/blue] random off-class [gold]Powers[/gold] and add {Cards:plural:it|[blue]{}[/blue] copies} to your [gold]Hand[/gold]. {Cards:plural:It costs|They cost} [blue]0[/blue] this turn."
+  "DOWNFALL-SNECKO_POWERS_POTION.description": "Choose [blue]1[/blue] of [blue]3[/blue] random off-class [gold]Powers[/gold] and add {Cards:plural:it|[blue]{}[/blue] copies} to your [gold]Hand[/gold]. {Cards:plural:It costs|They cost} [blue]0[/blue] this turn.",
+  "DOWNFALL-EAU_DE_GREM_POTION.title": "Eau de Grem",
+  "DOWNFALL-EAU_DE_GREM_POTION.description": "Trigger all [blue]5[/blue] Gremlin abilities [blue]{Repeat}[/blue] times.",
+  "DOWNFALL-NECROMANCY_POTION.title": "Gremlin In A Jar",
+  "DOWNFALL-NECROMANCY_POTION.description": "Heal [blue]{HealPercent}%[/blue] of your Max HP.",
+  "DOWNFALL-SWAP_POTION.title": "Bottled Dupe",
+  "DOWNFALL-SWAP_POTION.description": "[gold]Swap[/gold] to a random Gremlin.",
+  "DOWNFALL-WIZ_POTION.title": "Pizazz Potion",
+  "DOWNFALL-WIZ_POTION.description": "Gain [blue]{VigorPower}[/blue] [gold]Vigor[/gold]."
 }

@@ -313,6 +313,32 @@ internal static class GremlinMob
         return true;
     }
 
+    public static async Task SacrificeAsync(
+        Player player,
+        ICombatState combatState,
+        GremlinKind kind,
+        PlayerChoiceContext choiceContext)
+    {
+        var state = GetState(combatState, player);
+        if (!state.Initialized || state.Order.Count < 2 || !state.Order.Contains(kind))
+            return;
+
+        if (state.Order[0] == kind)
+        {
+            if (!state.IsNob && player.Creature.IsAlive && !CombatManager.Instance.IsOverOrEnding)
+            {
+                await SwapNextAsync(player, combatState, choiceContext);
+            }
+            else
+            {
+                state.Order.RemoveAt(0);
+                return;
+            }
+        }
+
+        state.Order.Remove(kind);
+    }
+
     public static async Task EnterNobAsync(Player player, ICombatState combatState, PlayerChoiceContext choiceContext)
     {
         if (!player.Creature.IsAlive || CombatManager.Instance.IsOverOrEnding)

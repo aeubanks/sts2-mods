@@ -1,6 +1,7 @@
 using Downfall.Core;
 using Downfall.Gremlins;
 using Downfall.Gremlins.Cards;
+using Downfall.Gremlins.Potions;
 using Downfall.Gremlins.Powers;
 using Downfall.Gremlins.Relics;
 using Godot;
@@ -9,8 +10,10 @@ using MegaCrit.Sts2.Core.Commands;
 using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Entities.Relics;
 using MegaCrit.Sts2.Core.GameActions.Multiplayer;
+using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Models.Powers;
 using MegaCrit.Sts2.Core.Nodes.Rooms;
+using MegaCrit.Sts2.Core.Rooms;
 using MegaCrit.Sts2.Core.Runs;
 using MegaCrit.Sts2.Core.ValueProps;
 using StsCards = MegaCrit.Sts2.Core.Models.Cards;
@@ -1662,5 +1665,280 @@ internal static class GremlinTests
         AutoTestAssert.True(!GremlinMob.IsNob(combatState, player), "Reverted out of Gremlin Nob form");
         AutoTestAssert.True(!player.Creature.HasPower<GremlinNobPower>(), "GremlinNobPower removed on revert");
         AutoTestAssert.True(player.Creature.Powers.OfType<GremlinActivePower>().Any(), "Active Gremlin power restored on revert");
+    }
+
+    /// <summary>
+    /// End-to-end combat verification of all 15 Phase 3E Gremlin Relics and all 4 Gremlin Potions.
+    /// </summary>
+    public static async Task TestRelicsAndPotionsInCombat()
+    {
+        var (player, _, combatState) = await DownfallAutoTestRunner.StartCombatAsync<TheGremlins>("DFGRM06");
+        var pcs = AutoTestAssert.NotNull(player.PlayerCombatState, "PlayerCombatState");
+        var enemy1 = AutoTestAssert.NotNull(combatState.HittableEnemies.FirstOrDefault(), "First enemy");
+        var enemy2 = await CreatureCmd.Add<MegaCrit.Sts2.Core.Models.Monsters.Nibbit>(combatState);
+        var ctx = new ThrowingPlayerChoiceContext();
+
+        await CreatureCmd.GainMaxHp(enemy1, 1500m);
+        await CreatureCmd.GainMaxHp(enemy2, 1500m);
+
+        async Task ResetHandAndEnergy(int energy = 10)
+        {
+            foreach (var c in pcs.Hand.Cards.ToList())
+                await CardPileCmd.Add(c, PileType.Discard);
+            if (pcs.Energy > energy)
+                await PlayerCmd.LoseEnergy(pcs.Energy - energy, player);
+            else if (pcs.Energy < energy)
+                await PlayerCmd.GainEnergy(energy - pcs.Energy, player);
+            if (player.Creature.Block > 0)
+                await CreatureCmd.LoseBlock(ctx, player.Creature, player.Creature.Block, null);
+        }
+
+        async Task CleanPlayerBuffs()
+        {
+            if (player.Creature.GetPower<WizPower>() is { } w) await PowerCmd.Remove(w);
+            if (player.Creature.GetPower<StrengthPower>() is { } s) await PowerCmd.Remove(s);
+            if (player.Creature.GetPower<FlexPotionPower>() is { } f) await PowerCmd.Remove(f);
+            if (player.Creature.GetPower<DownfallTempHpPower>() is { } t) await PowerCmd.Remove(t);
+            if (player.Creature.GetPower<FuriousPower>() is { } fu) await PowerCmd.Remove(fu);
+            if (player.Creature.GetPower<VigorPower>() is { } v) await PowerCmd.Remove(v);
+            if (player.Creature.GetPower<WeakPower>() is { } wk) await PowerCmd.Remove(wk);
+        }
+
+        await GremlinMob.SwapToSpecificAsync(player, combatState, GremlinKind.Mad, ctx);
+
+        // 1. GremlinKnobUpgrade: replaces GremlinKnob on pickup; 1st shuffle per turn -> +1 Energy, Draw 1, Swap; 2nd shuffle does not!
+        AutoTestAssert.True(player.Relics.OfType<GremlinKnob>().Any(), "Starts with GremlinKnob");
+        var crown = await RelicCmd.Obtain<GremlinKnobUpgrade>(player);
+        AutoTestAssert.True(!player.Relics.OfType<GremlinKnob>().Any(), "GremlinKnobUpgrade replaced GremlinKnob");
+        AutoTestAssert.Equal(RelicStatus.Normal, crown.Status, "GremlinKnobUpgrade active before first shuffle");
+
+        await ResetHandAndEnergy(energy: 3);
+        foreach (var c in PileType.Draw.GetPile(player).Cards.ToList())
+            await CardPileCmd.Add(c, PileType.Discard);
+        var kindBeforeShuffle = GremlinMob.GetActiveKind(combatState, player);
+        await CardPileCmd.Draw(ctx, 1, player); // triggers shuffle -> +1 Energy, +1 extra Draw (total 2 drawn), Swap!
+        AutoTestAssert.Equal(4, pcs.Energy, "GremlinKnobUpgrade granted +1 Energy on 1st shuffle");
+        AutoTestAssert.Equal(2, pcs.Hand.Cards.Count, "GremlinKnobUpgrade drew +1 extra card (1 + 1 = 2)");
+        AutoTestAssert.True(GremlinMob.GetActiveKind(combatState, player) != kindBeforeShuffle, "GremlinKnobUpgrade swapped Gremlin");
+        AutoTestAssert.Equal(RelicStatus.Disabled, crown.Status, "GremlinKnobUpgrade disabled after 1st shuffle this turn");
+
+        // 2nd shuffle same turn does NOT trigger!
+        await ResetHandAndEnergy(energy: 3);
+        foreach (var c in PileType.Draw.GetPile(player).Cards.ToList())
+            await CardPileCmd.Add(c, PileType.Discard);
+        var kindBefore2nd = GremlinMob.GetActiveKind(combatState, player);
+        await CardPileCmd.Draw(ctx, 1, player);
+        AutoTestAssert.Equal(3, pcs.Energy, "GremlinKnobUpgrade did NOT trigger on 2nd shuffle same turn");
+        AutoTestAssert.Equal(1, pcs.Hand.Cards.Count, "No extra draw on 2nd shuffle");
+        AutoTestAssert.Equal(kindBefore2nd, GremlinMob.GetActiveKind(combatState, player), "No swap on 2nd shuffle");
+        await GremlinMob.SwapToSpecificAsync(player, combatState, GremlinKind.Mad, ctx);
+
+        // 2. FragmentationGrenade (+3 random dmg) + PricklyShields (2 random dmg on Block, guarded by FuriousPower):
+        await ResetHandAndEnergy();
+        await CleanPlayerBuffs();
+        await RelicCmd.Obtain<FragmentationGrenade>(player);
+        await RelicCmd.Obtain<PricklyShields>(player);
+
+        int totalEnemyHp = enemy1.CurrentHp + enemy2.CurrentHp;
+        await CreatureCmd.GainBlock(player.Creature, 5m, ValueProp.Unpowered, null);
+        AutoTestAssert.Equal(totalEnemyHp - 5, enemy1.CurrentHp + enemy2.CurrentHp, "PricklyShields (2) + FragmentationGrenade (3) dealt 5 random damage on Block");
+
+        // SwordBoomerang (TargetType.RandomEnemy, 3x3) boosted to (3+3)x3 = 18!
+        var boomerang = combatState.CreateCard<StsCards.SwordBoomerang>(player);
+        await CardPileCmd.Add(boomerang, PileType.Hand);
+        totalEnemyHp = enemy1.CurrentHp + enemy2.CurrentHp;
+        AutoTestAssert.True(boomerang.TryManualPlay(null), "Play SwordBoomerang with FragmentationGrenade");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(totalEnemyHp - 18, enemy1.CurrentHp + enemy2.CurrentHp, "SwordBoomerang boosted by FragmentationGrenade to (3+3)x3 = 18");
+
+        // Under FuriousPower, PricklyShields must NOT double-fire (only Furious's 5 AOE x 2 enemies = 10)!
+        await PowerCmd.Apply<FuriousPower>(ctx, player.Creature, 1m, player.Creature, null);
+        totalEnemyHp = enemy1.CurrentHp + enemy2.CurrentHp;
+        await CreatureCmd.GainBlock(player.Creature, 5m, ValueProp.Unpowered, null);
+        AutoTestAssert.Equal(totalEnemyHp - 10, enemy1.CurrentHp + enemy2.CurrentHp, "FuriousPower suppressed PricklyShields (only 5x2=10 AOE)");
+        await CleanPlayerBuffs();
+
+        // 3. ImpeccablePecs: +Strength (including temporary Strength!) grants equal Temp HP; Round 1 hook grants 1 Str + 1 Temp HP!
+        var pecs = await RelicCmd.Obtain<ImpeccablePecs>(player);
+        await PowerCmd.Apply<StrengthPower>(ctx, player.Creature, 3m, player.Creature, null);
+        AutoTestAssert.Equal(3, player.Creature.GetPowerAmount<DownfallTempHpPower>(), "ImpeccablePecs granted +3 Temp HP on +3 Strength");
+        await PowerCmd.Apply<FlexPotionPower>(ctx, player.Creature, 2m, player.Creature, null);
+        AutoTestAssert.Equal(5, player.Creature.GetPowerAmount<DownfallTempHpPower>(), "ImpeccablePecs granted +2 Temp HP on FlexPotionPower temporary Strength (3 -> 5)");
+        await CleanPlayerBuffs();
+        await pecs.BeforeSideTurnStart(ctx, CombatSide.Player, [player.Creature], combatState);
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<StrengthPower>(), "ImpeccablePecs Round 1 granted +1 Strength");
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<DownfallTempHpPower>(), "ImpeccablePecs Round 1 also triggered +1 Temp HP");
+        await CleanPlayerBuffs();
+
+        // 4. MagicalMallet: Weak -> +1 Wiz, up to 3/turn!
+        var mallet = await RelicCmd.Obtain<MagicalMallet>(player);
+        AutoTestAssert.Equal(3, mallet.DisplayAmount, "MagicalMallet starts with 3 triggers remaining");
+        for (int i = 0; i < 4; i++)
+            await PowerCmd.Apply<WeakPower>(ctx, enemy1, 1m, player.Creature, null);
+        AutoTestAssert.Equal(3, player.Creature.GetPowerAmount<WizPower>(), "MagicalMallet capped at 3 Wiz per turn");
+        AutoTestAssert.Equal(0, mallet.DisplayAmount, "MagicalMallet at 0 remaining");
+        AutoTestAssert.Equal(RelicStatus.Disabled, mallet.Status, "MagicalMallet disabled at 0 remaining");
+        if (enemy1.GetPower<WeakPower>() is { } wClean1) await PowerCmd.Remove(wClean1);
+
+        // 5. WizardStaff (+7 Wiz dmg) + WizardHat (remove random debuff on Wiz consumed):
+        await ResetHandAndEnergy();
+        await RelicCmd.Obtain<WizardStaff>(player);
+        await RelicCmd.Obtain<WizardHat>(player);
+        await PowerCmd.Apply<WeakPower>(ctx, player.Creature, 2m, enemy1, null);
+        AutoTestAssert.Equal(3, player.Creature.GetPowerAmount<WizPower>(), "3 Wiz still active for WizardStaff + WizardHat");
+        var wizStrike = combatState.CreateCard<GremlinStrike>(player);
+        await CardPileCmd.Add(wizStrike, PileType.Hand);
+        int e2Hp = enemy2.CurrentHp;
+        AutoTestAssert.True(wizStrike.TryManualPlay(enemy2), "Play GremlinStrike with 3 Wiz + WizardStaff + Weak");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        // (6 + 7 Wiz + 7 WizardStaff) * 0.75 Weak = 20 * 0.75 = 15!
+        AutoTestAssert.Equal(e2Hp - 15, enemy2.CurrentHp, "WizardStaff boosted Wiz damage to 6+7+7=20 (x0.75 Weak = 15)");
+        AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<WizPower>(), "Wiz consumed");
+        AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<WeakPower>(), "WizardHat cleansed Weak debuff on Wiz consumption");
+
+        // 6. StolenMerchandise: Swap adds an Echo of a random Colorless card to Hand!
+        await ResetHandAndEnergy();
+        await RelicCmd.Obtain<StolenMerchandise>(player);
+        await GremlinMob.SwapNextAsync(player, combatState, ctx);
+        var stolenEcho = pcs.Hand.Cards.FirstOrDefault(GremlinMob.IsEcho);
+        AutoTestAssert.NotNull(stolenEcho, "StolenMerchandise added an Echo card to Hand on Swap");
+        AutoTestAssert.True(stolenEcho!.Keywords.Contains(CardKeyword.Ethereal), "StolenMerchandise Echo is Ethereal");
+        await GremlinMob.SwapToSpecificAsync(player, combatState, GremlinKind.Mad, ctx);
+
+        // 7. TagTeamwork: pickup adds 2 TagTeam to Deck; drawing TagTeam draws +1 card!
+        await ResetHandAndEnergy();
+        int deckTagBefore = PileType.Deck.GetPile(player).Cards.OfType<TagTeam>().Count();
+        await RelicCmd.Obtain<TagTeamwork>(player);
+        AutoTestAssert.Equal(deckTagBefore + 2, PileType.Deck.GetPile(player).Cards.OfType<TagTeam>().Count(), "TagTeamwork added 2 TagTeam cards to Deck");
+        var ttDraw = combatState.CreateCard<TagTeam>(player);
+        var bonusDraw = combatState.CreateCard<GremlinDefend>(player);
+        await CardPileCmd.Add(bonusDraw, PileType.Draw, CardPilePosition.Top);
+        await CardPileCmd.Add(ttDraw, PileType.Draw, CardPilePosition.Top);
+        await CardPileCmd.Draw(ctx, 1, player);
+        AutoTestAssert.Equal(2, pcs.Hand.Cards.Count, "Drawing TagTeam triggered TagTeamwork to draw +1 card");
+
+        // 8. LeaderVoucher: permanently sacrifices a random Gremlin (immediately evicting from active combat!) and adds +1 Max Energy!
+        var voucher = await RelicCmd.Obtain<LeaderVoucher>(player);
+        AutoTestAssert.True(voucher.SacrificedGremlin.HasValue, "LeaderVoucher sacrificed a Gremlin on pickup");
+        AutoTestAssert.Equal(4, GremlinMob.GetLivingCount(combatState, player), "LeaderVoucher reduced living Gremlin count from 5 to 4");
+        AutoTestAssert.True(!await GremlinMob.SwapToSpecificAsync(player, combatState, voucher.SacrificedGremlin!.Value, ctx),
+            "Cannot swap to the Gremlin sacrificed by LeaderVoucher");
+        AutoTestAssert.Equal(4m, voucher.ModifyMaxEnergy(player, 3m), "LeaderVoucher grants +1 Max Energy");
+
+        // 9. GremlinBomb (<= 50% HP on unblocked dmg -> 30 AOE once) + ShortStature (layers after ScatterPower -> prevent lethal + heal 20% Max HP) + GremlinGravestone:
+        await CleanPlayerBuffs();
+        var statue = await RelicCmd.Obtain<ShortStature>(player);
+        var grave = await RelicCmd.Obtain<GremlinGravestone>(player);
+
+        // First drop HP to 35 (<= 50%) BEFORE obtaining GremlinBomb, then verify a fully blocked hit does NOT trigger GremlinBomb!
+        await CreatureCmd.Damage(ctx, player.Creature, 40m, ValueProp.Unblockable | ValueProp.Unpowered, enemy1, null, null);
+        AutoTestAssert.Equal(35, player.Creature.CurrentHp, "Player dropped to 35 HP (<= 50%)");
+        var bomb = await RelicCmd.Obtain<GremlinBomb>(player);
+        await CreatureCmd.GainBlock(player.Creature, 20m, ValueProp.Unpowered, null);
+        int e1Hp = enemy1.CurrentHp;
+        e2Hp = enemy2.CurrentHp;
+        await CreatureCmd.Damage(ctx, player.Creature, 10m, ValueProp.Unpowered, enemy1, null, null); // fully blocked!
+        AutoTestAssert.Equal(e1Hp, enemy1.CurrentHp, "GremlinBomb did NOT trigger on fully blocked hit while <= 50% HP");
+        AutoTestAssert.Equal(RelicStatus.Normal, bomb.Status, "GremlinBomb still armed after blocked hit");
+
+        // Unblocked hit while <= 50% HP triggers GremlinBomb once!
+        await CreatureCmd.Damage(ctx, player.Creature, 5m, ValueProp.Unblockable | ValueProp.Unpowered, enemy1, null, null);
+        AutoTestAssert.Equal(30, player.Creature.CurrentHp, "Player took 5 unblocked damage (35 -> 30)");
+        AutoTestAssert.Equal(e1Hp - 30, enemy1.CurrentHp, "GremlinBomb dealt 30 AOE to enemy1");
+        AutoTestAssert.Equal(e2Hp - 30, enemy2.CurrentHp, "GremlinBomb dealt 30 AOE to enemy2");
+        AutoTestAssert.Equal(RelicStatus.Disabled, bomb.Status, "GremlinBomb disabled after triggering once");
+
+        // Taking more unblocked damage must NOT re-trigger GremlinBomb:
+        e1Hp = enemy1.CurrentHp;
+        await CreatureCmd.Damage(ctx, player.Creature, 1m, ValueProp.Unblockable | ValueProp.Unpowered, enemy1, null, null);
+        AutoTestAssert.Equal(e1Hp, enemy1.CurrentHp, "GremlinBomb did NOT trigger a second time");
+        await CreatureCmd.Heal(player.Creature, 1m); // back to 30 HP
+
+        // ScatterPower (AfterOsty) prevents lethal BEFORE ShortStature (AfterOstyLate)!
+        await PowerCmd.Apply<ScatterPower>(ctx, player.Creature, 1m, player.Creature, null);
+        await CreatureCmd.Damage(ctx, player.Creature, 500m, ValueProp.Unblockable | ValueProp.Unpowered, enemy1, null, null);
+        AutoTestAssert.Equal(30, player.Creature.CurrentHp, "ScatterPower prevented lethal hit before ShortStature");
+        AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<ScatterPower>(), "ScatterPower consumed");
+        AutoTestAssert.Equal(RelicStatus.Normal, statue.Status, "ShortStature stayed armed when ScatterPower prevented lethal");
+
+        // Next lethal hit (500 damage at 30 HP) -> ShortStature prevents lethal AND heals 20% of 75 = 15 HP (30 -> 45)!
+        await CreatureCmd.Damage(ctx, player.Creature, 500m, ValueProp.Unblockable | ValueProp.Unpowered, enemy1, null, null);
+        AutoTestAssert.True(player.Creature.IsAlive, "ShortStature prevented lethal damage");
+        AutoTestAssert.Equal(45, player.Creature.CurrentHp, "ShortStature healed 20% of 75 Max HP (+15: 30 -> 45)");
+        AutoTestAssert.Equal(RelicStatus.Disabled, statue.Status, "ShortStature disabled after triggering once");
+
+        // GremlinGravestone heals +15 HP on entering RestSiteRoom (45 -> 60)!
+        await grave.AfterRoomEntered(new RestSiteRoom());
+        AutoTestAssert.Equal(60, player.Creature.CurrentHp, "GremlinGravestone healed +15 HP on entering RestSiteRoom (45 -> 60)");
+
+        // 10. All 4 Gremlin Potions (EauDeGremPotion, NecromancyPotion, SwapPotion, WizPotion):
+        foreach (var existing in player.Potions.ToList())
+            await PotionCmd.Discard(existing);
+        // Remove ImpeccablePecs / PricklyShields / FragmentationGrenade / StolenMerchandise so potion numbers are crisp!
+        // (Keep MagicalMallet — already at 0 remaining this turn — so we can also verify its Turn 2 reset!)
+        await RelicCmd.Remove(player.Relics.OfType<ImpeccablePecs>().First());
+        await RelicCmd.Remove(player.Relics.OfType<PricklyShields>().First());
+        await RelicCmd.Remove(player.Relics.OfType<FragmentationGrenade>().First());
+        await RelicCmd.Remove(player.Relics.OfType<StolenMerchandise>().First());
+
+        // (a) EauDeGremPotion: triggers all 5 Gremlin abilities x2 (+4 temp Str, +2 Weak all, +4 Block, 2x2=4 random dmg, +2 Wiz)!
+        await ResetHandAndEnergy();
+        await CleanPlayerBuffs();
+        if (enemy1.GetPower<WeakPower>() is { } wc1) await PowerCmd.Remove(wc1);
+        if (enemy2.GetPower<WeakPower>() is { } wc2) await PowerCmd.Remove(wc2);
+        var eau = ModelDb.Potion<EauDeGremPotion>().ToMutable();
+        await PotionCmd.TryToProcure(eau, player);
+        totalEnemyHp = enemy1.CurrentHp + enemy2.CurrentHp;
+        await eau.OnUseWrapper(ctx, player.Creature);
+        AutoTestAssert.Equal(4, player.Creature.GetPowerAmount<StrengthPower>(), "EauDeGrem granted +4 temporary Strength");
+        AutoTestAssert.Equal(2, enemy1.GetPowerAmount<WeakPower>(), "EauDeGrem applied 2 Weak to enemy1");
+        AutoTestAssert.Equal(2, enemy2.GetPowerAmount<WeakPower>(), "EauDeGrem applied 2 Weak to enemy2");
+        AutoTestAssert.Equal(4, player.Creature.Block, "EauDeGrem granted 4 Block");
+        AutoTestAssert.Equal(totalEnemyHp - 4, enemy1.CurrentHp + enemy2.CurrentHp, "EauDeGrem dealt 2x2 = 4 random damage");
+        AutoTestAssert.Equal(2, player.Creature.GetPowerAmount<WizPower>(), "EauDeGrem granted 2 Wiz");
+
+        // (b) NecromancyPotion: heals 20% of 75 = +15 HP (60 -> 75)!
+        var necroPot = ModelDb.Potion<NecromancyPotion>().ToMutable();
+        await PotionCmd.TryToProcure(necroPot, player);
+        await necroPot.OnUseWrapper(ctx, player.Creature);
+        AutoTestAssert.Equal(75, player.Creature.CurrentHp, "NecromancyPotion healed 20% Max HP (60 -> 75)");
+
+        // (c) SwapPotion: swaps to a random different Gremlin!
+        var kindBeforePot = GremlinMob.GetActiveKind(combatState, player);
+        var swapPot = ModelDb.Potion<SwapPotion>().ToMutable();
+        await PotionCmd.TryToProcure(swapPot, player);
+        await swapPot.OnUseWrapper(ctx, player.Creature);
+        AutoTestAssert.True(GremlinMob.GetActiveKind(combatState, player) != kindBeforePot, "SwapPotion swapped to a different Gremlin");
+
+        // (d) WizPotion (Pizazz Potion): grants 10 VigorPower!
+        var wizPot = ModelDb.Potion<WizPotion>().ToMutable();
+        await PotionCmd.TryToProcure(wizPot, player);
+        await wizPot.OnUseWrapper(ctx, player.Creature);
+        AutoTestAssert.Equal(10, player.Creature.GetPowerAmount<VigorPower>(), "WizPotion granted 10 VigorPower");
+
+        // 11. WoundPoker (end of turn -> 4 dmg to Weak enemies) + SupplyScroll (Turn 3 start -> +2 Energy, +2 Draw):
+        await RelicCmd.Obtain<WoundPoker>(player);
+        await RelicCmd.Obtain<SupplyScroll>(player);
+        await RelicCmd.Remove(player.Relics.OfType<TagTeamwork>().First());
+        if (enemy2.GetPower<WeakPower>() is { } wc2b) await PowerCmd.Remove(wc2b);
+        if (enemy1.GetPower<WeakPower>() is null) await PowerCmd.Apply<WeakPower>(ctx, enemy1, 2m, player.Creature, null);
+
+        e1Hp = enemy1.CurrentHp;
+        e2Hp = enemy2.CurrentHp;
+        await CreatureCmd.GainBlock(player.Creature, 80m, ValueProp.Unpowered, null);
+        await DownfallAutoTestRunner.EndTurnAndWaitForRoundAsync(player, 2);
+        AutoTestAssert.Equal(e1Hp - 4, enemy1.CurrentHp, "WoundPoker dealt 4 damage to Weak enemy1 at Turn 1 end");
+        AutoTestAssert.Equal(e2Hp, enemy2.CurrentHp, "WoundPoker dealt 0 damage to non-Weak enemy2");
+        AutoTestAssert.Equal(3, mallet.DisplayAmount, "MagicalMallet reset to 3 triggers remaining on Turn 2 start");
+        AutoTestAssert.Equal(RelicStatus.Normal, mallet.Status, "MagicalMallet re-enabled on Turn 2 start");
+
+        // End Turn 2 -> Turn 3: LeaderVoucher (+1 Energy -> base 4) + SupplyScroll (+2 Energy -> 6, +2 Draw -> 7 cards)!
+        // Ensure plenty of cards in Draw Pile so Turn 3 draws all 5 + 2 = 7 cleanly!
+        for (int i = 0; i < 10; i++)
+            await CardPileCmd.Add(combatState.CreateCard<GremlinDefend>(player), PileType.Draw, CardPilePosition.Top);
+        await CreatureCmd.GainBlock(player.Creature, 80m, ValueProp.Unpowered, null);
+        await DownfallAutoTestRunner.EndTurnAndWaitForRoundAsync(player, 3);
+        AutoTestAssert.Equal(6, pcs.Energy, "Turn 3 Energy = 3 base + 1 LeaderVoucher + 2 SupplyScroll = 6");
+        AutoTestAssert.Equal(7, pcs.Hand.Cards.Count, "Turn 3 Hand = 5 base draw + 2 SupplyScroll = 7");
     }
 }
