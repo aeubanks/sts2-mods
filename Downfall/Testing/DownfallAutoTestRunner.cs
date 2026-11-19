@@ -140,6 +140,7 @@ internal static class DownfallAutoTestRunner
                 ("AwakenedStarterCombat", AwakenedTests.TestStarterCombat),
                 ("AwakenedCommonCardsInCombat", AwakenedTests.TestCommonCardsInCombat),
                 ("AwakenedUncommonBatch1InCombat", AwakenedTests.TestUncommonBatch1InCombat),
+                ("AwakenedUncommonBatch2InCombat", AwakenedTests.TestUncommonBatch2InCombat),
             ];
 
             foreach (var (name, run) in tests)

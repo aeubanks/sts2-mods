@@ -28,9 +28,10 @@ public sealed class Caw()
             .WithHitFx("vfx/vfx_attack_slash")
             .Execute(choiceContext);
 
-        if (TryTriggerChant(cardPlay) && Owner.PlayerCombatState is { } pcs)
+        int chantTriggers = TryTriggerChantCount(cardPlay);
+        if (chantTriggers > 0 && Owner.PlayerCombatState is { } pcs)
         {
-            decimal gain = DynamicVars["DamageGain"].BaseValue;
+            decimal gain = DynamicVars["DamageGain"].BaseValue * chantTriggers;
             foreach (var caw in pcs.AllCards.OfType<Caw>().Append(this).Distinct(ReferenceEqualityComparer.Instance).Cast<Caw>())
             {
                 caw.DynamicVars.Damage.BaseValue += gain;

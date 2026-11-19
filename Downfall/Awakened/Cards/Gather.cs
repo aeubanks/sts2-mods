@@ -24,19 +24,24 @@ public sealed class Gather()
     {
         await CreatureCmd.GainBlock(Owner.Creature, DynamicVars.Block, cardPlay);
 
-        if (!TryTriggerChant(cardPlay))
+        int chantTriggers = TryTriggerChantCount(cardPlay);
+        if (chantTriggers <= 0)
             return;
 
         var hand = PileType.Hand.GetPile(Owner);
         var discard = PileType.Discard.GetPile(Owner).Cards.ToList();
-        if (discard.Count == 0 || hand.Cards.Count >= CardPile.MaxCardsInHand)
+        int count = Math.Min(chantTriggers, Math.Min(discard.Count, CardPile.MaxCardsInHand - hand.Cards.Count));
+        if (count <= 0)
             return;
 
-        var prefs = new CardSelectorPrefs(SelectionScreenPrompt, 1);
-        var chosen = (await CardSelectCmd.FromSimpleGrid(choiceContext, discard, Owner, prefs)).FirstOrDefault();
-        if (chosen is not null)
+        var prefs = new CardSelectorPrefs(SelectionScreenPrompt, count);
+        var chosen = (await CardSelectCmd.FromSimpleGrid(choiceContext, discard, Owner, prefs)).ToList();
+        foreach (var card in chosen)
         {
-            await CardPileCmd.Add(chosen, PileType.Hand);
+            if (hand.Cards.Count >= CardPile.MaxCardsInHand)
+                break;
+
+            await CardPileCmd.Add(card, PileType.Hand);
         }
     }
 

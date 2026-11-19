@@ -1007,4 +1007,415 @@ internal static class AwakenedTests
         await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
         AutoTestAssert.Equal(3, player.Creature.Block, "MiddenHeap with 0 candidates still gained 3 Block");
     }
+
+    public static async Task TestUncommonBatch2InCombat()
+    {
+        var (player, _, combatState) = await DownfallAutoTestRunner.StartCombatAsync<TheAwakenedOne>("DFAWK04");
+        var pcs = AutoTestAssert.NotNull(player.PlayerCombatState, "PlayerCombatState");
+        var enemy1 = AutoTestAssert.NotNull(combatState.HittableEnemies.FirstOrDefault(), "First enemy");
+        var enemy2 = await CreatureCmd.Add<MegaCrit.Sts2.Core.Models.Monsters.Nibbit>(combatState);
+        var ctx = new ThrowingPlayerChoiceContext();
+
+        await CreatureCmd.GainMaxHp(enemy1, 900m);
+        await CreatureCmd.GainMaxHp(enemy2, 900m);
+
+        async Task ResetHandAndEnergy(int energy = 10)
+        {
+            foreach (var c in pcs.Hand.Cards.ToList())
+                await CardPileCmd.Add(c, PileType.Discard);
+            if (pcs.Energy > energy)
+                await PlayerCmd.LoseEnergy(pcs.Energy - energy, player);
+            else if (pcs.Energy < energy)
+                await PlayerCmd.GainEnergy(energy - pcs.Energy, player);
+            if (player.Creature.Block > 0)
+                await CreatureCmd.LoseBlock(ctx, player.Creature, player.Creature.Block, null);
+        }
+
+        // 1. MirePit: ALL enemies lose 6 Strength this turn (blocked by Artifact on enemy2), player gets 1 Drained, Exhausts!
+        await ResetHandAndEnergy();
+        await PowerCmd.Apply<ArtifactPower>(ctx, enemy2, 1m, enemy2, null);
+        var mirePit = combatState.CreateCard<MirePit>(player);
+        await CardPileCmd.Add(mirePit, PileType.Hand);
+        AutoTestAssert.True(mirePit.TryManualPlay(null), "Play MirePit");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(-6, enemy1.GetPowerAmount<StrengthPower>(), "MirePit reduced enemy1 Strength by 6");
+        AutoTestAssert.Equal(6, enemy1.GetPowerAmount<PiercingWailPower>(), "MirePit applied 6 temporary Strength loss to enemy1");
+        AutoTestAssert.Equal(0, enemy2.GetPowerAmount<StrengthPower>(), "Artifact blocked MirePit on enemy2");
+        AutoTestAssert.Equal(0, enemy2.GetPowerAmount<ArtifactPower>(), "Artifact consumed on enemy2");
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<HermitDrainedPower>(), "MirePit applied 1 Drained");
+        AutoTestAssert.Equal(PileType.Exhaust, mirePit.Pile?.Type, "MirePit exhausted");
+        if (player.Creature.GetPower<HermitDrainedPower>() is { } d1) await PowerCmd.Remove(d1);
+
+        // 2. MoonlitVision: mid-turn clamp & stacking!
+        // Play 2 Spells BEFORE MoonlitVision #1 -> #1 clamps _triggeredThisTurn=1 (0 triggers left this turn),
+        // then MoonlitVision #2 stacks Amount=2 -> next Spell DOES refund +1 Energy!
+        await ResetHandAndEnergy(energy: 10);
+        var preSpell1 = combatState.CreateCard<Cryostasis>(player);
+        var preSpell2 = combatState.CreateCard<Cryostasis>(player);
+        await CardPileCmd.Add(preSpell1, PileType.Hand);
+        await CardPileCmd.Add(preSpell2, PileType.Hand);
+        AutoTestAssert.True(preSpell1.TryManualPlay(null), "Play pre-Spell 1 before MoonlitVision");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.True(preSpell2.TryManualPlay(null), "Play pre-Spell 2 before MoonlitVision");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+
+        await ResetHandAndEnergy(energy: 8);
+        var moonlit1 = combatState.CreateCard<MoonlitVision>(player);
+        var moonlit2 = combatState.CreateCard<MoonlitVision>(player);
+        await CardPileCmd.Add(moonlit1, PileType.Hand);
+        await CardPileCmd.Add(moonlit2, PileType.Hand);
+        AutoTestAssert.True(moonlit1.TryManualPlay(null), "Play MoonlitVision #1 after 2 Spells");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(6, pcs.Energy, "MoonlitVision #1 cost 2 (8 -> 6)");
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<MoonlitVisionPower>(), "MoonlitVisionPower(1) applied");
+
+        var mvSpellNoRefund = combatState.CreateCard<Cryostasis>(player);
+        await CardPileCmd.Add(mvSpellNoRefund, PileType.Hand);
+        AutoTestAssert.True(mvSpellNoRefund.TryManualPlay(null), "Play Spell after MoonlitVision #1 (already spent this turn)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(5, pcs.Energy, "MoonlitVision #1 gave 0 refund because Spell already played this turn (6 -> 5)");
+
+        AutoTestAssert.True(moonlit2.TryManualPlay(null), "Play MoonlitVision #2 to stack to 2");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(3, pcs.Energy, "MoonlitVision #2 cost 2 (5 -> 3)");
+        AutoTestAssert.Equal(2, player.Creature.GetPowerAmount<MoonlitVisionPower>(), "MoonlitVisionPower stacked to 2");
+
+        var mvSpell1 = combatState.CreateCard<Cryostasis>(player);
+        var mvSpell2 = combatState.CreateCard<Cryostasis>(player);
+        await CardPileCmd.Add(mvSpell1, PileType.Hand);
+        await CardPileCmd.Add(mvSpell2, PileType.Hand);
+        AutoTestAssert.True(mvSpell1.TryManualPlay(null), "Play Spell after MoonlitVision #2 (cost 1 -> refunds 1)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(3, pcs.Energy, "Stacked MoonlitVision #2 refunded +1 Energy (3 - 1 + 1 = 3)");
+        AutoTestAssert.True(mvSpell2.TryManualPlay(null), "Play next Spell (both triggers now spent)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(2, pcs.Energy, "MoonlitVision did NOT trigger again once exhausted (3 - 1 = 2)");
+
+        // 3. MysticOrder: draws 2 cards and Conjures a Spell!
+        await ResetHandAndEnergy();
+        for (int i = 0; i < 4; i++)
+            await CardPileCmd.Add(combatState.CreateCard<AwakenedStrike>(player), PileType.Draw);
+        var mystic = combatState.CreateCard<MysticOrder>(player);
+        await CardPileCmd.Add(mystic, PileType.Hand);
+        int conjuresBefore = AwakenedSpellbook.GetConjuresThisCombat(combatState, player);
+        AutoTestAssert.True(mystic.TryManualPlay(null), "Play MysticOrder");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(3, pcs.Hand.Cards.Count, "MysticOrder drew 2 cards + Conjured 1 Spell = 3 cards in Hand");
+        AutoTestAssert.Equal(conjuresBefore + 1, AwakenedSpellbook.GetConjuresThisCombat(combatState, player), "MysticOrder Conjured 1 Spell");
+
+        // 4. Primacy: 1st Strength gain draws 1 card; 2nd does NOT; negative Strength does NOT trigger!
+        await ResetHandAndEnergy();
+        for (int i = 0; i < 4; i++)
+            await CardPileCmd.Add(combatState.CreateCard<AwakenedStrike>(player), PileType.Draw);
+        var primacy = combatState.CreateCard<Primacy>(player);
+        await CardPileCmd.Add(primacy, PileType.Hand);
+        AutoTestAssert.True(primacy.TryManualPlay(null), "Play Primacy");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+
+        // Negative Strength must NOT trigger or consume Primacy!
+        var fvNeg = combatState.CreateCard<FeatherVeil>(player);
+        await CardPileCmd.Add(fvNeg, PileType.Hand);
+        AutoTestAssert.True(fvNeg.TryManualPlay(null), "Play FeatherVeil (-1 Strength)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(0, pcs.Hand.Cards.Count, "Negative Strength did NOT trigger Primacy");
+
+        var cer1 = combatState.CreateCard<Ceremony>(player);
+        var cer2 = combatState.CreateCard<Ceremony>(player);
+        await CardPileCmd.Add(cer1, PileType.Hand);
+        await CardPileCmd.Add(cer2, PileType.Hand);
+        AutoTestAssert.True(cer1.TryManualPlay(null), "Play 1st Ceremony (+1 Strength)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(2, pcs.Hand.Cards.Count, "Primacy drew 1 card on 1st Strength gain (cer2 + 1 drawn)");
+        AutoTestAssert.True(cer2.TryManualPlay(null), "Play 2nd Ceremony (+1 Strength)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(1, pcs.Hand.Cards.Count, "Primacy did NOT draw on 2nd Strength gain");
+        if (player.Creature.GetPower<StrengthPower>() is { } strClean1) await PowerCmd.Remove(strClean1);
+
+        // 5. RavenStrike (Strike tag, Chant plays top card of Draw Pile; non-Chant does not):
+        // Play a non-Power card first so last card played is NOT Ceremony (a Power)!
+        await ResetHandAndEnergy();
+        var clearChant = combatState.CreateCard<AwakenedDefend>(player);
+        await CardPileCmd.Add(clearChant, PileType.Hand);
+        AutoTestAssert.True(clearChant.TryManualPlay(null), "Play Defend so last card is non-Power");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        await ResetHandAndEnergy();
+        var ravenNoChant = combatState.CreateCard<RavenStrike>(player);
+        AutoTestAssert.True(ravenNoChant.Tags.Contains(CardTag.Strike), "RavenStrike has Strike tag");
+        var topDefend = combatState.CreateCard<AwakenedDefend>(player);
+        await CardPileCmd.Add(topDefend, PileType.Draw, CardPilePosition.Top);
+        await CardPileCmd.Add(ravenNoChant, PileType.Hand);
+        int hpBefore = enemy1.CurrentHp;
+        AutoTestAssert.True(ravenNoChant.TryManualPlay(enemy1), "Play RavenStrike without Chant");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(hpBefore - 15, enemy1.CurrentHp, "RavenStrike dealt 15 damage");
+        AutoTestAssert.Equal(0, player.Creature.Block, "RavenStrike without Chant did NOT auto-play top card");
+        AutoTestAssert.Equal(PileType.Draw, topDefend.Pile?.Type, "Top card stayed in Draw Pile");
+
+        // Now play a Power (RisingChant — Ethereal base, non-Ethereal upgraded) to activate Chant AND RisingChantPower!
+        var risingPlus = combatState.CreateCard<RisingChant>(player);
+        AutoTestAssert.True(risingPlus.Keywords.Contains(CardKeyword.Ethereal), "Base RisingChant is Ethereal");
+        CardCmd.Upgrade(risingPlus);
+        AutoTestAssert.True(!risingPlus.Keywords.Contains(CardKeyword.Ethereal), "Upgraded RisingChant+ removes Ethereal");
+        await CardPileCmd.Add(risingPlus, PileType.Hand);
+        AutoTestAssert.True(risingPlus.TryManualPlay(null), "Play RisingChant+ (Power -> activates Chant + RisingChantPower)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<RisingChantPower>(), "RisingChantPower(1) active");
+
+        // 6. Victuals with Chant + RisingChantPower(1): doubles +2 Energy -> +4 Energy, Exhausts!
+        await ResetHandAndEnergy(energy: 2);
+        var victuals = combatState.CreateCard<Victuals>(player);
+        await CardPileCmd.Add(victuals, PileType.Hand);
+        AutoTestAssert.True(victuals.TryManualPlay(null), "Play Victuals with Chant + RisingChantPower");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(6, pcs.Energy, "Victuals + RisingChantPower gained 2x2 = +4 Energy (2 -> 6)");
+        AutoTestAssert.Equal(PileType.Exhaust, victuals.Pile?.Type, "Victuals exhausted");
+
+        // 2nd Chant in the same turn (RavenStrike after Ceremony) only triggers ONCE (RisingChantPower spent for this turn)!
+        await ResetHandAndEnergy();
+        var topDefend2 = combatState.CreateCard<AwakenedDefend>(player);
+        var secondDefend = combatState.CreateCard<AwakenedDefend>(player);
+        await CardPileCmd.Add(secondDefend, PileType.Draw, CardPilePosition.Top);
+        await CardPileCmd.Add(topDefend2, PileType.Draw, CardPilePosition.Top);
+        var cerForRaven = combatState.CreateCard<Ceremony>(player);
+        var ravenChant = combatState.CreateCard<RavenStrike>(player);
+        await CardPileCmd.Add(cerForRaven, PileType.Hand);
+        await CardPileCmd.Add(ravenChant, PileType.Hand);
+        AutoTestAssert.True(cerForRaven.TryManualPlay(null), "Play Ceremony for Chant");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.True(ravenChant.TryManualPlay(enemy1), "Play RavenStrike with Chant (RisingChant already used)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(5, player.Creature.Block, "RavenStrike auto-played exactly 1 top card (Defend = 5 Block)");
+        AutoTestAssert.Equal(PileType.Draw, secondDefend.Pile?.Type, "2nd card stayed in Draw Pile (RisingChant already spent)");
+        if (player.Creature.GetPower<StrengthPower>() is { } strClean2) await PowerCmd.Remove(strClean2);
+
+        // Victuals without Chant: gains 0 Energy, still Exhausts.
+        await ResetHandAndEnergy(energy: 3);
+        var victualsNoChant = combatState.CreateCard<Victuals>(player);
+        await CardPileCmd.Add(victualsNoChant, PileType.Hand);
+        AutoTestAssert.True(victualsNoChant.TryManualPlay(null), "Play Victuals without Chant");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(3, pcs.Energy, "Victuals without Chant gained 0 Energy");
+        AutoTestAssert.Equal(PileType.Exhaust, victualsNoChant.Pile?.Type, "Victuals without Chant still exhausted");
+
+        // 7. Siphon: Chant steals 2 Strength; Artifact blocks steal completely!
+        await ResetHandAndEnergy();
+        if (enemy1.GetPower<PiercingWailPower>() is { } pwClean) await PowerCmd.Remove(pwClean);
+        if (enemy1.GetPower<StrengthPower>() is { } esClean) await PowerCmd.Remove(esClean);
+        var cerForSiphon = combatState.CreateCard<Ceremony>(player);
+        var siphon = combatState.CreateCard<Siphon>(player);
+        await CardPileCmd.Add(cerForSiphon, PileType.Hand);
+        await CardPileCmd.Add(siphon, PileType.Hand);
+        AutoTestAssert.True(cerForSiphon.TryManualPlay(null), "Play Ceremony for Siphon Chant");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        int playerStrBeforeSiphon = player.Creature.GetPowerAmount<StrengthPower>();
+        AutoTestAssert.True(siphon.TryManualPlay(enemy1), "Play Siphon with Chant");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(-2, enemy1.GetPowerAmount<StrengthPower>(), "Siphon reduced enemy1 Strength by 2");
+        AutoTestAssert.Equal(playerStrBeforeSiphon + 2, player.Creature.GetPowerAmount<StrengthPower>(), "Siphon gave player +2 temporary Strength");
+        AutoTestAssert.Equal(2, player.Creature.GetPowerAmount<FlexPotionPower>(), "Siphon applied FlexPotionPower(2)");
+
+        // Siphon vs Artifact: enemy keeps Strength AND player does NOT gain Strength!
+        await PowerCmd.Apply<ArtifactPower>(ctx, enemy2, 1m, enemy2, null);
+        var cerForSiphon2 = combatState.CreateCard<Ceremony>(player);
+        var siphonArtifact = combatState.CreateCard<Siphon>(player);
+        await CardPileCmd.Add(cerForSiphon2, PileType.Hand);
+        await CardPileCmd.Add(siphonArtifact, PileType.Hand);
+        AutoTestAssert.True(cerForSiphon2.TryManualPlay(null), "Play Ceremony for Siphon vs Artifact");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        int strBeforeArtifactSiphon = player.Creature.GetPowerAmount<StrengthPower>();
+        AutoTestAssert.True(siphonArtifact.TryManualPlay(enemy2), "Play Siphon on Artifact enemy2");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(0, enemy2.GetPowerAmount<StrengthPower>(), "Artifact blocked Siphon Strength loss");
+        AutoTestAssert.Equal(strBeforeArtifactSiphon, player.Creature.GetPowerAmount<StrengthPower>(), "Player did NOT gain Strength when Siphon was blocked by Artifact");
+        if (player.Creature.GetPower<FlexPotionPower>() is { } flexClean) await PowerCmd.Remove(flexClean);
+        if (player.Creature.GetPower<StrengthPower>() is { } strClean3) await PowerCmd.Remove(strClean3);
+
+        // 8. SongOfSorrow: whenever a Void is created, ALL enemies lose 7 HP (ignores enemy Block)!
+        await ResetHandAndEnergy();
+        var song = combatState.CreateCard<SongOfSorrow>(player);
+        await CardPileCmd.Add(song, PileType.Hand);
+        AutoTestAssert.True(song.TryManualPlay(null), "Play SongOfSorrow");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        await CreatureCmd.GainBlock(enemy1, 50m, ValueProp.Unpowered, null);
+        int e1Before = enemy1.CurrentHp;
+        int e2Before = enemy2.CurrentHp;
+        var knifes = combatState.CreateCard<KnifesEdge>(player);
+        await CardPileCmd.Add(knifes, PileType.Hand);
+        AutoTestAssert.True(knifes.TryManualPlay(null), "Play KnifesEdge (creates 2 Voids)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(e1Before - 14, enemy1.CurrentHp, "SongOfSorrow dealt 2x7 = 14 unblockable HP loss to blocked enemy1");
+        AutoTestAssert.Equal(e2Before - 14, enemy2.CurrentHp, "SongOfSorrow dealt 2x7 = 14 unblockable HP loss to enemy2");
+        // Enemy-added Void (creator == null) must NOT trigger SongOfSorrow!
+        e1Before = enemy1.CurrentHp;
+        var enemyVoid = combatState.CreateCard<StsCards.Void>(player);
+        await CardPileCmd.AddGeneratedCardToCombat(enemyVoid, PileType.Discard, creator: null);
+        AutoTestAssert.Equal(e1Before, enemy1.CurrentHp, "Enemy-created Void (creator == null) did NOT trigger SongOfSorrow");
+        await CreatureCmd.LoseBlock(ctx, enemy1, enemy1.Block, null);
+        if (player.Creature.GetPower<StrengthPower>() is { } strClean4) await PowerCmd.Remove(strClean4);
+
+        // 9. SoulStrike: Strike tag, 4x3 = 12 damage, costs 0 right now because >= 3 Powers were played this turn!
+        await ResetHandAndEnergy(energy: 5);
+        var soulStrike = combatState.CreateCard<SoulStrike>(player);
+        AutoTestAssert.True(soulStrike.Tags.Contains(CardTag.Strike), "SoulStrike has Strike tag");
+        await CardPileCmd.Add(soulStrike, PileType.Hand);
+        AutoTestAssert.Equal(0, soulStrike.EnergyCost.GetAmountToSpend(), "SoulStrike costs 0 after 3+ Powers played this turn");
+        hpBefore = enemy1.CurrentHp;
+        AutoTestAssert.True(soulStrike.TryManualPlay(enemy1), "Play SoulStrike for 0 Energy");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(5, pcs.Energy, "SoulStrike spent 0 Energy");
+        AutoTestAssert.Equal(hpBefore - 12, enemy1.CurrentHp, "SoulStrike dealt 4x3 = 12 damage");
+
+        // 10. SplitWide + StrengthReturnPower: deals 5, exhausts, does NOT self-trigger; next attack grants +1 temp Strength!
+        await ResetHandAndEnergy();
+        var splitWide = combatState.CreateCard<SplitWide>(player);
+        await CardPileCmd.Add(splitWide, PileType.Hand);
+        hpBefore = enemy1.CurrentHp;
+        AutoTestAssert.True(splitWide.TryManualPlay(enemy1), "Play SplitWide");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(hpBefore - 5, enemy1.CurrentHp, "SplitWide dealt 5 damage");
+        AutoTestAssert.Equal(1, enemy1.GetPowerAmount<StrengthReturnPower>(), "SplitWide applied StrengthReturnPower(1)");
+        AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<StrengthPower>(), "SplitWide did NOT self-trigger StrengthReturnPower");
+        AutoTestAssert.Equal(PileType.Exhaust, splitWide.Pile?.Type, "SplitWide exhausted");
+
+        // Unpowered damage must NOT trigger StrengthReturnPower!
+        await CreatureCmd.Damage(ctx, enemy1, 3m, ValueProp.Unpowered, dealer: player.Creature, cardSource: null, cardPlay: null);
+        AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<StrengthPower>(), "Unpowered damage did NOT trigger StrengthReturnPower");
+
+        var followUpAtk = combatState.CreateCard<AwakenedStrike>(player);
+        await CardPileCmd.Add(followUpAtk, PileType.Hand);
+        AutoTestAssert.True(followUpAtk.TryManualPlay(enemy1), "Attack enemy1 with StrengthReturnPower");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<StrengthPower>(), "Attacking SplitWide enemy granted +1 temporary Strength");
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<FlexPotionPower>(), "SplitWide granted FlexPotionPower(1)");
+        if (player.Creature.GetPower<FlexPotionPower>() is { } flexClean2) await PowerCmd.Remove(flexClean2);
+        if (player.Creature.GetPower<StrengthPower>() is { } strClean5) await PowerCmd.Remove(strClean5);
+
+        // 11. StormRuler + GrimoirePower: Conjures and adds +6 damage ONLY to Thunderbolts!
+        await ResetHandAndEnergy();
+        conjuresBefore = AwakenedSpellbook.GetConjuresThisCombat(combatState, player);
+        var stormRuler = combatState.CreateCard<StormRuler>(player);
+        await CardPileCmd.Add(stormRuler, PileType.Hand);
+        AutoTestAssert.True(stormRuler.TryManualPlay(null), "Play StormRuler");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(conjuresBefore + 1, AwakenedSpellbook.GetConjuresThisCombat(combatState, player), "StormRuler Conjured");
+        AutoTestAssert.Equal(6, player.Creature.GetPowerAmount<GrimoirePower>(), "StormRuler applied GrimoirePower(6)");
+
+        var bolt = combatState.CreateCard<Thunderbolt>(player);
+        await CardPileCmd.Add(bolt, PileType.Hand);
+        hpBefore = enemy2.CurrentHp;
+        AutoTestAssert.True(bolt.TryManualPlay(enemy2), "Play Thunderbolt under GrimoirePower(6)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(hpBefore - 18, enemy2.CurrentHp, "Thunderbolt dealt 12 + 6 = 18 damage under GrimoirePower(6)");
+
+        var plainStrike = combatState.CreateCard<AwakenedStrike>(player);
+        await CardPileCmd.Add(plainStrike, PileType.Hand);
+        hpBefore = enemy2.CurrentHp;
+        AutoTestAssert.True(plainStrike.TryManualPlay(enemy2), "Play Strike under GrimoirePower(6)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(hpBefore - 6, enemy2.CurrentHp, "GrimoirePower did NOT boost non-Thunderbolt Strike");
+
+        // 12. WaveOfMiasma: gains 12 Block, applies 4 Manaburn to ALL enemies, Exhausts!
+        await ResetHandAndEnergy();
+        var wave = combatState.CreateCard<WaveOfMiasma>(player);
+        await CardPileCmd.Add(wave, PileType.Hand);
+        AutoTestAssert.True(wave.TryManualPlay(null), "Play WaveOfMiasma");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(12, player.Creature.Block, "WaveOfMiasma gained 12 Block");
+        AutoTestAssert.Equal(4, enemy1.GetPowerAmount<ManaburnPower>(), "WaveOfMiasma applied 4 Manaburn to enemy1");
+        AutoTestAssert.Equal(4, enemy2.GetPowerAmount<ManaburnPower>(), "WaveOfMiasma applied 4 Manaburn to enemy2");
+        AutoTestAssert.Equal(PileType.Exhaust, wave.Pile?.Type, "WaveOfMiasma exhausted");
+
+        // 13. Cross-turn verification: TakeFlight (without & with Chant -> Blur), Thaumaturgy, Spellshield (real turn-end AfterFlush!), SingularityShield (real BlockNextTurnPower!)
+        // First test TakeFlight WITHOUT Chant (last card was WaveOfMiasma, a Skill) -> no BlurPower!
+        await ResetHandAndEnergy();
+        var takeFlightNoChant = combatState.CreateCard<TakeFlight>(player);
+        await CardPileCmd.Add(takeFlightNoChant, PileType.Hand);
+        AutoTestAssert.True(takeFlightNoChant.TryManualPlay(null), "Play TakeFlight without Chant");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(12, player.Creature.Block, "TakeFlight without Chant gained 12 Block");
+        AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<BlurPower>(), "TakeFlight without Chant did NOT apply BlurPower");
+
+        await ResetHandAndEnergy();
+        var thaum = combatState.CreateCard<Thaumaturgy>(player);
+        await CardPileCmd.Add(thaum, PileType.Hand);
+        AutoTestAssert.True(thaum.TryManualPlay(null), "Play Thaumaturgy");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<DexterityPower>(), "Thaumaturgy granted +1 Dexterity");
+        AutoTestAssert.Equal(2, player.Creature.GetPowerAmount<ThaumaturgyPower>(), "Thaumaturgy applied ThaumaturgyPower(2)");
+
+        // Spellshield (2 Block per Retained card)
+        var spellshield = combatState.CreateCard<Spellshield>(player);
+        await CardPileCmd.Add(spellshield, PileType.Hand);
+        AutoTestAssert.True(spellshield.TryManualPlay(null), "Play Spellshield");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(2, player.Creature.GetPowerAmount<SpellshieldPower>(), "Spellshield applied SpellshieldPower(2)");
+
+        // TakeFlight right after Spellshield (Power -> Chant active!): gains 12 + 1 Dex = 13 Block + BlurPower(1)!
+        var takeFlight = combatState.CreateCard<TakeFlight>(player);
+        await CardPileCmd.Add(takeFlight, PileType.Hand);
+        AutoTestAssert.True(takeFlight.TryManualPlay(null), "Play TakeFlight with Chant");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(13, player.Creature.Block, "TakeFlight gained 12 + 1 Dex = 13 Block");
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<BlurPower>(), "TakeFlight Chant applied BlurPower(1)");
+
+        // SingularityShield: gains 8 + 1 Dex = 9 Block now, applies BlockNextTurnPower(9) and HermitDrainedPower(1)!
+        var singShield = combatState.CreateCard<SingularityShield>(player);
+        await CardPileCmd.Add(singShield, PileType.Hand);
+        AutoTestAssert.True(singShield.TryManualPlay(null), "Play SingularityShield");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(22, player.Creature.Block, "SingularityShield added 9 Block (13 -> 22)");
+        AutoTestAssert.Equal(9, player.Creature.GetPowerAmount<BlockNextTurnPower>(), "SingularityShield applied BlockNextTurnPower(9)");
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<HermitDrainedPower>(), "SingularityShield applied 1 Drained");
+
+        // Hold 2 Retained Spells in Hand (BurningStudy + Cryostasis) and drop enemy Strength so enemy attacks deal 0.
+        // Real end-of-turn flush triggers SpellshieldPower (+4 Block), Blur preserves 22 + 4 = 26, and BlockNextTurnPower adds +9 -> exact 35 Block on Round 2!
+        var retain1 = combatState.CreateCard<BurningStudy>(player);
+        var retain2 = combatState.CreateCard<Cryostasis>(player);
+        await CardPileCmd.Add(retain1, PileType.Hand);
+        await CardPileCmd.Add(retain2, PileType.Hand);
+        await PowerCmd.Apply<StrengthPower>(ctx, enemy1, -50m, enemy1, null);
+        await PowerCmd.Apply<StrengthPower>(ctx, enemy2, -50m, enemy2, null);
+
+        // Advance to Round 2: verify REAL cross-turn Spellshield + Blur + BlockNextTurnPower + Thaumaturgy + Drained + Primacy/RisingChant/MoonlitVision resets!
+        await DownfallAutoTestRunner.EndTurnAndWaitForRoundAsync(player, 2);
+        AutoTestAssert.Equal(22 + 4 + 9, player.Creature.Block, "Real turn-end Spellshield (+4) + Blur (kept 26) + SingularityShield BlockNextTurn (+9) = 35 Block");
+        AutoTestAssert.True(pcs.Hand.Cards.OfType<Ceremony>().Any(), "ThaumaturgyPower added Ceremony to Hand on Turn 2 start");
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<ThaumaturgyPower>(), "ThaumaturgyPower decremented 2 -> 1");
+        AutoTestAssert.Equal(player.MaxEnergy - 1, pcs.Energy, "SingularityShield Drained reduced Turn 2 Energy by 1");
+
+        // On Turn 2 (0 Powers played yet), SoulStrike is back to full cost 3!
+        var soulStrikeT2 = combatState.CreateCard<SoulStrike>(player);
+        await CardPileCmd.Add(soulStrikeT2, PileType.Hand);
+        AutoTestAssert.Equal(3, soulStrikeT2.EnergyCost.GetAmountToSpend(), "SoulStrike reset to full cost 3 on Turn 2");
+
+        // Play the Ceremony from Thaumaturgy: verifies PrimacyPower reset (+1 draw), SoulStrike partial cost (3 -> 2), and activates Chant!
+        for (int i = 0; i < 3; i++)
+            await CardPileCmd.Add(combatState.CreateCard<AwakenedStrike>(player), PileType.Draw);
+        var round2Ceremony = pcs.Hand.Cards.OfType<Ceremony>().First();
+        int handBeforeR2Cer = pcs.Hand.Cards.Count;
+        AutoTestAssert.True(round2Ceremony.TryManualPlay(null), "Play Round 2 Ceremony from Thaumaturgy");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(handBeforeR2Cer, pcs.Hand.Cards.Count, "PrimacyPower reset on Turn 2 and drew 1 card (-1 played +1 drawn)");
+        AutoTestAssert.Equal(2, soulStrikeT2.EnergyCost.GetAmountToSpend(), "SoulStrike reduced from 3 -> 2 after 1 Power on Turn 2");
+
+        // Play Victuals right after Ceremony: verifies RisingChantPower reset on Turn 2 (2x2 = +4 Energy)!
+        // Free hand space first (Turn 2 retained + drawn + Ceremony + RippedDoll + Primacy filled 10 slots).
+        foreach (var c in pcs.Hand.Cards.Take(3).ToList())
+            await CardPileCmd.Add(c, PileType.Discard);
+        int energyBeforeR2Victuals = pcs.Energy;
+        var r2Victuals = combatState.CreateCard<Victuals>(player);
+        await CardPileCmd.Add(r2Victuals, PileType.Hand);
+        AutoTestAssert.Equal(PileType.Hand, r2Victuals.Pile?.Type, "r2Victuals is in Hand");
+        AutoTestAssert.True(r2Victuals.TryManualPlay(null), "Play Victuals on Turn 2 with Chant + reset RisingChantPower");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(energyBeforeR2Victuals + 4, pcs.Energy, "RisingChantPower reset on Turn 2 and doubled Victuals (+4 Energy)");
+
+        // MoonlitVision reset on Turn 2: 1st Spell refunds +1 Energy!
+        int energyBeforeT2Spell = pcs.Energy;
+        var t2Spell = combatState.CreateCard<Cryostasis>(player);
+        await CardPileCmd.Add(t2Spell, PileType.Hand);
+        AutoTestAssert.True(t2Spell.TryManualPlay(null), "Play 1st Spell on Turn 2");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(energyBeforeT2Spell, pcs.Energy, "MoonlitVision reset on Turn 2 and refunded 1 Energy");
+    }
 }

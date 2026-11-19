@@ -21,7 +21,7 @@ public sealed class Recitation()
     protected override async Task OnPlay(PlayerChoiceContext choiceContext, CardPlay cardPlay)
     {
         ArgumentNullException.ThrowIfNull(cardPlay.Target);
-        int hits = TryTriggerChant(cardPlay) ? 2 : 1;
+        int hits = 1 + TryTriggerChantCount(cardPlay);
 
         await DamageCmd.Attack(DynamicVars.Damage.BaseValue)
             .WithHitCount(hits)

@@ -1,4 +1,5 @@
 using BaseLib.Utils;
+using Downfall.Awakened.Powers;
 using Downfall.Core;
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Entities.Cards;
@@ -73,18 +74,22 @@ public abstract class AwakenedCard(
     protected bool IsChantActiveInHand() =>
         _chantActivated || WasLastCardPlayedPower(Owner, CombatState);
 
-    protected bool TryTriggerChant(CardPlay cardPlay)
+    protected bool TryTriggerChant(CardPlay cardPlay) =>
+        TryTriggerChantCount(cardPlay) > 0;
+
+    protected int TryTriggerChantCount(CardPlay cardPlay)
     {
         if (!UsesChant)
-            return false;
+            return 0;
 
         if (_chantActivated || WasLastCardPlayedPower(Owner, CombatState, cardPlay))
         {
             _chantActivated = true;
-            return true;
+            var rising = Owner.Creature.GetPower<RisingChantPower>();
+            return rising?.TryConsumeDoubleChant() == true ? 2 : 1;
         }
 
-        return false;
+        return 0;
     }
 
     public override Task AfterCardPlayed(PlayerChoiceContext choiceContext, CardPlay cardPlay)

@@ -30,12 +30,13 @@ public sealed class FlareShot()
             .WithHitFx("vfx/vfx_attack_blunt")
             .Execute(choiceContext);
 
-        if (TryTriggerChant(cardPlay))
+        int chantTriggers = TryTriggerChantCount(cardPlay);
+        if (chantTriggers > 0)
         {
             await PowerCmd.Apply<DrawCardsNextTurnPower>(
                 choiceContext,
                 Owner.Creature,
-                DynamicVars.Cards.IntValue,
+                DynamicVars.Cards.IntValue * chantTriggers,
                 Owner.Creature,
                 this);
         }
