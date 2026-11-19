@@ -1,13 +1,17 @@
 using Downfall.Hermit;
 using Downfall.Hermit.Cards;
+using Downfall.Hermit.Potions;
 using Downfall.Hermit.Powers;
 using Downfall.Hermit.Relics;
+using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Commands;
 using MegaCrit.Sts2.Core.Entities.Cards;
+using MegaCrit.Sts2.Core.Entities.Relics;
 using MegaCrit.Sts2.Core.GameActions.Multiplayer;
 using MegaCrit.Sts2.Core.Models;
 using StsCards = MegaCrit.Sts2.Core.Models.Cards;
 using MegaCrit.Sts2.Core.Models.Powers;
+using MegaCrit.Sts2.Core.Rooms;
 using MegaCrit.Sts2.Core.Runs;
 using MegaCrit.Sts2.Core.ValueProps;
 
@@ -1300,5 +1304,249 @@ internal static class HermitTests
         playerHpBefore = player.Creature.CurrentHp;
         await DownfallAutoTestRunner.EndTurnAndWaitForRoundAsync(player, 3);
         AutoTestAssert.Equal(playerHpBefore, player.Creature.CurrentHp, "OverwhelmingPower did NOT deal HP loss with >0 Energy");
+    }
+
+    public static async Task TestRelicsAndPotionsInCombat()
+    {
+        var (player, _, combatState) = await DownfallAutoTestRunner.StartCombatAsync<TheHermit>("DFHRMRP");
+        var pcs = AutoTestAssert.NotNull(player.PlayerCombatState, "PlayerCombatState");
+        var enemy1 = AutoTestAssert.NotNull(combatState.HittableEnemies.FirstOrDefault(), "First enemy");
+        var enemy2 = await CreatureCmd.Add<MegaCrit.Sts2.Core.Models.Monsters.Nibbit>(combatState);
+        var ctx = new ThrowingPlayerChoiceContext();
+
+        await CreatureCmd.GainMaxHp(enemy1, 500m);
+        await CreatureCmd.GainMaxHp(enemy2, 500m);
+
+        async Task ResetHandAndEnergy()
+        {
+            foreach (var c in pcs.Hand.Cards.ToList())
+                await CardPileCmd.Add(c, PileType.Discard);
+            if (pcs.Energy < 10)
+                await PlayerCmd.GainEnergy(10 - pcs.Energy, player);
+        }
+
+        // 1. ClaspedLocket + StraightRazor (both Remove AND Transform!):
+        //    ClaspedLocket replaces OldLocket and adds 2 Injuries to Deck; StraightRazor heals 15 HP on Remove and 15 HP on Transform!
+        AutoTestAssert.True(ModelDb.Relic<ClaspedLocket>().IsAllowed(player.RunState), "ClaspedLocket allowed while owning OldLocket");
+        int injuriesBefore = player.Deck.Cards.Count(c => c is StsCards.Injury);
+        var clasped = await RelicCmd.Obtain<ClaspedLocket>(player);
+        AutoTestAssert.True(!player.Relics.OfType<OldLocket>().Any(), "ClaspedLocket replaced OldLocket");
+        AutoTestAssert.Equal(injuriesBefore + 2, player.Deck.Cards.Count(c => c is StsCards.Injury), "ClaspedLocket added 2 Injuries to deck");
+
+        await RelicCmd.Obtain<StraightRazor>(player);
+        await CreatureCmd.Damage(ctx, player.Creature, 40m, ValueProp.Unblockable | ValueProp.Unpowered, null, null, null);
+        int hpBeforeRazor = player.Creature.CurrentHp;
+        var deckInjury1 = player.Deck.Cards.OfType<StsCards.Injury>().First();
+        await CardPileCmd.RemoveFromDeck(deckInjury1, showPreview: false);
+        AutoTestAssert.Equal(hpBeforeRazor + 15, player.Creature.CurrentHp, "StraightRazor healed 15 HP on deck card removal");
+        var deckInjury2 = player.Deck.Cards.OfType<StsCards.Injury>().First();
+        await CardCmd.TransformTo<HermitStrike>(deckInjury2);
+        AutoTestAssert.Equal(hpBeforeRazor + 30, player.Creature.CurrentHp, "StraightRazor healed 15 HP on deck card Transform");
+
+        // 2. ClaspedLocket + CharredGlove in combat:
+        //    First Curse drawn exhausts + draws 2 cards AND triggers CharredGlove (+3 Vigor); 2nd Curse drawn stays in hand + triggers CharredGlove (+3 Vigor)!
+        await ResetHandAndEnergy();
+        await RelicCmd.Obtain<CharredGlove>(player);
+        var c1 = combatState.CreateCard<StsCards.Clumsy>(player);
+        var c2 = combatState.CreateCard<StsCards.Injury>(player);
+        var filler1 = combatState.CreateCard<HermitDefend>(player);
+        var filler2 = combatState.CreateCard<HermitDefend>(player);
+        await CardPileCmd.Add(c2, PileType.Draw, CardPilePosition.Top);
+        await CardPileCmd.Add(filler2, PileType.Draw, CardPilePosition.Top);
+        await CardPileCmd.Add(filler1, PileType.Draw, CardPilePosition.Top);
+        await CardPileCmd.Add(c1, PileType.Draw, CardPilePosition.Top);
+        await CardPileCmd.Draw(ctx, 1, player);
+        AutoTestAssert.True(PileType.Exhaust.GetPile(player).Cards.Contains(c1), "ClaspedLocket exhausted first Curse drawn this turn");
+        AutoTestAssert.Equal(2, pcs.Hand.Cards.Count, "ClaspedLocket drew 2 replacement cards");
+        AutoTestAssert.Equal(3, player.Creature.GetPowerAmount<VigorPower>(), "CharredGlove granted 3 Vigor on Curse draw");
+
+        await CardPileCmd.Draw(ctx, 1, player);
+        AutoTestAssert.True(pcs.Hand.Cards.Contains(c2), "ClaspedLocket did NOT exhaust second Curse same turn");
+        AutoTestAssert.Equal(6, player.Creature.GetPowerAmount<VigorPower>(), "CharredGlove granted +3 Vigor on 2nd Curse draw");
+        await PowerCmd.Remove<VigorPower>(player.Creature);
+        await RelicCmd.Remove(clasped);
+
+        // 3. BlackPowder: Dead On deals 2 damage to ALL enemies, and 4 (2x2) with Snipe!
+        await ResetHandAndEnergy();
+        await RelicCmd.Obtain<BlackPowder>(player);
+        var deadeye = combatState.CreateCard<Deadeye>(player);
+        await CardPileCmd.Add(deadeye, PileType.Hand);
+        int e1Before = enemy1.CurrentHp;
+        int e2Before = enemy2.CurrentHp;
+        AutoTestAssert.True(deadeye.TryManualPlay(enemy1), "Play Dead On Deadeye with BlackPowder");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(e1Before - 5 - 2, enemy1.CurrentHp, "BlackPowder dealt +2 damage to enemy1");
+        AutoTestAssert.Equal(e2Before - 2, enemy2.CurrentHp, "BlackPowder dealt 2 damage to enemy2");
+        await PowerCmd.Remove<StrengthPower>(player.Creature);
+
+        await ResetHandAndEnergy();
+        await PowerCmd.Apply<SnipePower>(ctx, player.Creature, 1m, player.Creature, null);
+        var deadeye2 = combatState.CreateCard<Deadeye>(player);
+        await CardPileCmd.Add(deadeye2, PileType.Hand);
+        e1Before = enemy1.CurrentHp;
+        e2Before = enemy2.CurrentHp;
+        AutoTestAssert.True(deadeye2.TryManualPlay(enemy1), "Play Sniped Dead On Deadeye with BlackPowder");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(e1Before - 5 - 4, enemy1.CurrentHp, "Sniped BlackPowder dealt +4 damage to enemy1");
+        AutoTestAssert.Equal(e2Before - 4, enemy2.CurrentHp, "Sniped BlackPowder dealt 4 damage to enemy2");
+        await PowerCmd.Remove<StrengthPower>(player.Creature);
+
+        // 4. Horseshoe: reduces incoming Weak/Frail/Vulnerable by 1 (1 -> 0, 2 -> 1); leaves other debuffs untouched!
+        await RelicCmd.Obtain<Horseshoe>(player);
+        await PowerCmd.Apply<WeakPower>(ctx, player.Creature, 1m, enemy1, null);
+        await PowerCmd.Apply<VulnerablePower>(ctx, player.Creature, 2m, enemy1, null);
+        await PowerCmd.Apply<FrailPower>(ctx, player.Creature, 2m, enemy1, null);
+        await PowerCmd.Apply<BruisePower>(ctx, player.Creature, 3m, enemy1, null);
+        AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<WeakPower>(), "Horseshoe reduced 1 Weak -> 0");
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<VulnerablePower>(), "Horseshoe reduced 2 Vulnerable -> 1");
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<FrailPower>(), "Horseshoe reduced 2 Frail -> 1");
+        AutoTestAssert.Equal(3, player.Creature.GetPowerAmount<BruisePower>(), "Horseshoe left non-Weak/Frail/Vuln debuff (Bruise) untouched");
+        await PowerCmd.Remove<VulnerablePower>(player.Creature);
+        await PowerCmd.Remove<FrailPower>(player.Creature);
+        await PowerCmd.Remove<BruisePower>(player.Creature);
+
+        // 5. RedScarf: gains 3 Block on NEW enemy debuff, 0 on stacking existing debuff, 0 when blocked by Artifact, +3 on negative Strength!
+        await RelicCmd.Obtain<RedScarf>(player);
+        if (player.Creature.Block > 0)
+            await CreatureCmd.LoseBlock(ctx, player.Creature, player.Creature.Block, null);
+        await PowerCmd.Apply<ArtifactPower>(ctx, enemy1, 1m, enemy1, null);
+        await PowerCmd.Apply<WeakPower>(ctx, enemy1, 1m, player.Creature, null);
+        AutoTestAssert.Equal(0, player.Creature.Block, "RedScarf did NOT trigger when Artifact blocked Weak");
+        await PowerCmd.Apply<WeakPower>(ctx, enemy1, 1m, player.Creature, null);
+        AutoTestAssert.Equal(3, player.Creature.Block, "RedScarf gained 3 Block on new Weak debuff");
+        await PowerCmd.Apply<WeakPower>(ctx, enemy1, 1m, player.Creature, null);
+        AutoTestAssert.Equal(3, player.Creature.Block, "RedScarf did NOT trigger on stacking existing Weak debuff");
+        await PowerCmd.Apply<StrengthPower>(ctx, enemy1, -1m, player.Creature, null);
+        AutoTestAssert.Equal(6, player.Creature.Block, "RedScarf gained 3 Block on new negative Strength debuff");
+        await PowerCmd.Remove<WeakPower>(enemy1);
+        await PowerCmd.Remove<StrengthPower>(enemy1);
+
+        // 6. PetGhost + RuggedPower ordering:
+        //    (a) Non-lethal hit does NOT consume PetGhost;
+        //    (b) At 5 HP with RuggedPower taking 15 powered attack damage, Rugged caps to 2 (non-lethal -> 3 HP) and PetGhost stays unused!
+        //    (c) Lethal hit consumes PetGhost and preserves HP; 2nd lethal hit verified at end of test!
+        var petGhost = await RelicCmd.Obtain<PetGhost>(player);
+        if (player.Creature.Block > 0)
+            await CreatureCmd.LoseBlock(ctx, player.Creature, player.Creature.Block, null);
+        int hpStartGhost = player.Creature.CurrentHp;
+        await CreatureCmd.Damage(ctx, player.Creature, 2m, ValueProp.Unblockable | ValueProp.Unpowered, enemy1, null, null);
+        AutoTestAssert.Equal(hpStartGhost - 2, player.Creature.CurrentHp, "Non-lethal damage bypassed PetGhost");
+        AutoTestAssert.Equal(RelicStatus.Normal, petGhost.Status, "Non-lethal damage did NOT consume PetGhost");
+
+        // Drop to 5 HP, grant 1 Rugged, hit for 15 powered attack damage -> Rugged reduces to 2 (3 HP), PetGhost stays Normal!
+        await CreatureCmd.Damage(ctx, player.Creature, player.Creature.CurrentHp - 5, ValueProp.Unblockable | ValueProp.Unpowered, null, null, null);
+        await PowerCmd.Apply<RuggedPower>(ctx, player.Creature, 1m, player.Creature, null);
+        await CreatureCmd.Damage(ctx, player.Creature, 15m, ValueProp.Move, enemy1, null, null);
+        AutoTestAssert.Equal(3, player.Creature.CurrentHp, "Rugged capped 15 attack damage to 2 before PetGhost (5 -> 3 HP)");
+        AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<RuggedPower>(), "RuggedPower consumed");
+        AutoTestAssert.Equal(RelicStatus.Normal, petGhost.Status, "PetGhost NOT wasted when Rugged made hit non-lethal");
+
+        // Now lethal hit (50 damage at 3 HP) -> PetGhost prevents lethal HP loss!
+        await CreatureCmd.Damage(ctx, player.Creature, 50m, ValueProp.Unblockable | ValueProp.Unpowered, enemy1, null, null);
+        AutoTestAssert.True(player.Creature.IsAlive, "PetGhost kept player alive on first lethal hit");
+        AutoTestAssert.Equal(3, player.Creature.CurrentHp, "PetGhost prevented lethal HP loss completely");
+        AutoTestAssert.Equal(RelicStatus.Disabled, petGhost.Status, "PetGhost disabled after first use");
+        // Restore HP for remaining tests.
+        await CreatureCmd.Heal(player.Creature, player.Creature.MaxHp - player.Creature.CurrentHp);
+
+        // 7. BartenderGlass (Shotglass) + all 3 Hermit Potions (Tonic, BlackBile, Eclipse)!
+        //    Mid-combat obtain auto-initializes counter to 2 without manual BeforeCombatStart(); 3rd potion grants 0 potions!
+        var shotglass = await RelicCmd.Obtain<BartenderGlass>(player);
+        AutoTestAssert.Equal(2, shotglass.DisplayAmount, "Shotglass mid-combat obtain initialized counter to 2");
+        foreach (var existing in player.Potions.ToList())
+            await PotionCmd.Discard(existing);
+
+        var tonic = ModelDb.Potion<Tonic>().ToMutable();
+        await PotionCmd.TryToProcure(tonic, player);
+        await tonic.OnUseWrapper(ctx, player.Creature);
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<RuggedPower>(), "Tonic granted 1 Rugged");
+        AutoTestAssert.Equal(1, player.Potions.Count(), "Shotglass granted 1st random potion");
+        AutoTestAssert.Equal(1, shotglass.DisplayAmount, "Shotglass counter decremented 2 -> 1");
+        await PowerCmd.Remove<RuggedPower>(player.Creature);
+        foreach (var existing in player.Potions.ToList())
+            await PotionCmd.Discard(existing);
+
+        var blackBile = ModelDb.Potion<BlackBile>().ToMutable();
+        await PotionCmd.TryToProcure(blackBile, player);
+        await blackBile.OnUseWrapper(ctx, enemy1);
+        AutoTestAssert.Equal(6, enemy1.GetPowerAmount<BruisePower>(), "BlackBile applied 6 Bruise");
+        AutoTestAssert.Equal(1, player.Potions.Count(), "Shotglass granted 2nd random potion");
+        AutoTestAssert.Equal(RelicStatus.Disabled, shotglass.Status, "Shotglass disabled after 2 triggers");
+        await PowerCmd.Remove<BruisePower>(enemy1);
+        foreach (var existing in player.Potions.ToList())
+            await PotionCmd.Discard(existing);
+
+        await ResetHandAndEnergy();
+        var exhaustedMalice = combatState.CreateCard<Malice>(player);
+        await CardPileCmd.Add(exhaustedMalice, PileType.Exhaust);
+        var eclipse = ModelDb.Potion<Eclipse>().ToMutable();
+        await PotionCmd.TryToProcure(eclipse, player);
+        using (DownfallAutoTestRunner.PreferCards(c => ReferenceEquals(c, exhaustedMalice)))
+        {
+            await eclipse.OnUseWrapper(ctx, player.Creature);
+        }
+        AutoTestAssert.True(pcs.Hand.Cards.Contains(exhaustedMalice), "Eclipse returned exhausted card to hand");
+        AutoTestAssert.Equal(0, exhaustedMalice.EnergyCost.GetWithModifiers(CostModifiers.All), "Eclipse set returned card cost to 0");
+        AutoTestAssert.Equal(0, player.Potions.Count(), "Disabled Shotglass did NOT grant a 3rd potion");
+
+        // 8. BrassTacks + Spyglass + DentedPlate + RyeStalk across turn transition!
+        await ResetHandAndEnergy();
+        var brassTacks = await RelicCmd.Obtain<BrassTacks>(player);
+        await RelicCmd.Obtain<Spyglass>(player);
+        await RelicCmd.Obtain<DentedPlate>(player);
+        await RelicCmd.Obtain<RyeStalk>(player);
+
+        // Player-turn HP loss must NOT trigger RyeStalk!
+        int handBeforeSelfDamage = pcs.Hand.Cards.Count;
+        await CreatureCmd.Damage(ctx, player.Creature, 2m, ValueProp.Unblockable | ValueProp.Unpowered, null, null, null);
+        AutoTestAssert.Equal(handBeforeSelfDamage, pcs.Hand.Cards.Count, "RyeStalk did NOT trigger on player-turn HP loss");
+
+        // Drop player HP to <= 50% for DentedPlate (with plenty of HP left to survive enemy attacks!)
+        int targetHp = player.Creature.MaxHp / 2;
+        if (player.Creature.CurrentHp > targetHp)
+        {
+            await CreatureCmd.Damage(ctx, player.Creature, player.Creature.CurrentHp - targetHp, ValueProp.Unblockable | ValueProp.Unpowered, null, null, null);
+        }
+        await PowerCmd.Apply<ConcentratedPower>(ctx, player.Creature, 1m, player.Creature, null);
+        if (player.Creature.Block > 0)
+            await CreatureCmd.LoseBlock(ctx, player.Creature, player.Creature.Block, null);
+        for (int i = 0; i < 10; i++)
+            await CardPileCmd.Add(combatState.CreateCard<HermitDefend>(player), PileType.Draw, CardPilePosition.Top);
+
+        int hpBeforeTurnEnd = player.Creature.CurrentHp;
+        await DownfallAutoTestRunner.EndTurnAndWaitForRoundAsync(player, 2);
+
+        // Spyglass (+1 EnergyNextTurnPower) + DentedPlate (+1 Energy) -> MaxEnergy + 2!
+        AutoTestAssert.Equal(player.MaxEnergy + 2, pcs.Energy, "Spyglass + DentedPlate granted +2 Energy on Round 2");
+        // Enemy attacks broke through BrassTacks's 2 Block -> RyeStalk drew on enemy turn + DentedPlate drew on Round 2 start!
+        AutoTestAssert.True(player.Creature.CurrentHp < hpBeforeTurnEnd, "Enemy dealt unblocked damage during enemy turn");
+        AutoTestAssert.True(pcs.Hand.Cards.Count >= 7, $"DentedPlate (+1) + RyeStalk (>=1) drew extra cards (hand={pcs.Hand.Cards.Count})");
+
+        // Verify BrassTacks gained 2 Block directly via BeforeSideTurnEnd!
+        if (player.Creature.Block > 0)
+            await CreatureCmd.LoseBlock(ctx, player.Creature, player.Creature.Block, null);
+        await brassTacks.BeforeSideTurnEnd(ctx, CombatSide.Player, [player.Creature]);
+        AutoTestAssert.Equal(2, player.Creature.Block, "BrassTacks gained 2 Block at end of turn");
+
+        // 9. BloodyTooth: 0 on non-Elite room, +7 HP & +35 Gold on Elite room!
+        var bloodyTooth = await RelicCmd.Obtain<BloodyTooth>(player);
+        int hpBeforeTooth = player.Creature.CurrentHp;
+        int goldBeforeTooth = player.Gold;
+        var currentRoom = AutoTestAssert.NotNull(player.RunState.CurrentRoom as CombatRoom, "Current CombatRoom");
+        await bloodyTooth.AfterCombatVictory(currentRoom);
+        AutoTestAssert.Equal(goldBeforeTooth, player.Gold, "BloodyTooth did NOT trigger on non-Elite combat");
+        AutoTestAssert.Equal(hpBeforeTooth, player.Creature.CurrentHp, "BloodyTooth did NOT heal on non-Elite combat");
+
+        var eliteEncounter = ModelDb.AllEncounters.First(e => e.RoomType == RoomType.Elite).ToMutable();
+        var eliteRoom = new CombatRoom(eliteEncounter, player.RunState);
+        await bloodyTooth.AfterCombatVictory(eliteRoom);
+        AutoTestAssert.Equal(goldBeforeTooth + 35, player.Gold, "BloodyTooth granted +35 Gold on Elite victory");
+        AutoTestAssert.Equal(Math.Min(player.Creature.MaxHp, hpBeforeTooth + 7), player.Creature.CurrentHp, "BloodyTooth healed +7 HP on Elite victory");
+
+        // 10. PetGhost 2nd lethal hit in the SAME combat is NOT prevented!
+        if (player.Creature.Block > 0)
+            await CreatureCmd.LoseBlock(ctx, player.Creature, player.Creature.Block, null);
+        await CreatureCmd.Damage(ctx, player.Creature, player.Creature.CurrentHp + 50, ValueProp.Unblockable | ValueProp.Unpowered, enemy1, null, null);
+        AutoTestAssert.True(player.Creature.IsDead, "Disabled PetGhost did NOT prevent 2nd lethal hit in same combat");
     }
 }

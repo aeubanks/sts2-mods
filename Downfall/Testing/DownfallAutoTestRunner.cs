@@ -135,6 +135,7 @@ internal static class DownfallAutoTestRunner
                 ("HermitUncommonBatch1InCombat", HermitTests.TestUncommonBatch1InCombat),
                 ("HermitUncommonBatch2InCombat", HermitTests.TestUncommonBatch2InCombat),
                 ("HermitRareCardsInCombat", HermitTests.TestRareCardsInCombat),
+                ("HermitRelicsAndPotionsInCombat", HermitTests.TestRelicsAndPotionsInCombat),
             ];
 
             foreach (var (name, run) in tests)
@@ -483,6 +484,7 @@ internal static class DownfallAutoTestRunner
         AutoTestAssert.True(new LocString("cards", "DOWNFALL-CHEAT.selectionScreenPrompt").Exists(), "Missing Cheat selectionScreenPrompt loc");
         AutoTestAssert.True(new LocString("cards", "DOWNFALL-LONE_WOLF.selectionScreenPrompt").Exists(), "Missing LoneWolf selectionScreenPrompt loc");
         AutoTestAssert.True(new LocString("cards", "DOWNFALL-MALICE.selectionScreenPrompt").Exists(), "Missing Malice selectionScreenPrompt loc");
+        AutoTestAssert.True(new LocString("potions", "DOWNFALL-ECLIPSE.selectionScreenPrompt").Exists(), "Missing Eclipse selectionScreenPrompt loc");
 
         return Task.CompletedTask;
     }

@@ -112,6 +112,10 @@ public abstract class HermitCard(
         }
 
         DeadOnTrackers.GetOrCreateValue(CombatState).RecordTriggers(CombatState.RoundNumber, Owner, cardPlay, triggers);
+        foreach (var blackPowder in Owner.Relics.OfType<Relics.BlackPowder>())
+        {
+            await blackPowder.OnDeadOnTriggeredAsync(triggers);
+        }
         return triggers;
     }
 

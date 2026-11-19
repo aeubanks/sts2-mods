@@ -1,0 +1,9 @@
+{
+  "DOWNFALL-BLACK_BILE.title": "Black Bile",
+  "DOWNFALL-BLACK_BILE.description": "Apply [blue]{BruisePower}[/blue] [gold]Bruise[/gold].",
+  "DOWNFALL-ECLIPSE.title": "Liquid Void",
+  "DOWNFALL-ECLIPSE.description": "Put [blue]{Cards}[/blue] {Cards:plural:card|cards} from your [gold]Exhaust Pile[/gold] into your [gold]Hand[/gold]. {Cards:plural:It costs|They cost} [blue]0[/blue] this turn.",
+  "DOWNFALL-ECLIPSE.selectionScreenPrompt": "Choose a card from your Exhaust Pile to return to your Hand.",
+  "DOWNFALL-TONIC.title": "Tonic",
+  "DOWNFALL-TONIC.description": "Gain [blue]{RuggedPower}[/blue] [gold]Rugged[/gold]."
+}
