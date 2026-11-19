@@ -24,6 +24,7 @@ using MegaCrit.Sts2.Core.ValueProps;
 using Packmaster.Cards;
 using Packmaster.Cards.BitingCold;
 using Packmaster.Cards.CoreSet;
+using Packmaster.Cards.EvenOdd;
 using Packmaster.Cards.Quiet;
 using Packmaster.Cards.Warlock;
 using Packmaster.Character;
@@ -89,6 +90,7 @@ internal static class PackmasterAutoTestRunner
                 ("QuietPackInCombat", TestQuietPackInCombat),
                 ("BitingColdPackInCombat", TestBitingColdPackInCombat),
                 ("WarlockPackInCombat", TestWarlockPackInCombat),
+                ("EvenOddPackInCombat", TestEvenOddPackInCombat),
             ];
 
             foreach (var (name, run) in tests)
@@ -1233,6 +1235,290 @@ internal static class PackmasterAutoTestRunner
         AutoTestAssert.Equal(0, rod.DynamicVars["Drawn"].IntValue, "RunedMithrilRod+ reset Drawn counter to 0");
         AutoTestAssert.True(turn3Strikes.All(s => s.EnergyCost.GetWithModifiers(CostModifiers.All) == 0), "RunedMithrilRod+ discounted ALL 4 opening-hand Strikes to 0");
         AutoTestAssert.Equal(0, turn3ZeroCost.EnergyCost.GetWithModifiers(CostModifiers.All), "0-cost card stayed at 0 cost");
+    }
+
+    private static async Task TestEvenOddPackInCombat()
+    {
+        var (player, _, combatState) = await StartCombatAsync("PMEVEN01");
+        var pcs = AutoTestAssert.NotNull(player.PlayerCombatState, "PlayerCombatState");
+        var enemy = AutoTestAssert.NotNull(combatState.HittableEnemies.FirstOrDefault(), "First hittable enemy");
+
+        await CreatureCmd.GainMaxHp(enemy, 800m);
+        await CreatureCmd.GainMaxHp(player.Creature, 200m);
+
+        foreach (var c in pcs.Hand.Cards.ToList())
+            await CardPileCmd.Add(c, PileType.Discard);
+
+        async Task RefillEnergy(int target = 15)
+        {
+            if (pcs.Energy < target)
+                await PlayerCmd.GainEnergy(target - pcs.Energy, player);
+        }
+
+        // === TURN 1 ===
+        await RefillEnergy();
+        AutoTestAssert.True(!ModelDb.Card<Flourish>().CanBeGeneratedInCombat, "Flourish cannot be randomly generated in combat");
+
+        // Card #1 (First / Odd): Battlecry draws 2 + grants +2 Strength.
+        var battlecry = combatState.CreateCard<Battlecry>(player);
+        await CardPileCmd.Add(battlecry, PileType.Hand);
+        AutoTestAssert.True(battlecry.TryManualPlay(null), "Play Battlecry (#1 First)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(2, player.Creature.GetPowerAmount<StrengthPower>(), "Battlecry as First card granted +2 Strength");
+        AutoTestAssert.Equal(2, pcs.Hand.Cards.Count, "Battlecry drew 2 cards");
+
+        // Card #2 (Even): GammaWard -> +4 Block + GammaWardPower(12).
+        var gamma1 = combatState.CreateCard<GammaWard>(player);
+        await CardPileCmd.Add(gamma1, PileType.Hand);
+        int blockBefore = player.Creature.Block;
+        AutoTestAssert.True(gamma1.TryManualPlay(null), "Play GammaWard (#2 Even)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(blockBefore + 4, player.Creature.Block, "GammaWard +4 Block");
+        AutoTestAssert.Equal(12, player.Creature.GetPowerAmount<GammaWardPower>(), "GammaWard as Even card applied GammaWardPower(12)");
+
+        // Card #3 (Odd): SwordAndBoard acts as Skill -> +8 Block, consumes GammaWardPower WITHOUT +12 bonus (Odd)!
+        var sabOdd = combatState.CreateCard<SwordAndBoard>(player);
+        await CardPileCmd.Add(sabOdd, PileType.Hand);
+        AutoTestAssert.Equal(CardType.Skill, sabOdd.Type, "SwordAndBoard is Skill when next play is Odd");
+        AutoTestAssert.Equal(TargetType.Self, sabOdd.TargetType, "SwordAndBoard targets Self when Odd");
+        blockBefore = player.Creature.Block;
+        AutoTestAssert.True(sabOdd.TryManualPlay(null), "Play SwordAndBoard (#3 Odd)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(blockBefore + 8, player.Creature.Block, "SwordAndBoard Odd gave 8 Block (no GammaWard bonus on Odd)");
+        AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<GammaWardPower>(), "GammaWardPower consumed by next Skill");
+
+        // Card #4 (Even): GammaWard -> GammaWardPower(12).
+        var gamma2 = combatState.CreateCard<GammaWard>(player);
+        await CardPileCmd.Add(gamma2, PileType.Hand);
+        AutoTestAssert.True(gamma2.TryManualPlay(null), "Play GammaWard (#4 Even)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(12, player.Creature.GetPowerAmount<GammaWardPower>(), "GammaWard #4 applied GammaWardPower(12)");
+
+        // Card #5 (Odd): PrimeDirective (Power, NOT Skill -> does NOT consume GammaWardPower!).
+        var prime = combatState.CreateCard<PrimeDirective>(player);
+        await CardPileCmd.Add(prime, PileType.Hand);
+        AutoTestAssert.True(prime.TryManualPlay(null), "Play PrimeDirective (#5 Odd)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(4, player.Creature.GetPowerAmount<PrimeDirectivePower>(), "PrimeDirectivePower(4) applied");
+        AutoTestAssert.Equal(12, player.Creature.GetPowerAmount<GammaWardPower>(), "Power card did not consume GammaWardPower");
+
+        // Card #6 (Even): QuickReflex (NOT First -> 6 Block) + GammaWardPower triggers on Even Skill (+12 Block) = +18 Block!
+        var quickNonFirst = combatState.CreateCard<QuickReflex>(player);
+        await CardPileCmd.Add(quickNonFirst, PileType.Hand);
+        blockBefore = player.Creature.Block;
+        AutoTestAssert.True(quickNonFirst.TryManualPlay(null), "Play QuickReflex (#6 Even)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(blockBefore + 18, player.Creature.Block, "QuickReflex non-First (6) + GammaWard Even Skill (+12) = 18 Block");
+        AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<GammaWardPower>(), "GammaWardPower removed after triggering");
+
+        // Card #7 (Odd): WitzBolt -> 8 + 2 (Str) + 4 (PrimeDirective Odd!) = 14 dmg + 1 Weak + 1 Vulnerable!
+        // Also verify PrimeDirectivePower hover preview (cardPlay == null): Odd Attack gets +4, Odd Skill SwordAndBoard gets 0!
+        var witz = combatState.CreateCard<WitzBolt>(player);
+        await CardPileCmd.Add(witz, PileType.Hand);
+        var primePower = AutoTestAssert.NotNull(player.Creature.GetPower<PrimeDirectivePower>(), "PrimeDirectivePower instance");
+        AutoTestAssert.Equal(4m, primePower.ModifyDamageAdditive(enemy, 8m, ValueProp.Move, player.Creature, witz, null), "PrimeDirective previews +4 on Odd Attack");
+        AutoTestAssert.Equal(0m, primePower.ModifyDamageAdditive(enemy, 10m, ValueProp.Move, player.Creature, sabOdd, null), "PrimeDirective previews 0 on Odd Skill SwordAndBoard");
+        int hpBefore = enemy.CurrentHp;
+        AutoTestAssert.True(witz.TryManualPlay(enemy), "Play WitzBolt (#7 Odd)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(hpBefore - 14, enemy.CurrentHp, "WitzBolt Odd dealt 8+2+4=14 damage");
+        AutoTestAssert.Equal(1, enemy.GetPowerAmount<WeakPower>(), "WitzBolt Odd applied 1 Weak");
+        AutoTestAssert.Equal(1, enemy.GetPowerAmount<VulnerablePower>(), "WitzBolt Odd applied 1 Vulnerable");
+
+        // Card #8 (Even): WindUpBomb acts as Skill -> buffs its own damage from 8 to 23!
+        // Also verify PrimeDirectivePower hover preview on Even Attack is 0.
+        AutoTestAssert.Equal(0m, primePower.ModifyDamageAdditive(enemy, 8m, ValueProp.Move, player.Creature, witz, null), "PrimeDirective previews 0 on Even Attack");
+        var bomb = combatState.CreateCard<WindUpBomb>(player);
+        await CardPileCmd.Add(bomb, PileType.Hand);
+        AutoTestAssert.Equal(CardType.Skill, bomb.Type, "WindUpBomb is Skill when next play is Even");
+        AutoTestAssert.True(bomb.TryManualPlay(null), "Play WindUpBomb (#8 Even)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(23, bomb.DynamicVars.Damage.IntValue, "WindUpBomb Even increased damage 8 -> 23");
+
+        // Card #9 (Odd): WindUpBomb acts as Attack -> deals floor((23 + 2 Str + 4 PrimeDirective) * 1.5 Vuln) = 43 dmg!
+        await CardPileCmd.Add(bomb, PileType.Hand);
+        AutoTestAssert.Equal(CardType.Attack, bomb.Type, "WindUpBomb is Attack when next play is Odd");
+        hpBefore = enemy.CurrentHp;
+        AutoTestAssert.True(bomb.TryManualPlay(enemy), "Play WindUpBomb (#9 Odd)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(hpBefore - 43, enemy.CurrentHp, "WindUpBomb Odd dealt floor(29*1.5)=43 damage");
+
+        // Card #10 (Even): SwordAndBoard acts as Attack -> deals floor((10 + 2 Str + 0 PrimeDirective Even!) * 1.5 Vuln) = 18 dmg!
+        await CardPileCmd.Add(sabOdd, PileType.Hand);
+        AutoTestAssert.Equal(CardType.Attack, sabOdd.Type, "SwordAndBoard is Attack when next play is Even");
+        hpBefore = enemy.CurrentHp;
+        AutoTestAssert.True(sabOdd.TryManualPlay(enemy), "Play SwordAndBoard (#10 Even)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(hpBefore - 18, enemy.CurrentHp, "SwordAndBoard Even dealt floor(12*1.5)=18 damage (no PrimeDirective bonus)");
+
+        // === TURN 2: QuickReflex First, Flourish Even (Heal) & Odd (Energy) ===
+        await EndTurnAndWaitForRoundAsync(player, 2);
+        await RefillEnergy(15);
+        // Ensure player is missing some HP so Flourish Even healing is observable.
+        await CreatureCmd.Damage(new ThrowingPlayerChoiceContext(), player.Creature, 20m, ValueProp.Unblockable | ValueProp.Unpowered, null, null);
+
+        // Card #1 (First): QuickReflex -> 6 + 6 = 12 Block!
+        var quickFirst = combatState.CreateCard<QuickReflex>(player);
+        await CardPileCmd.Add(quickFirst, PileType.Hand);
+        blockBefore = player.Creature.Block;
+        AutoTestAssert.True(quickFirst.TryManualPlay(null), "Play QuickReflex (#1 First)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(blockBefore + 12, player.Creature.Block, "QuickReflex First granted 6+6=12 Block");
+
+        // Card #2 (Even): Flourish -> +3 Plating + Heal 3 HP!
+        var flourishEven = combatState.CreateCard<Flourish>(player);
+        await CardPileCmd.Add(flourishEven, PileType.Hand);
+        int playerHpBefore = player.Creature.CurrentHp;
+        AutoTestAssert.True(flourishEven.TryManualPlay(null), "Play Flourish (#2 Even)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(3, player.Creature.GetPowerAmount<PlatingPower>(), "Flourish applied 3 Plating");
+        AutoTestAssert.Equal(playerHpBefore + 3, player.Creature.CurrentHp, "Flourish Even healed 3 HP");
+
+        // Card #3 (Odd): Flourish -> +3 Plating (total 6) + Gain 1 Energy (net 0 energy spent)!
+        var flourishOdd = combatState.CreateCard<Flourish>(player);
+        await CardPileCmd.Add(flourishOdd, PileType.Hand);
+        int energyBefore = pcs.Energy;
+        AutoTestAssert.True(flourishOdd.TryManualPlay(null), "Play Flourish (#3 Odd)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(6, player.Creature.GetPowerAmount<PlatingPower>(), "Flourish Odd stacked Plating to 6");
+        AutoTestAssert.Equal(energyBefore, pcs.Energy, "Flourish Odd spent 1 and gained 1 Energy");
+
+        // Negative parity branches & GammaWard chaining on Turn 2:
+        // Card #4 (Even): GammaWard #1 -> GammaWardPower(12).
+        var chainGamma1 = combatState.CreateCard<GammaWard>(player);
+        await CardPileCmd.Add(chainGamma1, PileType.Hand);
+        AutoTestAssert.True(chainGamma1.TryManualPlay(null), "Play chain GammaWard #1 (#4 Even)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(12, player.Creature.GetPowerAmount<GammaWardPower>(), "Chain GammaWard #1 applied GammaWardPower(12)");
+
+        // Card #5 (Odd): non-First ElementOfSurprise -> no DuplicationPower; consumes GammaWardPower WITHOUT bonus Block.
+        var nonFirstSurprise = combatState.CreateCard<ElementOfSurprise>(player);
+        await CardPileCmd.Add(nonFirstSurprise, PileType.Hand);
+        AutoTestAssert.True(nonFirstSurprise.TryManualPlay(null), "Play non-First ElementOfSurprise (#5 Odd)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<DuplicationPower>(), "Non-First ElementOfSurprise did not apply DuplicationPower");
+
+        // Card #6 (Even): GammaWard #2 -> applies GammaWardPower(12); Card #7 (Odd): Attack; Card #8 (Even): GammaWard #3 -> +16 Block AND keeps GammaWardPower(12)!
+        var chainGamma2 = combatState.CreateCard<GammaWard>(player);
+        var chainStrike = combatState.CreateCard<PackmasterStrike>(player);
+        var chainGamma3 = combatState.CreateCard<GammaWard>(player);
+        await CardPileCmd.Add(chainGamma2, PileType.Hand);
+        await CardPileCmd.Add(chainStrike, PileType.Hand);
+        await CardPileCmd.Add(chainGamma3, PileType.Hand);
+        AutoTestAssert.True(chainGamma2.TryManualPlay(null), "Play chain GammaWard #2 (#6 Even)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.True(chainStrike.TryManualPlay(enemy), "Play spacer Strike (#7 Odd)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        blockBefore = player.Creature.Block;
+        AutoTestAssert.True(chainGamma3.TryManualPlay(null), "Play chain GammaWard #3 (#8 Even)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(blockBefore + 16, player.Creature.Block, "Chained Even GammaWard gained exact 12 (prior power) + 4 (self) = 16 Block");
+        AutoTestAssert.Equal(12, player.Creature.GetPowerAmount<GammaWardPower>(), "Chained Even GammaWard preserved newly applied GammaWardPower(12)");
+
+        // Card #9 (Odd): non-First Battlecry (no extra Strength); Card #10 (Even): WitzBolt (no extra Weak/Vuln).
+        var nonFirstBattlecry = combatState.CreateCard<Battlecry>(player);
+        var evenWitz = combatState.CreateCard<WitzBolt>(player);
+        await CardPileCmd.Add(nonFirstBattlecry, PileType.Hand);
+        await CardPileCmd.Add(evenWitz, PileType.Hand);
+        int strBefore = player.Creature.GetPowerAmount<StrengthPower>();
+        AutoTestAssert.True(nonFirstBattlecry.TryManualPlay(null), "Play non-First Battlecry (#9 Odd)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(strBefore, player.Creature.GetPowerAmount<StrengthPower>(), "Non-First Battlecry did not grant Strength");
+        int weakBefore = enemy.GetPowerAmount<WeakPower>();
+        int vulnBefore = enemy.GetPowerAmount<VulnerablePower>();
+        AutoTestAssert.True(evenWitz.TryManualPlay(enemy), "Play Even WitzBolt (#10 Even)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(weakBefore, enemy.GetPowerAmount<WeakPower>(), "Even WitzBolt did not apply Weak");
+        AutoTestAssert.Equal(vulnBefore, enemy.GetPowerAmount<VulnerablePower>(), "Even WitzBolt did not apply Vulnerable");
+
+        // Card #11 (Odd): Odd GammaWard -> does NOT apply GammaWardPower!
+        var oddGamma = combatState.CreateCard<GammaWard>(player);
+        await CardPileCmd.Add(oddGamma, PileType.Hand);
+        AutoTestAssert.True(oddGamma.TryManualPlay(null), "Play Odd GammaWard (#11 Odd)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<GammaWardPower>(), "Odd GammaWard did not apply GammaWardPower");
+
+        // Re-apply GammaWardPower(12) on Card #12 (Even) and leave unused -> verify it expires on Turn 3!
+        var expiringGamma = combatState.CreateCard<GammaWard>(player);
+        await CardPileCmd.Add(expiringGamma, PileType.Hand);
+        AutoTestAssert.True(expiringGamma.TryManualPlay(null), "Play expiring GammaWard (#12 Even)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(12, player.Creature.GetPowerAmount<GammaWardPower>(), "Expiring GammaWard applied GammaWardPower(12)");
+
+        // === TURN 3: GammaWardPower expiration, ElementOfSurprise (First -> DuplicationPower), & SwordAndBoard Type lock w/ BurstPower ===
+        await EndTurnAndWaitForRoundAsync(player, 3);
+        AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<GammaWardPower>(), "Unused GammaWardPower expired at end of turn");
+        await RefillEnergy(10);
+        var surprise = combatState.CreateCard<ElementOfSurprise>(player);
+        var dupStrike = combatState.CreateCard<PackmasterStrike>(player);
+        await CardPileCmd.Add(surprise, PileType.Hand);
+        await CardPileCmd.Add(dupStrike, PileType.Hand);
+        AutoTestAssert.True(surprise.TryManualPlay(null), "Play ElementOfSurprise (#1 First)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<DuplicationPower>(), "ElementOfSurprise First applied DuplicationPower(1)");
+
+        int effectiveHpBefore = enemy.CurrentHp + enemy.Block;
+        AutoTestAssert.True(dupStrike.TryManualPlay(enemy), "Play duplicated Strike");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        // Play #2 (Even): 6+2=8 dmg; duplicate play #3 (Odd!): 6+2+4=12 dmg -> exact 20 total damage!
+        AutoTestAssert.Equal(effectiveHpBefore - 20, enemy.CurrentHp + enemy.Block, "Duplicated Strike dealt exact 8 (Even) + 12 (Odd w/ PrimeDirective) = 20 damage");
+
+        // Verify SwordAndBoard Type lock during play with BurstPower: Card #4 (Even, Attack) -> Card #5 (Odd, Skill w/ BurstPower -> plays twice & decrements BurstPower to 0!).
+        var sabBurst = combatState.CreateCard<SwordAndBoard>(player);
+        var spacer = combatState.CreateCard<PackmasterStrike>(player);
+        await CardPileCmd.Add(spacer, PileType.Hand);
+        await CardPileCmd.Add(sabBurst, PileType.Hand);
+        AutoTestAssert.True(spacer.TryManualPlay(enemy), "Play spacer Strike (#4 Even)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        await PowerCmd.Apply<BurstPower>(new ThrowingPlayerChoiceContext(), player.Creature, 1m, player.Creature, null);
+        blockBefore = player.Creature.Block;
+        AutoTestAssert.True(sabBurst.TryManualPlay(null), "Play Odd Skill SwordAndBoard with BurstPower (#5 Odd)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<BurstPower>(), "BurstPower decremented on Odd Skill SwordAndBoard (Type did not flip mid-play)");
+        AutoTestAssert.True(player.Creature.Block >= blockBefore + 8, "Odd Skill SwordAndBoard gained Block");
+
+        // === TURN 4: LeftHook (Odd stays in hand, Even discards, Duplication at UsesLeft==2, 7th play exhausts!) ===
+        await EndTurnAndWaitForRoundAsync(player, 4);
+        await RefillEnergy(10);
+        var leftHook = combatState.CreateCard<LeftHook>(player);
+        await CardPileCmd.Add(leftHook, PileType.Hand);
+
+        // Play #1 (Odd): stays in hand, UsesLeft 7 -> 6.
+        AutoTestAssert.True(leftHook.TryManualPlay(enemy), "Play LeftHook #1 (Odd)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.True(pcs.Hand.Cards.Contains(leftHook), "LeftHook Odd stayed in hand");
+        AutoTestAssert.Equal(6, leftHook.DynamicVars["UsesLeft"].IntValue, "LeftHook UsesLeft 7 -> 6");
+
+        // Play #2 (Even): goes to Discard, UsesLeft 6 -> 5.
+        AutoTestAssert.True(leftHook.TryManualPlay(enemy), "Play LeftHook #2 (Even)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.True(pcs.DiscardPile.Cards.Contains(leftHook), "LeftHook Even went to Discard");
+        AutoTestAssert.Equal(5, leftHook.DynamicVars["UsesLeft"].IntValue, "LeftHook UsesLeft 6 -> 5");
+
+        // Play 3 more times (UsesLeft 5 -> 2).
+        for (int play = 3; play <= 5; play++)
+        {
+            if (leftHook.Pile?.Type != PileType.Hand)
+                await CardPileCmd.Add(leftHook, PileType.Hand);
+            AutoTestAssert.True(leftHook.TryManualPlay(enemy), $"Play LeftHook #{play}");
+            await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        }
+        AutoTestAssert.Equal(2, leftHook.DynamicVars["UsesLeft"].IntValue, "LeftHook at UsesLeft == 2");
+
+        // Play with DuplicationPower at UsesLeft == 2 -> decrements once (2 -> 1), stays playable, never stuck at 0!
+        if (leftHook.Pile?.Type != PileType.Hand)
+            await CardPileCmd.Add(leftHook, PileType.Hand);
+        await PowerCmd.Apply<DuplicationPower>(new ThrowingPlayerChoiceContext(), player.Creature, 1m, player.Creature, null);
+        AutoTestAssert.True(leftHook.TryManualPlay(enemy), "Play duplicated LeftHook at UsesLeft == 2");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(1, leftHook.DynamicVars["UsesLeft"].IntValue, "Duplicated LeftHook decremented UsesLeft once (2 -> 1)");
+
+        // Final play (UsesLeft 1 -> 0) -> Exhausts!
+        if (leftHook.Pile?.Type != PileType.Hand)
+            await CardPileCmd.Add(leftHook, PileType.Hand);
+        AutoTestAssert.True(leftHook.TryManualPlay(enemy), "Play final LeftHook (7th)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.True(pcs.ExhaustPile.Cards.Contains(leftHook), "LeftHook exhausted on 7th play");
     }
 
     private static async Task WaitUntilAsync(Func<bool> predicate, int timeoutMs = 15000)

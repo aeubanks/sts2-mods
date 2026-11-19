@@ -25,5 +25,11 @@
   "PACKMASTER-MALCHEZAARS_IMP_POWER.smartDescription": "Whenever a non-Imp card is [gold]Exhausted[/gold], add [blue]{Amount}[/blue] [gold]{Amount:plural:Imp|Imps}[/gold] to your [gold]Discard Pile[/gold].",
   "PACKMASTER-MALCHEZAARS_IMP_UPGRADED_POWER.title": "Malchezaar's Imp+",
   "PACKMASTER-MALCHEZAARS_IMP_UPGRADED_POWER.description": "Whenever a non-Imp card is Exhausted, shuffle Imps into your Draw Pile.",
-  "PACKMASTER-MALCHEZAARS_IMP_UPGRADED_POWER.smartDescription": "Whenever a non-Imp card is [gold]Exhausted[/gold], shuffle [blue]{Amount}[/blue] [gold]{Amount:plural:Imp|Imps}[/gold] into your [gold]Draw Pile[/gold]."
+  "PACKMASTER-MALCHEZAARS_IMP_UPGRADED_POWER.smartDescription": "Whenever a non-Imp card is [gold]Exhausted[/gold], shuffle [blue]{Amount}[/blue] [gold]{Amount:plural:Imp|Imps}[/gold] into your [gold]Draw Pile[/gold].",
+  "PACKMASTER-GAMMA_WARD_POWER.title": "Gamma Ward",
+  "PACKMASTER-GAMMA_WARD_POWER.description": "Your next Skill this turn has Even: Gain Block.",
+  "PACKMASTER-GAMMA_WARD_POWER.smartDescription": "Your next Skill this turn has [gold]Even:[/gold] Gain [blue]{Amount}[/blue] [gold]Block[/gold].",
+  "PACKMASTER-PRIME_DIRECTIVE_POWER.title": "Prime Directive",
+  "PACKMASTER-PRIME_DIRECTIVE_POWER.description": "Your Attacks have Odd: Deal additional damage.",
+  "PACKMASTER-PRIME_DIRECTIVE_POWER.smartDescription": "Your Attacks have [gold]Odd:[/gold] Deal [blue]{Amount}[/blue] additional damage."
 }

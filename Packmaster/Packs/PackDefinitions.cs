@@ -1,5 +1,6 @@
 using Packmaster.Cards.BitingCold;
 using Packmaster.Cards.CoreSet;
+using Packmaster.Cards.EvenOdd;
 using Packmaster.Cards.Quiet;
 using Packmaster.Cards.Warlock;
 
@@ -11,6 +12,7 @@ public static class PackDefinitions
     public const string QuietId = "Quiet";
     public const string BitingColdId = "BitingCold";
     public const string WarlockId = "Warlock";
+    public const string EvenOddId = "EvenOdd";
 
     public static void RegisterAll()
     {
@@ -80,6 +82,23 @@ public static class PackDefinitions
                 typeof(SoulShear),
                 typeof(Soulfire),
                 typeof(TheSoularium),
+            ]));
+
+        PackRegistry.Register(new PackDefinition(
+            Id: EvenOddId,
+            AlwaysInclude: false,
+            CardTypes:
+            [
+                typeof(Battlecry),
+                typeof(ElementOfSurprise),
+                typeof(Flourish),
+                typeof(GammaWard),
+                typeof(LeftHook),
+                typeof(PrimeDirective),
+                typeof(QuickReflex),
+                typeof(SwordAndBoard),
+                typeof(WindUpBomb),
+                typeof(WitzBolt),
             ]));
     }
 }
