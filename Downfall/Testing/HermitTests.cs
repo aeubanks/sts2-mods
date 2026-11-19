@@ -6,6 +6,7 @@ using MegaCrit.Sts2.Core.Commands;
 using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.GameActions.Multiplayer;
 using MegaCrit.Sts2.Core.Models;
+using StsCards = MegaCrit.Sts2.Core.Models.Cards;
 using MegaCrit.Sts2.Core.Models.Powers;
 using MegaCrit.Sts2.Core.Runs;
 using MegaCrit.Sts2.Core.ValueProps;
@@ -156,5 +157,284 @@ internal static class HermitTests
         await DownfallAutoTestRunner.EndTurnAndWaitForRoundAsync(player, 3);
         AutoTestAssert.Equal(0, enemy.GetPowerAmount<BruisePower>(), "BruisePower removed after player turn end");
         AutoTestAssert.True(!player.Creature.HasPower<ConcentratedPower>(), "Unused ConcentratedPower expired after player turn end");
+    }
+
+    public static async Task TestCommonCardsInCombat()
+    {
+        var (player, _, combatState) = await DownfallAutoTestRunner.StartCombatAsync<TheHermit>("DFHRMCOM");
+        var pcs = AutoTestAssert.NotNull(player.PlayerCombatState, "PlayerCombatState");
+        var enemy = AutoTestAssert.NotNull(combatState.HittableEnemies.FirstOrDefault(), "First enemy");
+
+        await CreatureCmd.GainMaxHp(enemy, 500m);
+
+        async Task ResetHandAndEnergy()
+        {
+            foreach (var c in pcs.Hand.Cards.ToList())
+                await CardPileCmd.Add(c, PileType.Discard);
+            if (pcs.Energy < 10)
+                await PlayerCmd.GainEnergy(10 - pcs.Energy, player);
+        }
+
+        // 1. BodyArmor: discarding Skill gives double Block (10); discarding Attack gives single Block (5).
+        await ResetHandAndEnergy();
+        var bodyArmor1 = combatState.CreateCard<BodyArmor>(player);
+        var skillToDiscard = combatState.CreateCard<HermitDefend>(player);
+        await CardPileCmd.Add(bodyArmor1, PileType.Hand);
+        await CardPileCmd.Add(skillToDiscard, PileType.Hand);
+        int blockBefore = player.Creature.Block;
+        using (DownfallAutoTestRunner.PreferCards(c => ReferenceEquals(c, skillToDiscard)))
+        {
+            AutoTestAssert.True(bodyArmor1.TryManualPlay(null), "Play BodyArmor discarding Skill");
+            await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        }
+        AutoTestAssert.Equal(blockBefore + 10, player.Creature.Block, "BodyArmor discarding non-Attack grants 10 Block");
+
+        await ResetHandAndEnergy();
+        var bodyArmor2 = combatState.CreateCard<BodyArmor>(player);
+        var attackToDiscard = combatState.CreateCard<HermitStrike>(player);
+        await CardPileCmd.Add(bodyArmor2, PileType.Hand);
+        await CardPileCmd.Add(attackToDiscard, PileType.Hand);
+        blockBefore = player.Creature.Block;
+        using (DownfallAutoTestRunner.PreferCards(c => ReferenceEquals(c, attackToDiscard)))
+        {
+            AutoTestAssert.True(bodyArmor2.TryManualPlay(null), "Play BodyArmor discarding Attack");
+            await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        }
+        AutoTestAssert.Equal(blockBefore + 5, player.Creature.Block, "BodyArmor discarding Attack grants 5 Block");
+
+        // 2. Dive (Dead On): gains 8 Block + 1 PlatingPower.
+        await ResetHandAndEnergy();
+        var dive = combatState.CreateCard<Dive>(player);
+        await CardPileCmd.Add(dive, PileType.Hand);
+        blockBefore = player.Creature.Block;
+        AutoTestAssert.True(dive.TryManualPlay(null), "Play Dead On Dive");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(blockBefore + 8, player.Creature.Block, "Dive gained 8 Block");
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<PlatingPower>(), "Dead On Dive gained 1 PlatingPower");
+
+        // 3. CalledShot right after Dead On Dive: deals 5 damage AND draws 1 card;
+        //    a second CalledShot (after non-Dead On CalledShot) deals 5 damage and draws 0 cards!
+        var calledShot = combatState.CreateCard<CalledShot>(player);
+        await CardPileCmd.Add(calledShot, PileType.Hand);
+        int hpBefore = enemy.CurrentHp;
+        AutoTestAssert.True(calledShot.TryManualPlay(enemy), "Play CalledShot after Dead On");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(hpBefore - 5, enemy.CurrentHp, "CalledShot dealt 5 damage");
+        AutoTestAssert.Equal(1, pcs.Hand.Cards.Count, "CalledShot drew 1 card after Dead On");
+
+        await ResetHandAndEnergy();
+        var calledShot2 = combatState.CreateCard<CalledShot>(player);
+        await CardPileCmd.Add(calledShot2, PileType.Hand);
+        AutoTestAssert.True(calledShot2.TryManualPlay(enemy), "Play CalledShot after non-Dead On card");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(0, pcs.Hand.Cards.Count, "CalledShot did not draw after non-Dead On card");
+
+        // 4. Feint: gains 3 Block + applies 2 Bruise to enemy.
+        await ResetHandAndEnergy();
+        var feint = combatState.CreateCard<Feint>(player);
+        await CardPileCmd.Add(feint, PileType.Hand);
+        blockBefore = player.Creature.Block;
+        AutoTestAssert.True(feint.TryManualPlay(null), "Play Feint");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(blockBefore + 3, player.Creature.Block, "Feint gained 3 Block");
+        AutoTestAssert.Equal(2, enemy.GetPowerAmount<BruisePower>(), "Feint applied 2 Bruise");
+        await PowerCmd.Remove<BruisePower>(enemy);
+
+        // 5. Glare: applies 1 Weak and 1 Vulnerable.
+        await ResetHandAndEnergy();
+        var glare = combatState.CreateCard<Glare>(player);
+        await CardPileCmd.Add(glare, PileType.Hand);
+        AutoTestAssert.True(glare.TryManualPlay(enemy), "Play Glare");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(1, enemy.GetPowerAmount<WeakPower>(), "Glare applied 1 Weak");
+        AutoTestAssert.Equal(1, enemy.GetPowerAmount<VulnerablePower>(), "Glare applied 1 Vulnerable");
+        await PowerCmd.Remove<WeakPower>(enemy);
+        await PowerCmd.Remove<VulnerablePower>(enemy);
+
+        // 6. Headshot (Dead On): deals 14 damage (2x 7).
+        await ResetHandAndEnergy();
+        var headshot = combatState.CreateCard<Headshot>(player);
+        await CardPileCmd.Add(headshot, PileType.Hand);
+        hpBefore = enemy.CurrentHp;
+        AutoTestAssert.True(headshot.TryManualPlay(enemy), "Play Dead On Headshot");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(hpBefore - 14, enemy.CurrentHp, "Dead On Headshot dealt double (14) damage");
+
+        // 7. HighCaliber: deals 6 damage, adds 12-damage Strike+ to hand, exhausts.
+        await ResetHandAndEnergy();
+        var highCal = combatState.CreateCard<HighCaliber>(player);
+        await CardPileCmd.Add(highCal, PileType.Hand);
+        hpBefore = enemy.CurrentHp;
+        AutoTestAssert.True(highCal.TryManualPlay(enemy), "Play HighCaliber");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(hpBefore - 6, enemy.CurrentHp, "HighCaliber dealt 6 damage");
+        AutoTestAssert.True(PileType.Exhaust.GetPile(player).Cards.Contains(highCal), "HighCaliber exhausted");
+        var boostedStrike = AutoTestAssert.NotNull(pcs.Hand.Cards.OfType<HermitStrike>().FirstOrDefault(), "HighCaliber added HermitStrike to hand");
+        AutoTestAssert.Equal(12m, boostedStrike.DynamicVars.Damage.BaseValue, "HighCaliber Strike has 12 base damage");
+
+        // 8. HoleUp: gains 12 Block and 2 Weak.
+        await ResetHandAndEnergy();
+        var holeUp = combatState.CreateCard<HoleUp>(player);
+        await CardPileCmd.Add(holeUp, PileType.Hand);
+        blockBefore = player.Creature.Block;
+        AutoTestAssert.True(holeUp.TryManualPlay(null), "Play HoleUp");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(blockBefore + 12, player.Creature.Block, "HoleUp gained 12 Block");
+        AutoTestAssert.Equal(2, player.Creature.GetPowerAmount<WeakPower>(), "HoleUp applied 2 Weak to player");
+
+        // 9. LowProfile with 1 debuff (Weak) + 2 Dexterity: gains 7 + 4 + 2 = 13 Block (Dexterity applied once, not twice).
+        await ResetHandAndEnergy();
+        await PowerCmd.Apply<DexterityPower>(new ThrowingPlayerChoiceContext(), player.Creature, 2m, player.Creature, null);
+        var lowProfile = combatState.CreateCard<LowProfile>(player);
+        await CardPileCmd.Add(lowProfile, PileType.Hand);
+        blockBefore = player.Creature.Block;
+        AutoTestAssert.True(lowProfile.TryManualPlay(null), "Play LowProfile with 1 debuff + 2 Dex");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(blockBefore + 13, player.Creature.Block, "LowProfile gained 7 + 4 + 2 Dex = 13 Block");
+        await PowerCmd.Remove<WeakPower>(player.Creature);
+        await PowerCmd.Remove<DexterityPower>(player.Creature);
+
+        // 10. ItchyTrigger (Dead On, middle of 3 cards): deals 7 damage and reduces a hand card's cost by 1.
+        await ResetHandAndEnergy();
+        var costTarget1 = combatState.CreateCard<Manifest>(player);
+        var itchy = combatState.CreateCard<ItchyTrigger>(player);
+        var costTarget2 = combatState.CreateCard<Manifest>(player);
+        await CardPileCmd.Add(costTarget1, PileType.Hand);
+        await CardPileCmd.Add(itchy, PileType.Hand);
+        await CardPileCmd.Add(costTarget2, PileType.Hand);
+        hpBefore = enemy.CurrentHp;
+        AutoTestAssert.True(itchy.TryManualPlay(enemy), "Play Dead On ItchyTrigger");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(hpBefore - 7, enemy.CurrentHp, "ItchyTrigger dealt 7 damage");
+        AutoTestAssert.True(
+            costTarget1.EnergyCost.GetWithModifiers(CostModifiers.All) == 1
+            || costTarget2.EnergyCost.GetWithModifiers(CostModifiers.All) == 1,
+            "Dead On ItchyTrigger reduced a hand card's cost by 1");
+
+        // 11. Manifest: gains 16 Block and adds Decay to hand.
+        await ResetHandAndEnergy();
+        var manifest = combatState.CreateCard<Manifest>(player);
+        await CardPileCmd.Add(manifest, PileType.Hand);
+        blockBefore = player.Creature.Block;
+        AutoTestAssert.True(manifest.TryManualPlay(null), "Play Manifest");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(blockBefore + 16, player.Creature.Block, "Manifest gained 16 Block");
+        AutoTestAssert.True(pcs.Hand.Cards.Any(c => c is StsCards.Decay), "Manifest added Decay to hand");
+
+        // 12. Misfire: deals 11 damage and shuffles Clumsy into draw pile.
+        await ResetHandAndEnergy();
+        var misfire = combatState.CreateCard<Misfire>(player);
+        await CardPileCmd.Add(misfire, PileType.Hand);
+        hpBefore = enemy.CurrentHp;
+        AutoTestAssert.True(misfire.TryManualPlay(enemy), "Play Misfire");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(hpBefore - 11, enemy.CurrentHp, "Misfire dealt 11 damage");
+        AutoTestAssert.True(PileType.Draw.GetPile(player).Cards.Any(c => c is StsCards.Clumsy), "Misfire shuffled Clumsy into draw pile");
+
+        // 13. PistolWhip: deals 6 damage and applies 3 Bruise.
+        await ResetHandAndEnergy();
+        var pistolWhip = combatState.CreateCard<PistolWhip>(player);
+        await CardPileCmd.Add(pistolWhip, PileType.Hand);
+        hpBefore = enemy.CurrentHp;
+        AutoTestAssert.True(pistolWhip.TryManualPlay(enemy), "Play PistolWhip");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(hpBefore - 6, enemy.CurrentHp, "PistolWhip dealt 6 damage");
+        AutoTestAssert.Equal(3, enemy.GetPowerAmount<BruisePower>(), "PistolWhip applied 3 Bruise");
+        await PowerCmd.Remove<BruisePower>(enemy);
+
+        // 14. Roulette: deals 16 damage, discards hand (2 cards), draws 2 cards.
+        await ResetHandAndEnergy();
+        var roulette = combatState.CreateCard<Roulette>(player);
+        var h1 = combatState.CreateCard<HermitStrike>(player);
+        var h2 = combatState.CreateCard<HermitDefend>(player);
+        await CardPileCmd.Add(roulette, PileType.Hand);
+        await CardPileCmd.Add(h1, PileType.Hand);
+        await CardPileCmd.Add(h2, PileType.Hand);
+        hpBefore = enemy.CurrentHp;
+        AutoTestAssert.True(roulette.TryManualPlay(enemy), "Play Roulette");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(hpBefore - 16, enemy.CurrentHp, "Roulette dealt 16 damage");
+        AutoTestAssert.Equal(2, pcs.Hand.Cards.Count, "Roulette replaced 2 discarded hand cards with 2 drawn cards");
+
+        // 15. SprayPray: deals 4x3 = 12 damage and shuffles Doubt into draw pile.
+        await ResetHandAndEnergy();
+        var sprayPray = combatState.CreateCard<SprayPray>(player);
+        await CardPileCmd.Add(sprayPray, PileType.Hand);
+        hpBefore = enemy.CurrentHp;
+        AutoTestAssert.True(sprayPray.TryManualPlay(null), "Play SprayPray");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(hpBefore - 12, enemy.CurrentHp, "SprayPray dealt 12 total damage");
+        AutoTestAssert.True(PileType.Draw.GetPile(player).Cards.Any(c => c is StsCards.Doubt), "SprayPray shuffled Doubt into draw pile");
+
+        // 16. TrackingShot: applies ConcentratedPower and deals 4x2 = 8 damage.
+        await ResetHandAndEnergy();
+        var tracking = combatState.CreateCard<TrackingShot>(player);
+        await CardPileCmd.Add(tracking, PileType.Hand);
+        hpBefore = enemy.CurrentHp;
+        AutoTestAssert.True(tracking.TryManualPlay(enemy), "Play TrackingShot");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(hpBefore - 8, enemy.CurrentHp, "TrackingShot dealt 8 damage");
+        AutoTestAssert.True(player.Creature.HasPower<ConcentratedPower>(), "TrackingShot applied ConcentratedPower");
+
+        // 17. Vantage (off-center but Concentrated!): gains 8 Block, draws 1 card and upgrades it, consumes Concentration!
+        var topUnupgraded = combatState.CreateCard<HermitStrike>(player);
+        await CardPileCmd.Add(topUnupgraded, PileType.Draw, CardPilePosition.Top);
+        var vantage = combatState.CreateCard<Vantage>(player);
+        var vPad1 = combatState.CreateCard<HermitDefend>(player);
+        var vPad2 = combatState.CreateCard<HermitDefend>(player);
+        await CardPileCmd.Add(vantage, PileType.Hand);
+        await CardPileCmd.Add(vPad1, PileType.Hand);
+        await CardPileCmd.Add(vPad2, PileType.Hand);
+        blockBefore = player.Creature.Block;
+        AutoTestAssert.True(vantage.TryManualPlay(null), "Play Concentrated Vantage");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(blockBefore + 8, player.Creature.Block, "Vantage gained 8 Block");
+        AutoTestAssert.True(topUnupgraded.IsUpgraded, "Dead On Vantage upgraded the drawn card");
+        AutoTestAssert.True(!player.Creature.HasPower<ConcentratedPower>(), "Vantage consumed ConcentratedPower");
+
+        // 18. WideOpen: deals 6 damage and applies 1 Vulnerable.
+        await ResetHandAndEnergy();
+        var wideOpen = combatState.CreateCard<WideOpen>(player);
+        await CardPileCmd.Add(wideOpen, PileType.Hand);
+        hpBefore = enemy.CurrentHp;
+        AutoTestAssert.True(wideOpen.TryManualPlay(enemy), "Play WideOpen");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(hpBefore - 6, enemy.CurrentHp, "WideOpen dealt 6 damage");
+        AutoTestAssert.Equal(1, enemy.GetPowerAmount<VulnerablePower>(), "WideOpen applied 1 Vulnerable");
+        await PowerCmd.Remove<VulnerablePower>(enemy);
+
+        // 19 & 20. Quickdraw + Coalescence across turn end:
+        // Quickdraw deals 9, draws 2, applies HermitDrawLessNextTurnPower(1).
+        // Coalescence gains 6 Block and retains 1 chosen card across turn end!
+        await ResetHandAndEnergy();
+        var quickdraw = combatState.CreateCard<Quickdraw>(player);
+        await CardPileCmd.Add(quickdraw, PileType.Hand);
+        hpBefore = enemy.CurrentHp;
+        AutoTestAssert.True(quickdraw.TryManualPlay(enemy), "Play Quickdraw");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(hpBefore - 9, enemy.CurrentHp, "Quickdraw dealt 9 damage");
+        AutoTestAssert.Equal(2, pcs.Hand.Cards.Count, "Quickdraw drew 2 cards");
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<HermitDrawLessNextTurnPower>(), "Quickdraw applied DrawLess(1)");
+
+        var retainTarget = combatState.CreateCard<HermitStrike>(player);
+        var coalescence = combatState.CreateCard<Coalescence>(player);
+        await CardPileCmd.Add(retainTarget, PileType.Hand);
+        await CardPileCmd.Add(coalescence, PileType.Hand);
+        blockBefore = player.Creature.Block;
+        AutoTestAssert.True(coalescence.TryManualPlay(null), "Play Coalescence");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(blockBefore + 6, player.Creature.Block, "Coalescence gained 6 Block");
+        AutoTestAssert.Equal(2, player.Creature.GetPowerAmount<CoalescencePower>(), "Coalescence applied CoalescencePower(2)");
+
+        int autoRetainedBeforeEnd = pcs.Hand.Cards.Count(c => c.ShouldRetainThisTurn);
+        using (DownfallAutoTestRunner.PreferCards(c => ReferenceEquals(c, retainTarget)))
+        {
+            await DownfallAutoTestRunner.EndTurnAndWaitForRoundAsync(player, 2);
+        }
+        AutoTestAssert.True(pcs.Hand.Cards.Contains(retainTarget), "CoalescencePower retained chosen card into Turn 2");
+        AutoTestAssert.True(!player.Creature.HasPower<CoalescencePower>(), "CoalescencePower removed after turn end");
+        AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<HermitDrawLessNextTurnPower>(), "HermitDrawLessNextTurnPower consumed on Turn 2 draw");
+        // Exact Turn 2 hand size: any naturally retained cards + 1 retained via Coalescence + 4 drawn (5 - 1 from Quickdraw).
+        AutoTestAssert.Equal(autoRetainedBeforeEnd + 1 + 4, pcs.Hand.Cards.Count, "Turn 2 hand equals retained cards + 4 drawn (DrawLess -1)");
     }
 }

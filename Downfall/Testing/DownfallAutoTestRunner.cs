@@ -131,6 +131,7 @@ internal static class DownfallAutoTestRunner
                 ("ModelDbAssetsAndLocIntegrity", TestModelDbAssetsAndLocIntegrity),
                 ("HermitVisualsRuntime", HermitTests.TestVisualsRuntime),
                 ("HermitStarterCombat", HermitTests.TestStarterCombat),
+                ("HermitCommonCardsInCombat", HermitTests.TestCommonCardsInCombat),
             ];
 
             foreach (var (name, run) in tests)
@@ -472,7 +473,9 @@ internal static class DownfallAutoTestRunner
         // Validate Hermit-specific loc keys.
         AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-DEAD_ON_KEYWORD.title").Exists(), "Missing Dead On title loc");
         AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-DEAD_ON_KEYWORD.description").Exists(), "Missing Dead On desc loc");
+        AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-COALESCENCE.selectionScreenPrompt").Exists(), "Missing Coalescence prompt loc");
         AutoTestAssert.True(new LocString("cards", "DOWNFALL-COVET.selectionScreenPrompt").Exists(), "Missing Covet selectionScreenPrompt loc");
+        AutoTestAssert.True(new LocString("cards", "DOWNFALL-BODY_ARMOR.selectionScreenPrompt").Exists(), "Missing BodyArmor selectionScreenPrompt loc");
 
         return Task.CompletedTask;
     }

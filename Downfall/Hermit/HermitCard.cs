@@ -1,7 +1,10 @@
+using System.Runtime.CompilerServices;
 using BaseLib.Utils;
 using Downfall.Core;
 using Downfall.Hermit.Powers;
+using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Entities.Cards;
+using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.GameActions.Multiplayer;
 using MegaCrit.Sts2.Core.HoverTips;
 using MegaCrit.Sts2.Core.Localization;
@@ -18,6 +21,8 @@ public abstract class HermitCard(
     bool showInCardLibrary = true)
     : DownfallCard(cost, type, rarity, target, showInCardLibrary)
 {
+    private static readonly ConditionalWeakTable<ICombatState, HashSet<CardPlay>> DeadOnPlaysByCombat = new();
+
     private bool _deadOnWhenPlayed;
 
     protected override string CharacterKey => TheHermit.CharKey;
@@ -76,10 +81,43 @@ public abstract class HermitCard(
 
     public override Task AfterCardPlayed(PlayerChoiceContext choiceContext, CardPlay cardPlay)
     {
-        if (ReferenceEquals(cardPlay.Card, this) && cardPlay.PlayIndex >= cardPlay.PlayCount - 1)
+        if (ReferenceEquals(cardPlay.Card, this))
         {
-            _deadOnWhenPlayed = false;
+            if (UsesDeadOn && _deadOnWhenPlayed && CombatState is not null)
+            {
+                DeadOnPlaysByCombat.GetOrCreateValue(CombatState).Add(cardPlay);
+            }
+
+            if (cardPlay.PlayIndex >= cardPlay.PlayCount - 1)
+            {
+                _deadOnWhenPlayed = false;
+            }
         }
         return Task.CompletedTask;
+    }
+
+    internal static bool WasLastCardPlayedThisTurnDeadOn(Player? owner, ICombatState? combatState, CardPlay? currentPlay = null)
+    {
+        if (owner is null
+            || combatState is null
+            || !DeadOnPlaysByCombat.TryGetValue(combatState, out var deadOnPlays)
+            || deadOnPlays.Count == 0)
+        {
+            return false;
+        }
+
+        CardPlay? previous = null;
+        foreach (var entry in CombatManager.Instance.History.CardPlaysStarted)
+        {
+            if (entry.CardPlay.Card.Owner != owner || !entry.HappenedThisTurn(combatState))
+                continue;
+
+            if (currentPlay is not null && ReferenceEquals(entry.CardPlay, currentPlay))
+                return previous is not null && deadOnPlays.Contains(previous);
+
+            previous = entry.CardPlay;
+        }
+
+        return previous is not null && deadOnPlays.Contains(previous);
     }
 }
