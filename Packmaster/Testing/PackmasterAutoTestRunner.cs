@@ -19,7 +19,10 @@ using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Models.Powers;
 using MegaCrit.Sts2.Core.Multiplayer.Serialization;
 using MegaCrit.Sts2.Core.Nodes;
+using MegaCrit.Sts2.Core.Nodes.Combat;
 using MegaCrit.Sts2.Core.Nodes.Events;
+using MegaCrit.Sts2.Core.Nodes.RestSite;
+using MegaCrit.Sts2.Core.Nodes.Screens.Shops;
 using MegaCrit.Sts2.Core.Random;
 using MegaCrit.Sts2.Core.Rooms;
 using MegaCrit.Sts2.Core.Runs;
@@ -112,6 +115,7 @@ internal static class PackmasterAutoTestRunner
             (string Name, Func<Task> Run)[] tests =
             [
                 ("ModelDbAssetsAndLocIntegrity", TestModelDbAssetsAndLocIntegrity),
+                ("CharacterVisualsRuntime", TestCharacterVisualsRuntime),
                 ("PackSystemAndCardPoolFiltering", TestPackSystemAndCardPoolFiltering),
                 ("PackRunStateSaveLoadPersistence", TestPackRunStateSaveLoadPersistence),
                 ("NeowInteractivePackDraft", TestNeowInteractivePackDraft),
@@ -252,9 +256,15 @@ internal static class PackmasterAutoTestRunner
         var relicPool = AutoTestAssert.NotNull(ModelDb.RelicPool<PackmasterRelicPool>(), "PackmasterRelicPool");
         var potionPool = AutoTestAssert.NotNull(ModelDb.PotionPool<PackmasterPotionPool>(), "PackmasterPotionPool");
 
+        const string packmasterSpritePath = "res://Packmaster/images/char/packmaster.png";
         string[] charAssets =
         [
+            packmasterSpritePath,
+            character.CustomVisualPath,
+            character.CustomRestSiteAnimPath,
+            character.CustomMerchantAnimPath,
             character.CustomIconTexturePath,
+            character.CustomIconOutlineTexturePath,
             character.CustomCharacterSelectIconPath,
             character.CustomCharacterSelectLockedIconPath,
             character.CustomCharacterSelectBg,
@@ -262,6 +272,55 @@ internal static class PackmasterAutoTestRunner
         ];
         foreach (var path in charAssets)
             AutoTestAssert.True(ResourceLoader.Exists(path), $"Missing character asset: {path}");
+
+        AutoTestAssert.NotNull(ResourceLoader.Load<Texture2D>(packmasterSpritePath), "Packmaster sprite Texture2D");
+        AutoTestAssert.NotNull(ResourceLoader.Load<Texture2D>(character.CustomIconOutlineTexturePath), "Packmaster icon outline Texture2D");
+
+        // Verify BaseLib wires overrides onto base CharacterModel properties.
+        CharacterModel baseChar = character;
+        AutoTestAssert.Equal(character.CustomRestSiteAnimPath, baseChar.RestSiteAnimPath, "Base CharacterModel.RestSiteAnimPath resolves to Packmaster");
+        AutoTestAssert.Equal(character.CustomMerchantAnimPath, baseChar.MerchantAnimPath, "Base CharacterModel.MerchantAnimPath resolves to Packmaster");
+        AutoTestAssert.Equal(character.CustomIconOutlineTexturePath, baseChar.IconOutlineTexture?.ResourcePath, "Base CharacterModel.IconOutlineTexture resolves to Packmaster");
+
+        // Verify BaseLib scene conversions instantiate Packmaster's sprite (not Ironclad) for combat, rest site, and merchant.
+        var combatVisuals = AutoTestAssert.NotNull(baseChar.CreateVisuals(), "CharacterModel.CreateVisuals()");
+        try
+        {
+            var combatSprite = AutoTestAssert.NotNull(combatVisuals.GetNodeOrNull<Sprite2D>("%Visuals"), "Combat %Visuals Sprite2D");
+            AutoTestAssert.Equal(packmasterSpritePath, combatSprite.Texture?.ResourcePath, "Combat visuals use Packmaster sprite");
+            var bounds = AutoTestAssert.NotNull(combatVisuals.GetNodeOrNull<Control>("%Bounds"), "Combat %Bounds present");
+            AutoTestAssert.Equal(Control.MouseFilterEnum.Ignore, bounds.MouseFilter, "Combat %Bounds ignores mouse input");
+        }
+        finally
+        {
+            combatVisuals.Free();
+        }
+
+        var restVisuals = AutoTestAssert.NotNull(
+            ResourceLoader.Load<PackedScene>(baseChar.RestSiteAnimPath)?.Instantiate<NRestSiteCharacter>(),
+            "Instantiated NRestSiteCharacter");
+        try
+        {
+            var restSprite = AutoTestAssert.NotNull(restVisuals.GetNodeOrNull<Sprite2D>("ControlRoot/Visuals"), "Rest site Visuals Sprite2D");
+            AutoTestAssert.Equal(packmasterSpritePath, restSprite.Texture?.ResourcePath, "Rest site visuals use Packmaster sprite");
+        }
+        finally
+        {
+            restVisuals.Free();
+        }
+
+        var merchantVisuals = AutoTestAssert.NotNull(
+            ResourceLoader.Load<PackedScene>(baseChar.MerchantAnimPath)?.Instantiate<NMerchantCharacter>(),
+            "Instantiated NMerchantCharacter");
+        try
+        {
+            var merchantSprite = AutoTestAssert.NotNull(merchantVisuals.GetNodeOrNull<Sprite2D>("%Visuals"), "Merchant %Visuals Sprite2D");
+            AutoTestAssert.Equal(packmasterSpritePath, merchantSprite.Texture?.ResourcePath, "Merchant visuals use Packmaster sprite");
+        }
+        finally
+        {
+            merchantVisuals.Free();
+        }
 
         var cardPool = ModelDb.CardPool<PackmasterCardPool>();
         AutoTestAssert.True(ResourceLoader.Exists(cardPool.BigEnergyIconPath), $"Missing {cardPool.BigEnergyIconPath}");
@@ -387,6 +446,71 @@ internal static class PackmasterAutoTestRunner
         AutoTestAssert.True(new LocString("relics", "PACKMASTER-PM_COLLECTION.selectionScreenPrompt").Exists(), "Missing PACKMASTER-PM_COLLECTION.selectionScreenPrompt loc key");
 
         return Task.CompletedTask;
+    }
+
+    private static void CollectNodes<T>(Node root, List<T> results) where T : Node
+    {
+        if (root is T match && !match.IsQueuedForDeletion())
+            results.Add(match);
+        foreach (var child in root.GetChildren())
+            CollectNodes(child, results);
+    }
+
+    private static async Task TestCharacterVisualsRuntime()
+    {
+        const string packmasterSpritePath = "res://Packmaster/images/char/packmaster.png";
+
+        var player = Player.CreateForNewRun<ThePackmaster>(new UnlockState(SaveManager.Instance.Progress), 1uL);
+        await NGame.Instance!.StartNewSingleplayerRun(
+            player,
+            shouldSave: false,
+            ActModel.GetDefaultList(),
+            Array.Empty<ModifierModel>(),
+            "PMVIS01",
+            GameMode.Standard,
+            isCustomGame: false);
+
+        // 1. Rest Site: _Ready() runs on live NRestSiteCharacter in SceneTree.
+        await RunManager.Instance.EnterRoomDebug(RoomType.RestSite, MapPointType.RestSite, null, showTransition: false);
+        var restChars = new List<NRestSiteCharacter>();
+        CollectNodes(NRun.Instance!, restChars);
+        AutoTestAssert.True(restChars.Count >= 1, "Rest site mounted live NRestSiteCharacter");
+        var restChar = restChars[0];
+        AutoTestAssert.True(restChar.IsNodeReady(), "NRestSiteCharacter._Ready() completed");
+        var restSprite = AutoTestAssert.NotNull(restChar.GetNodeOrNull<Sprite2D>("ControlRoot/Visuals"), "Live rest site Visuals Sprite2D");
+        AutoTestAssert.Equal(packmasterSpritePath, restSprite.Texture?.ResourcePath, "Live rest site uses Packmaster sprite");
+        AutoTestAssert.NotNull(restChar.Hitbox, "Live rest site Hitbox initialized");
+
+        // 2. Shop: _Ready() and PlayAnimation run on live NMerchantCharacter in SceneTree.
+        await RunManager.Instance.EnterRoomDebug(RoomType.Shop, MapPointType.Shop, null, showTransition: false);
+        var merchantChars = new List<NMerchantCharacter>();
+        CollectNodes(NRun.Instance!, merchantChars);
+        AutoTestAssert.True(merchantChars.Count >= 1, "Shop mounted live NMerchantCharacter");
+        var merchantChar = merchantChars[0];
+        AutoTestAssert.True(merchantChar.IsNodeReady(), "NMerchantCharacter._Ready() completed");
+        var merchantSprite = AutoTestAssert.NotNull(merchantChar.GetNodeOrNull<Sprite2D>("%Visuals"), "Live merchant %Visuals Sprite2D");
+        AutoTestAssert.Equal(packmasterSpritePath, merchantSprite.Texture?.ResourcePath, "Live merchant uses Packmaster sprite");
+        merchantChar.PlayAnimation("relaxed_loop", loop: true);
+
+        // 3. Combat + lethal damage / player death animation path.
+        CleanupRun();
+        var (combatPlayer, _, combatState) = await StartCombatAsync("PMVIS02");
+        var creatures = new List<NCreature>();
+        CollectNodes(NRun.Instance!, creatures);
+        var playerCreatureNode = AutoTestAssert.NotNull(
+            creatures.FirstOrDefault(c => c.Entity == combatPlayer.Creature),
+            "Live player NCreature mounted in combat");
+        AutoTestAssert.True(playerCreatureNode.Visuals.IsNodeReady(), "Player NCreatureVisuals._Ready() completed");
+        var combatSprite = AutoTestAssert.NotNull(playerCreatureNode.Visuals.Body as Sprite2D, "Live player body is Sprite2D");
+        AutoTestAssert.Equal(packmasterSpritePath, combatSprite.Texture?.ResourcePath, "Live combat player uses Packmaster sprite");
+        AutoTestAssert.Equal(Control.MouseFilterEnum.Ignore, playerCreatureNode.Visuals.Bounds.MouseFilter, "Live combat %Bounds ignores mouse");
+        AutoTestAssert.True(playerCreatureNode.Visuals.VfxSpawnPosition.Position.Y < -50f,
+            $"Player VfxSpawnPosition should be on torso (got Y={playerCreatureNode.Visuals.VfxSpawnPosition.Position.Y})");
+
+        // Apply lethal damage to exercise the player death animation path cleanly without errors.
+        var enemy = AutoTestAssert.NotNull(combatState.HittableEnemies.FirstOrDefault(), "Enemy for lethal test");
+        await CreatureCmd.Damage(new ThrowingPlayerChoiceContext(), combatPlayer.Creature, 999m, ValueProp.Unblockable | ValueProp.Unpowered, dealer: enemy, cardSource: null, cardPlay: null);
+        AutoTestAssert.True(combatPlayer.Creature.IsDead, "Player died cleanly from lethal damage");
     }
 
     private static async Task TestPackSystemAndCardPoolFiltering()
@@ -2107,14 +2231,6 @@ internal static class PackmasterAutoTestRunner
         AutoTestAssert.True(!NeowPackDraftPatch.TryExtractDraftPackId(null, out _), "Rejects null key");
         AutoTestAssert.True(!NeowPackDraftPatch.TryExtractDraftPackId(string.Empty, out _), "Rejects empty key");
         AutoTestAssert.True(!NeowPackDraftPatch.TryExtractDraftPackId("NEOW_OPTION_1", out _), "Rejects non-draft key");
-
-        static void CollectNodes<T>(Node root, List<T> results) where T : Node
-        {
-            if (root is T match && !match.IsQueuedForDeletion())
-                results.Add(match);
-            foreach (var child in root.GetChildren())
-                CollectNodes(child, results);
-        }
 
         static List<NEventOptionButton> GetLiveEventOptionButtons()
         {

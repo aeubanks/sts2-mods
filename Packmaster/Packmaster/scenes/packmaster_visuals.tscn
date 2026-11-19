@@ -1,0 +1,20 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Texture2D" path="res://Packmaster/images/char/packmaster.png" id="1_packmaster"]
+
+[node name="PackmasterVisuals" type="Node2D"]
+
+[node name="Visuals" type="Sprite2D" parent="."]
+unique_name_in_owner = true
+position = Vector2(0, -138)
+texture = ExtResource("1_packmaster")
+
+[node name="Bounds" type="Control" parent="."]
+unique_name_in_owner = true
+layout_mode = 3
+anchors_preset = 0
+mouse_filter = 2
+offset_left = -120.0
+offset_top = -290.0
+offset_right = 120.0
+offset_bottom = 0.0

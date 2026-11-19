@@ -65,7 +65,7 @@ trap 'rm -f "$LOG_FILE"' EXIT
 
 echo "[test.sh] Launching headless SlayTheSpire2 autotest..."
 set +e
-PACKMASTER_AUTOTEST=1 timeout 90 "$STS2_BIN" --headless --force-steam=off --audio-driver Dummy >"$LOG_FILE" 2>&1
+DOWNFALL_AUTOTEST=0 PACKMASTER_AUTOTEST=1 timeout --kill-after=10 150 "$STS2_BIN" --headless --force-steam=off --audio-driver Dummy >"$LOG_FILE" 2>&1
 RC=$?
 set -e
 
