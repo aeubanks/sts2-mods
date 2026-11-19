@@ -136,6 +136,8 @@ internal static class DownfallAutoTestRunner
                 ("HermitUncommonBatch2InCombat", HermitTests.TestUncommonBatch2InCombat),
                 ("HermitRareCardsInCombat", HermitTests.TestRareCardsInCombat),
                 ("HermitRelicsAndPotionsInCombat", HermitTests.TestRelicsAndPotionsInCombat),
+                ("AwakenedVisualsRuntime", AwakenedTests.TestVisualsRuntime),
+                ("AwakenedStarterCombat", AwakenedTests.TestStarterCombat),
             ];
 
             foreach (var (name, run) in tests)
@@ -474,11 +476,15 @@ internal static class DownfallAutoTestRunner
             }
         }
 
-        // Validate Hermit-specific loc keys.
+        // Validate character-specific gameplay UI and prompt loc keys.
         AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-DEAD_ON_KEYWORD.title").Exists(), "Missing Dead On title loc");
         AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-DEAD_ON_KEYWORD.description").Exists(), "Missing Dead On desc loc");
         AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-COALESCENCE.selectionScreenPrompt").Exists(), "Missing Coalescence prompt loc");
         AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-ADAPT.selectionScreenPrompt").Exists(), "Missing Adapt prompt loc");
+        AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-CHANT_KEYWORD.title").Exists(), "Missing Chant title loc");
+        AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-CHANT_KEYWORD.description").Exists(), "Missing Chant desc loc");
+        AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-CONJURE_KEYWORD.title").Exists(), "Missing Conjure title loc");
+        AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-CONJURE_KEYWORD.description").Exists(), "Missing Conjure desc loc");
         AutoTestAssert.True(new LocString("cards", "DOWNFALL-COVET.selectionScreenPrompt").Exists(), "Missing Covet selectionScreenPrompt loc");
         AutoTestAssert.True(new LocString("cards", "DOWNFALL-BODY_ARMOR.selectionScreenPrompt").Exists(), "Missing BodyArmor selectionScreenPrompt loc");
         AutoTestAssert.True(new LocString("cards", "DOWNFALL-CHEAT.selectionScreenPrompt").Exists(), "Missing Cheat selectionScreenPrompt loc");
