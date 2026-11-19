@@ -11,4 +11,5 @@ public sealed record PackDefinition(
 
     public LocString Title => new("gameplay_ui", $"{KeyPrefix}.title");
     public LocString Description => new("gameplay_ui", $"{KeyPrefix}.description");
+    public string IconPath => $"res://Packmaster/images/packs/{Id.ToLowerInvariant()}.png";
 }

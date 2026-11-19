@@ -1,3 +1,4 @@
+using Godot;
 using HarmonyLib;
 using MegaCrit.Sts2.Core.Events;
 using MegaCrit.Sts2.Core.Helpers;
@@ -5,6 +6,7 @@ using MegaCrit.Sts2.Core.HoverTips;
 using MegaCrit.Sts2.Core.Localization;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Models.Events;
+using MegaCrit.Sts2.Core.Nodes.Events;
 using MegaCrit.Sts2.Core.Random;
 using Packmaster.Character;
 using Packmaster.Config;
@@ -14,6 +16,7 @@ namespace Packmaster.Packs;
 [HarmonyPatch(typeof(Neow), "GenerateInitialOptions")]
 internal static class NeowPackDraftPatch
 {
+    private const string DraftKeyPrefix = "PACKMASTER_DRAFT_";
     private const int MaxChoicePicks = 3;
     private const int CandidatesPerPick = 3;
 
@@ -106,7 +109,7 @@ internal static class NeowPackDraftPatch
                 () => OnPackPicked(neow, chosen, remaining, rng, pickedPack, pickIndex, totalPicks),
                 title,
                 desc,
-                $"PACKMASTER_DRAFT_{pickIndex}_{pack.Id}",
+                $"{DraftKeyPrefix}{pickIndex}_{pack.Id}",
                 Array.Empty<IHoverTip>())
                 .ThatWontSaveToChoiceHistory();
 
@@ -163,6 +166,20 @@ internal static class NeowPackDraftPatch
         return result;
     }
 
+    internal static bool TryExtractDraftPackId(string? textKey, out string packId)
+    {
+        packId = string.Empty;
+        if (string.IsNullOrEmpty(textKey) || !textKey.StartsWith(DraftKeyPrefix, StringComparison.Ordinal))
+            return false;
+
+        int sep = textKey.IndexOf('_', DraftKeyPrefix.Length);
+        if (sep <= DraftKeyPrefix.Length || sep + 1 >= textKey.Length)
+            return false;
+
+        packId = textKey[(sep + 1)..];
+        return true;
+    }
+
     private static string FormatActivePackNames(List<string> packIds)
     {
         if (packIds.Count == 0)
@@ -173,5 +190,40 @@ internal static class NeowPackDraftPatch
             var pack = PackRegistry.Get(id);
             return pack is not null && pack.Title.Exists() ? pack.Title.GetFormattedText() : id;
         }));
+    }
+}
+
+[HarmonyPatch(typeof(NEventOptionButton), "_Ready")]
+internal static class NeowPackDraftButtonIconPatch
+{
+    [HarmonyPostfix]
+    private static void Postfix(NEventOptionButton __instance)
+    {
+        if (__instance.Event is not Neow)
+            return;
+
+        if (!NeowPackDraftPatch.TryExtractDraftPackId(__instance.Option?.TextKey, out var packId))
+            return;
+
+        var pack = PackRegistry.Get(packId);
+        if (pack is null || !ResourceLoader.Exists(pack.IconPath))
+            return;
+
+        var texture = ResourceLoader.Load<Texture2D>(pack.IconPath);
+        if (texture is null)
+            return;
+
+        var icon = __instance.GetNodeOrNull<TextureRect>("%RelicIcon");
+        if (icon is null)
+            return;
+
+        icon.Texture = texture;
+        var outline = icon.GetNodeOrNull<TextureRect>("%Outline");
+        if (outline is not null)
+        {
+            outline.Texture = null;
+            outline.Visible = false;
+        }
+        icon.Visible = true;
     }
 }

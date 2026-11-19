@@ -19,6 +19,7 @@ using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Models.Powers;
 using MegaCrit.Sts2.Core.Multiplayer.Serialization;
 using MegaCrit.Sts2.Core.Nodes;
+using MegaCrit.Sts2.Core.Nodes.Events;
 using MegaCrit.Sts2.Core.Random;
 using MegaCrit.Sts2.Core.Rooms;
 using MegaCrit.Sts2.Core.Runs;
@@ -298,6 +299,8 @@ internal static class PackmasterAutoTestRunner
         {
             AutoTestAssert.True(pack.Title.Exists(), $"Missing pack title loc: {pack.Id}");
             AutoTestAssert.True(pack.Description.Exists(), $"Missing pack description loc: {pack.Id}");
+            AutoTestAssert.True(ResourceLoader.Exists(pack.IconPath), $"Missing pack icon asset for {pack.Id}: {pack.IconPath}");
+            AutoTestAssert.NotNull(ResourceLoader.Load<Texture2D>(pack.IconPath), $"Failed to load pack icon Texture2D for {pack.Id}: {pack.IconPath}");
             AutoTestAssert.True(pack.CardTypes.Count > 0, $"Pack {pack.Id} has no cards");
             foreach (var cardType in pack.CardTypes)
                 AutoTestAssert.True(poolTypes.Contains(cardType), $"Pack {pack.Id} card {cardType.Name} not in PackmasterCardPool");
@@ -2095,6 +2098,32 @@ internal static class PackmasterAutoTestRunner
 
     private static async Task TestNeowInteractivePackDraft()
     {
+        // Direct unit checks for TryExtractDraftPackId edge cases.
+        AutoTestAssert.True(NeowPackDraftPatch.TryExtractDraftPackId("PACKMASTER_DRAFT_1_CoreSet", out var parsedId) && parsedId == "CoreSet", "Parses standard draft key");
+        AutoTestAssert.True(NeowPackDraftPatch.TryExtractDraftPackId("PACKMASTER_DRAFT_2_MY_PACK", out parsedId) && parsedId == "MY_PACK", "Parses pack ID containing underscores");
+        AutoTestAssert.True(!NeowPackDraftPatch.TryExtractDraftPackId("PACKMASTER_DRAFT_1_", out _), "Rejects trailing underscore with empty pack ID");
+        AutoTestAssert.True(!NeowPackDraftPatch.TryExtractDraftPackId("PACKMASTER_DRAFT__CoreSet", out _), "Rejects empty pick index");
+        AutoTestAssert.True(!NeowPackDraftPatch.TryExtractDraftPackId("PACKMASTER_DRAFT_1", out _), "Rejects missing pack separator");
+        AutoTestAssert.True(!NeowPackDraftPatch.TryExtractDraftPackId(null, out _), "Rejects null key");
+        AutoTestAssert.True(!NeowPackDraftPatch.TryExtractDraftPackId(string.Empty, out _), "Rejects empty key");
+        AutoTestAssert.True(!NeowPackDraftPatch.TryExtractDraftPackId("NEOW_OPTION_1", out _), "Rejects non-draft key");
+
+        static void CollectNodes<T>(Node root, List<T> results) where T : Node
+        {
+            if (root is T match && !match.IsQueuedForDeletion())
+                results.Add(match);
+            foreach (var child in root.GetChildren())
+                CollectNodes(child, results);
+        }
+
+        static List<NEventOptionButton> GetLiveEventOptionButtons()
+        {
+            var buttons = new List<NEventOptionButton>();
+            if (NRun.Instance is not null)
+                CollectNodes(NRun.Instance, buttons);
+            return buttons;
+        }
+
         bool savedAllPacks = PackmasterConfig.AllPacksMode;
         int savedPacksPerRun = PackmasterConfig.PacksPerRun;
         PackmasterConfig.AllPacksMode = false;
@@ -2130,6 +2159,26 @@ internal static class PackmasterAutoTestRunner
             var pickedIds = new List<string>();
             for (int pick = 1; pick <= 3; pick++)
             {
+                // Verify live NEventOptionButton pack icons on Pick 1 and Pick 2 (ensuring SetEventState re-runs _Ready cleanly).
+                if (pick <= 2)
+                {
+                    var liveButtons = GetLiveEventOptionButtons()
+                        .Where(b => b.Option is not null && neow.CurrentOptions.Contains(b.Option))
+                        .ToList();
+                    AutoTestAssert.Equal(neow.CurrentOptions.Count, liveButtons.Count, $"Pick {pick} renders all {neow.CurrentOptions.Count} NEventOptionButtons");
+                    foreach (var btn in liveButtons)
+                    {
+                        AutoTestAssert.True(NeowPackDraftPatch.TryExtractDraftPackId(btn.Option.TextKey, out var btnPackId), $"Pick {pick} button TextKey parses: {btn.Option.TextKey}");
+                        var btnPack = AutoTestAssert.NotNull(PackRegistry.Get(btnPackId), $"Pick {pick} button pack registered: {btnPackId}");
+                        var icon = AutoTestAssert.NotNull(btn.GetNodeOrNull<TextureRect>("%RelicIcon"), $"Pick {pick} button has %RelicIcon");
+                        AutoTestAssert.True(icon.Visible && icon.IsVisibleInTree(), $"Pick {pick} pack icon is visible in tree for {btnPackId}");
+                        AutoTestAssert.Equal(btnPack.IconPath, icon.Texture?.ResourcePath, $"Pick {pick} pack icon texture matches {btnPackId}");
+                        var outline = icon.GetNodeOrNull<TextureRect>("%Outline");
+                        if (outline is not null)
+                            AutoTestAssert.True(!outline.Visible && outline.Texture is null, $"Pick {pick} pack icon outline hidden & cleared for {btnPackId}");
+                    }
+                }
+
                 var opt = neow.CurrentOptions[0];
                 string prefix = $"PACKMASTER_DRAFT_{pick}_";
                 AutoTestAssert.True(opt.TextKey.StartsWith(prefix), $"Pick {pick} option key starts with {prefix}");
@@ -2151,6 +2200,18 @@ internal static class PackmasterAutoTestRunner
             AutoTestAssert.True(pickedIds.All(activePacks.Contains), "Final drafted packs include all 3 interactively picked packs");
             AutoTestAssert.True(neow.CurrentOptions.Count > 0, "Neow now presents normal blessing options");
             AutoTestAssert.True(neow.CurrentOptions.All(o => !o.TextKey.StartsWith("PACKMASTER_DRAFT_")), "Neow options are no longer draft options");
+
+            // Confirm post-draft vanilla Neow option buttons are untouched by the pack icon patch.
+            var postDraftButtons = GetLiveEventOptionButtons()
+                .Where(b => b.Option is not null && neow.CurrentOptions.Contains(b.Option))
+                .ToList();
+            AutoTestAssert.Equal(neow.CurrentOptions.Count, postDraftButtons.Count, "Post-draft vanilla Neow renders option buttons");
+            foreach (var btn in postDraftButtons)
+            {
+                var icon = btn.GetNodeOrNull<TextureRect>("%RelicIcon");
+                AutoTestAssert.True(icon?.Texture?.ResourcePath?.StartsWith("res://Packmaster/images/packs/") != true,
+                    $"Post-draft vanilla Neow button must not show a Packmaster pack icon (got {icon?.Texture?.ResourcePath})");
+            }
 
             // 4th click: pick a real vanilla Neow blessing via EventSynchronizer to confirm room transitions & finishes cleanly!
             RunManager.Instance.EventSynchronizer.ChooseLocalOption(0);
