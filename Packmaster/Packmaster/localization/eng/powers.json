@@ -1,0 +1,5 @@
+{
+  "PACKMASTER-MAYHEM_FORM_POWER.title": "Unrelenting Form",
+  "PACKMASTER-MAYHEM_FORM_POWER.description": "Once per turn, when you reach 2 or fewer cards in Hand, draw 2 cards and gain Energy.",
+  "PACKMASTER-MAYHEM_FORM_POWER.smartDescription": "Once per turn, when you reach 2 or fewer cards in [gold]Hand[/gold], draw 2 cards and gain [blue]{Amount}[/blue] Energy."
+}

@@ -6,8 +6,8 @@ using MegaCrit.Sts2.Core.ValueProps;
 
 namespace Packmaster.Cards;
 
-public abstract class BaseStrikeCard(CardRarity rarity)
-    : PackmasterCard(1, CardType.Attack, rarity, TargetType.AnyEnemy)
+public sealed class PackmasterStrike()
+    : PackmasterCard(1, CardType.Attack, CardRarity.Basic, TargetType.AnyEnemy)
 {
     protected override string PortraitKey => "strike";
 
@@ -33,11 +33,3 @@ public abstract class BaseStrikeCard(CardRarity rarity)
         DynamicVars.Damage.UpgradeValueBy(3m);
     }
 }
-
-public sealed class PackmasterStrike() : BaseStrikeCard(CardRarity.Basic);
-
-public sealed class CommonStrike() : BaseStrikeCard(CardRarity.Common);
-
-public sealed class UncommonStrike() : BaseStrikeCard(CardRarity.Uncommon);
-
-public sealed class RareStrike() : BaseStrikeCard(CardRarity.Rare);

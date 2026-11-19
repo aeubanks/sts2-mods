@@ -6,6 +6,7 @@ using HarmonyLib;
 using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Modding;
 using Packmaster.Config;
+using Packmaster.Packs;
 using Packmaster.Testing;
 
 namespace Packmaster;
@@ -23,6 +24,7 @@ public static class MainFile
         ScriptManagerBridge.LookupScriptsInAssembly(assembly);
 
         ModConfigRegistry.Register(ModId, new PackmasterConfig());
+        PackDefinitions.RegisterAll();
 
         var harmony = new Harmony(ModId);
         harmony.PatchAll(assembly);

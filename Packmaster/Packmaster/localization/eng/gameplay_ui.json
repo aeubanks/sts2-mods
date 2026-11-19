@@ -1,3 +1,5 @@
 {
-  "PACKMASTER-PACK_CARD_TYPE": "{Type} • {Pack}"
+  "PACKMASTER-PACK_CARD_TYPE": "{Type} • {Pack}",
+  "PACKMASTER-PACK_CORESET.title": "Core Set",
+  "PACKMASTER-PACK_CORESET.description": "The foundational Packmaster set featuring versatile tools and Synergy payoffs."
 }
