@@ -140,5 +140,8 @@
   "DOWNFALL-WIZARD_STAFF.flavor": "The pride and joy of every Gremlin Wizard, this staff is a frequent target of theft by rival mobs.",
   "DOWNFALL-WOUND_POKER.title": "Wound Poker",
   "DOWNFALL-WOUND_POKER.description": "At the end of your turn, deal [blue]{Damage}[/blue] damage to each [gold]Weak[/gold] enemy.",
-  "DOWNFALL-WOUND_POKER.flavor": "Does it hurt when I do this?"
+  "DOWNFALL-WOUND_POKER.flavor": "Does it hurt when I do this?",
+  "DOWNFALL-CHAMPION_CROWN.title": "Champion's Crown",
+  "DOWNFALL-CHAMPION_CROWN.description": "At the start of combat, add [gold]Inspiration[/gold] to your [gold]Hand[/gold].",
+  "DOWNFALL-CHAMPION_CROWN.flavor": "To the victor go the spoils."
 }

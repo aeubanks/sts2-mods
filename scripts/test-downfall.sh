@@ -69,7 +69,7 @@ trap 'rm -f "$LOG_FILE"' EXIT
 
 echo "[test-downfall.sh] Launching headless SlayTheSpire2 autotest..."
 set +e
-PACKMASTER_AUTOTEST=0 DOWNFALL_AUTOTEST=1 timeout --kill-after=10 150 "$STS2_BIN" --headless --force-steam=off --audio-driver Dummy >"$LOG_FILE" 2>&1
+PACKMASTER_AUTOTEST=0 DOWNFALL_AUTOTEST=1 timeout --kill-after=10 240 "$STS2_BIN" --headless --force-steam=off --audio-driver Dummy >"$LOG_FILE" 2>&1
 RC=$?
 set -e
 

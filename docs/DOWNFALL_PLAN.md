@@ -65,15 +65,50 @@ Port **The Hermit** in focused ~15–20 card commits (each reviewed + tested):
   - Starting relic: `GremlinKnob` ("Mob Leader's Staff") + `Testing/GremlinsTests.cs`.
 - **Phase 3B–3F — Gremlins Cards (~15–20/batch), Relics & Potions**, each reviewed + tested.
 
-### Phase 4+: Remaining 7 Downfall Characters (Same ~15–20 Card Vertical-Slice Process)
+### Phase 4: The Champ (Fourth Complete Playable Downfall Character)
+Port **The Champ** (`CharKey = "champ"`, `80 HP`, `99 Gold`, authentic Spine stance poses from `champ.atlas`/`champ.json`, at most 1 tiny Harmony prefix on `VigorPower` for `CrookedStrike`) in 6 clean vertical slices (~15–20 cards/batch), each tested, High-model reviewed, and committed:
+
+- **Core StS 2 Architecture (Simplicity-First):**
+  - **Shared `DownfallEcho` promotion:** Promote `GremlinMob`'s tiny `ConditionalWeakTable<CardModel, object>` + `MakeEcho` helper to `Downfall/Core/DownfallEcho.cs` so Gremlins, Champ (`SpectersHand`, `TripleStrike`), and future Downfall characters share one Echo helper.
+  - **Stances (`Downfall/Champ/ChampStances.cs` + 3 Stance Powers + 2 Ultimate Duration Powers):**
+    - `ChampStanceKind`: `None`, `Berserker`, `Defensive`, `Ultimate`.
+    - Active stance represented natively by one of 3 `ChampStancePower` subclasses (`PowerStackType.Single`, `DynamicVars["Charges"]` starting at `3m`, `DisplayAmount => DynamicVars["Charges"].IntValue`), swapping Champ's combat `Sprite2D.Texture` across all 4 authentic Spine poses (`Idle`, `IdleBerserker`, `IdleDefensive`, `IdleUltimate`):
+      - `BerserkerStancePower`: **Skill Bonus** = Gain `2` (+`DoubleStylePower` +`DoubleStyleThisTurnPower`) `VigorPower` (native StS 2!). **Finisher Bonus** = Gain `1` `StrengthPower`.
+      - `DefensiveStancePower`: **Skill Bonus** = Gain `3` (+`DoubleStylePower` +`DoubleStyleThisTurnPower`) `CounterPower`. **Finisher Bonus** = Gain `6` (+`DefensiveTrainingManual` relic) Block (`ValueProp.Unpowered`).
+      - `UltimateStancePower`: BOTH Berserker AND Defensive Skill Bonus and Finisher Bonus!
+    - **Skill Bonus charges (`BeforeCardPlayed`):** Playing a `CardType.Skill` while in a Stance with `Charges > 0` spends 1 charge (charges do **not** refresh per turn — only on entering a *different* Stance) and triggers the Stance's Skill Bonus (departing-stance timing matches StS 1's `stance.onPlayCard` so Opener Skills from Neutral don't burn a charge of the newly entered Stance, while same-stance Opener Skills spend 1 charge and do not reset charges). Entering the same Stance is a no-op.
+    - **Ultimate duration & lock:** `UltimateFormPower` locks the player in `Ultimate` Stance (blocking stance exits/switches) and decrements at end of round, removing `UltimateFormPower` **before** exiting to Neutral on expiration. `UltimateFormNextTurnPower` enters `Ultimate` Stance and applies `UltimateFormPower` at the start of next turn.
+    - **Technique:** Explicit `ChampStances.TriggerSkillBonusAsync` (triggers active Stance's Skill Bonus directly without consuming a charge).
+    - **Finisher (`ChampCard.IsFinisher`):** Only playable when in a Stance (`IsPlayable`, unless exempted by `SignatureFinisher`). Triggers active Stance's Finisher Bonus (skipped if Neutral via `SignatureFinisher`), increments combat/turn finisher counters, and exits Stance (unless `noExit`, `UltimateFormPower`, or `SignatureFinisher`). All Finisher/Combo reactors (`DancingMasterPower`, `FocusedBerPower`, `ChampionCrownUpgraded`, `Devastate`, `GladiatorsBookOfMartialProwess`) use native `AfterCardPlayed` directly!
+    - **Combo (`ChampCard.IsCombo`):** `ChampStances.IsInBerserker` (Berserker or Ultimate) and `ChampStances.IsInDefensive` (Defensive or Ultimate), glowing gold on `ShouldGlowGoldInternal`.
+    - **Single listener interface:** Keep ONLY `IChampStanceChangedListener` (used by `ImprovisingPower`, `IronFortressPower`, `BlackKnightsHelmet`, `SpectersHand`).
+  - **Counter (`CounterPower` + `Riposte` token):**
+    - `CounterPower` (`PowerStackType.Counter`): on `AfterDamageReceived` (when attacked by another creature with `props.IsPoweredAttack()`, even if fully blocked), snapshots `Amount`, removes `CounterPower` first (multi-hit safe!), adds `1` (+`ParryPower` stacks) 0-cost Ethereal Exhaust `Riposte` token Attack (`CardTag.Strike`) to Hand with damage equal to the snapshotted Counter, and notifies `GladiatorFormPower`.
+  - **Vigor-spend tracking & `CrookedStrike`:**
+    - `GladiatorFormPower` (every 3 Vigor / 3 Counter spent -> next-turn Vigor / Counter via `NextTurnVigorPower` / `NextTurnCounterPower`) and `RageAmulet` (every 8 Vigor spent -> +1 Strength) snapshot `Owner.GetPowerAmount<VigorPower>()` in `BeforeCardPlayed` (excluding `CrookedStrike`).
+    - `CrookedStrike` ("Does not consume Vigor"): check `VigorPower` in `sts2.dll`; if no native opt-out hook exists, use **1 tiny Harmony prefix** on `VigorPower` skipping consumption when `cardPlay.Card is CrookedStrike`.
+  - **No card-modifier framework:** `EnchantCrown`/`EnchantShield`/`EnchantSword` directly mutate the chosen in-combat `CardModel` (`EnergyCost.SetThisCombat(0)`, `Block.BaseValue += 8`, `Damage.BaseValue += 8`); `TripleStrike` sets a single `bool TriggersSkillBonus` on its 2 `ChampStrike` Echoes.
+  - **Skipped dead StS 1 files:** Commented-out cards (`CrownThrowBackup`, `FightOn`, `FinalRevenge`, `HeartStrike`), dead powers (`BoomerangPower`, `FalseCounterPower`, `FocusedDefPower`, `CalledShotPower`, `ResolvePower`, `GladiatorStylePower`, `IronFortressVigorPower`, `ShieldWallPower`, `DrawLessNextTurnPower`), and Custom-Mode-only `ModFinisher`.
+  - **Class disambiguation (`ModelId` uniqueness):** `ChampStrike`, `ChampDefend`, `ChampCalledShot` (avoids Hermit `CalledShot`), `ChampHeadbutt`, `ChampPerfectedStrike`, `UltimateStanceCard` (avoids `UltimateStancePower`).
+
+- **Phase 4A — Champ Character, Visuals, Stances, Counter & Starter Kit:**
+  - Render all 4 authentic Champ Spine poses (`champ.png`, `champ_berserker.png`, `champ_defensive.png`, `champ_ultimate.png`) + scenes (`champ_visuals.tscn`, `champ_rest_site.tscn`, `champ_merchant.tscn`, `char_select_bg.tscn`) + UI/energy icons + pools (`ChampCardPool`, `ChampRelicPool`, `ChampPotionPool`).
+  - `TheChamp` (80 HP, 99 Gold), starter deck (10 cards: 4× `ChampStrike`, 3× `ChampDefend`, `BerserkersShout`, `DefensiveShout`, `Execute`), tokens (`Riposte`, `StanceDanceCrown`, plus 2 stance-choice token cards `ChooseBerserkerStance`/`ChooseDefensiveStance`), starting relic `ChampionCrown`.
+  - Core infrastructure: `Downfall/Core/DownfallEcho.cs`, `ChampStances.cs`, `BerserkerStancePower`, `DefensiveStancePower`, `UltimateStancePower`, `UltimateFormPower`, `UltimateFormNextTurnPower`, `CounterPower`, `Testing/ChampTests.cs` (`ChampVisualsRuntime`, `ChampStarterCombat`).
+- **Phase 4B — Champ Common Cards (19 active cards):** `AdrenalArmor`, `BringItOn`, `Circumvent`, `CrownThrow`, `EnGarde`, `Encircle`, `Endure`, `FlashCut`, `FocusedDefense`, `Haymaker`, `ChampHeadbutt`, `ChampPerfectedStrike`, `PreciseThrust`, `RapidStrikes`, `RisingSlash`, `ShieldSigil`, `StanceDance`, `Taunt`, `TornadoPunch` + `EnGardePower`, `DoubleStyleThisTurnPower` + `ChampCommonCardsInCombat`.
+- **Phase 4C-1 — Champ Uncommon Cards Batch 1 (16 cards):** `ArenaPreparation`, `Backstep`, `BerserkerStyle` (*Hone Blade* -> `HonePower`), `BladeFlurry`, `ChampCalledShot`, `CrookedStrike` (+ `VigorPower` Harmony prefix if needed), `DeathBlow`, `DefensiveStyle` (*Double Style* -> `DoubleStylePower`), `Duel`, `EnragedBash`, `FaceSlap`, `FalseCounter`, `FanOfKnives`, `FancyFootwork`, `FocusedBerserking` (*All Out* -> `FocusedBerPower`), `GladiatorStyle` + `ChampUncommonBatch1InCombat`.
+- **Phase 4C-2 — Champ Uncommon Cards Batch 2 (15 cards):** `GutPunch`, `IronFortress`, `Lariat`, `Parry`, `PreemptiveStrike`, `RageSigil`, `RecklessLeap`, `SetATrap`, `Shatter`, `ShieldSlam`, `ShieldWall`, `SkillfulDodge`, `SwordSigil`, `ViciousMockery`, `WindUp` + powers (`IronFortressPower`, `ParryPower`, `NoBlockNextTurnPower`, `EntangleNextTurnPower`, `Metallicize`-like non-decaying Block power if needed) + `ChampUncommonBatch2InCombat`.
+- **Phase 4D — Champ Rare Cards (20 active cards):** `CheapShot`, `DancingMaster`, `Devastate`, `EnchantCrown`, `EnchantShield`, `EnchantSword`, `GladiatorForm`, `HeavySlash`, `HoldFirm`, `IgnorePain`, `Improvising`, `LastStand`, `MurderStrike`, `ShieldThrow`, `SteelEdge`, `StrikeOfGenius`, `SwordThrow`, `TripleStrike`, `UltimateStanceCard`, `VampiricStrike` + powers (`DancingMasterPower`, `GladiatorFormPower`, `NextTurnVigorPower`, `NextTurnCounterPower`, `ImprovisingPower`, `LastStandPower`, `PushThroughPower`, `StrikeOfGeniusPower`, `StrikeOfGeniusUpgradedPower`, `EnchantedShieldPower`) + `ChampRareCardsInCombat`.
+- **Phase 4E — Champ Relics (15 remaining) & Potions (4):** `Barbells`, `BerserkersGuideToSlaughter`, `BlackKnightsHelmet` (`RelicRarity.Event`), `ChampStancesModRelic` (`RelicRarity.Event`), `ChampionCrownUpgraded`, `DefensiveTrainingManual`, `DeflectingBracers` (native block-expiry hook), `DuelingGlove`, `FightingForDummies`, `GladiatorsBookOfMartialProwess`, `LiftRelic` (`RelicRarity.Event`), `PowerArmor` (+1 Max Energy, clamps `VigorPower`/`CounterPower` total stack to `10`, no Block conversion), `RageAmulet` (every 8 Vigor spent -> +1 Strength), `SignatureFinisher` (0 cost via `TryModifyEnergyCostInCombat` guarding `!CostsX`, playable without Stance, never exits Stance, `MoonTalisman` deck-index pattern), `SpectersHand` (`DownfallEcho` of 0-cost Strike/Defend on stance enter); Potions: `CounterstrikePotion`, `OpenerPotion`, `TechPotion`, `UltimateStancePotion` + `ChampRelicsAndPotionsInCombat`.
+
+### Phase 5+: Remaining 6 Downfall Characters (Same ~15–20 Card Vertical-Slice Process)
 Order from cleanest StS 2 mechanical fit to most custom subsystems:
-1. **The Champ** (Stances + Finisher + Counter)
-2. **The Snecko** (Muddle + Overflow + Offclass)
-3. **The Guardian** (Defensive Mode + Stasis + Brace/Gems)
-4. **The Hexaghost** (Soulburn + Afterlife + 6 Ghostflames)
-5. **The Slime Boss** (Slimed + Lick + Tackle + Split Slimes)
-6. **The Automaton** (Encode + Compile Functions)
-7. **The Collector** (Doom + Collected Cards + Pyre/Torchhead)
+1. **The Snecko** (Muddle + Overflow + Offclass)
+2. **The Guardian** (Defensive Mode + Stasis + Brace/Gems)
+3. **The Hexaghost** (Soulburn + Afterlife + 6 Ghostflames)
+4. **The Slime Boss** (Slimed + Lick + Tackle + Split Slimes)
+5. **The Automaton** (Encode + Compile Functions)
+6. **The Collector** (Doom + Collected Cards + Pyre/Torchhead)
 
 ---
 

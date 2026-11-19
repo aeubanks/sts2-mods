@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using Downfall.Core;
 using Downfall.Gremlins.Cards;
 using Downfall.Gremlins.Powers;
 using Godot;
@@ -60,8 +61,6 @@ internal static class GremlinMob
     }
 
     private static readonly ConditionalWeakTable<ICombatState, Dictionary<Player, MobState>> States = new();
-    private static readonly ConditionalWeakTable<CardModel, object> EchoCards = new();
-    private static readonly object EchoMarker = new();
 
     public static readonly GremlinKind[] AllKinds =
     [
@@ -448,22 +447,9 @@ internal static class GremlinMob
             cardPlay: null);
     }
 
-    public static bool IsEcho(CardModel card) => EchoCards.TryGetValue(card, out _);
+    public static bool IsEcho(CardModel card) => DownfallEcho.IsEcho(card);
 
-    public static CardModel? MakeEcho(CardModel source)
-    {
-        if (!source.IsMutable || IsEcho(source))
-            return null;
-
-        var clone = source.CreateClone();
-        clone.AddKeyword(CardKeyword.Ethereal);
-        if (clone.Type != CardType.Power)
-        {
-            clone.AddKeyword(CardKeyword.Exhaust);
-        }
-        EchoCards.AddOrUpdate(clone, EchoMarker);
-        return clone;
-    }
+    public static CardModel? MakeEcho(CardModel source) => DownfallEcho.MakeEcho(source);
 
     public static void UpdateCombatSprite(Player player, string texturePath)
     {

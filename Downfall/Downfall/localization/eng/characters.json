@@ -43,5 +43,20 @@
   "DOWNFALL-THE_GREMLINS.goldMonologue": "Shiny! Shiny! Gimme!",
   "DOWNFALL-THE_GREMLINS.banter": "Get 'em, boys!",
   "DOWNFALL-THE_GREMLINS.bestiaryQuote": "Five scheming gremlins swapping in and out of the fray.",
-  "DOWNFALL-THE_GREMLINS.aromaPrinciple": "Stolen snacks and chaos."
+  "DOWNFALL-THE_GREMLINS.aromaPrinciple": "Stolen snacks and chaos.",
+  "DOWNFALL-THE_CHAMP.title": "The Champ",
+  "DOWNFALL-THE_CHAMP.titleObject": "the Champ",
+  "DOWNFALL-THE_CHAMP.shortTitle": "Champ",
+  "DOWNFALL-THE_CHAMP.description": "A pompous gladiator of the Spire's grand arena.\nSwitches between martial Stances to unleash devastating Finishers.",
+  "DOWNFALL-THE_CHAMP.pronounObject": "him",
+  "DOWNFALL-THE_CHAMP.possessiveAdjective": "his",
+  "DOWNFALL-THE_CHAMP.pronounPossessive": "his",
+  "DOWNFALL-THE_CHAMP.pronounSubject": "he",
+  "DOWNFALL-THE_CHAMP.cardsModifierTitle": "Champ's Cards",
+  "DOWNFALL-THE_CHAMP.cardsModifierDescription": "Champ cards can now appear in rewards and shops.",
+  "DOWNFALL-THE_CHAMP.eventDeathPrevention": "YOU CALL THAT A WEAPON?!",
+  "DOWNFALL-THE_CHAMP.goldMonologue": "A champion's spoils!",
+  "DOWNFALL-THE_CHAMP.banter": "BEHOLD MY TRUE POWER!",
+  "DOWNFALL-THE_CHAMP.bestiaryQuote": "Undefeated gladiator of the City's arena.",
+  "DOWNFALL-THE_CHAMP.aromaPrinciple": "Polished steel and arena dust."
 }

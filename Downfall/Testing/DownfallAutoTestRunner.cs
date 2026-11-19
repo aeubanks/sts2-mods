@@ -150,6 +150,8 @@ internal static class DownfallAutoTestRunner
                 ("GremlinUncommonBatch2InCombat", GremlinTests.TestUncommonBatch2InCombat),
                 ("GremlinRareCardsInCombat", GremlinTests.TestRareCardsInCombat),
                 ("GremlinRelicsAndPotionsInCombat", GremlinTests.TestRelicsAndPotionsInCombat),
+                ("ChampVisualsRuntime", ChampTests.TestVisualsRuntime),
+                ("ChampStarterCombat", ChampTests.TestStarterCombat),
             ];
 
             foreach (var (name, run) in tests)
@@ -543,6 +545,16 @@ internal static class DownfallAutoTestRunner
         AutoTestAssert.True(new LocString("cards", "DOWNFALL-TAG_TEAM.selectionScreenPrompt").Exists(), "Missing TagTeam selectionScreenPrompt loc");
         AutoTestAssert.True(new LocString("cards", "DOWNFALL-RHYTHM.selectionScreenPrompt").Exists(), "Missing Rhythm selectionScreenPrompt loc");
         AutoTestAssert.True(new LocString("cards", "DOWNFALL-DUPLICATE.selectionScreenPrompt").Exists(), "Missing Duplicate selectionScreenPrompt loc");
+        AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-BERSERKER_STANCE_KEYWORD.title").Exists(), "Missing Berserker Stance title loc");
+        AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-BERSERKER_STANCE_KEYWORD.description").Exists(), "Missing Berserker Stance desc loc");
+        AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-DEFENSIVE_STANCE_KEYWORD.title").Exists(), "Missing Defensive Stance title loc");
+        AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-DEFENSIVE_STANCE_KEYWORD.description").Exists(), "Missing Defensive Stance desc loc");
+        AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-ULTIMATE_STANCE_KEYWORD.title").Exists(), "Missing Ultimate Stance title loc");
+        AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-ULTIMATE_STANCE_KEYWORD.description").Exists(), "Missing Ultimate Stance desc loc");
+        AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-FINISHER_KEYWORD.title").Exists(), "Missing Finisher title loc");
+        AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-FINISHER_KEYWORD.description").Exists(), "Missing Finisher desc loc");
+        AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-COMBO_KEYWORD.title").Exists(), "Missing Combo title loc");
+        AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-COMBO_KEYWORD.description").Exists(), "Missing Combo desc loc");
 
         return Task.CompletedTask;
     }
