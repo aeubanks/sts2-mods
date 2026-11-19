@@ -146,6 +146,7 @@ internal static class DownfallAutoTestRunner
                 ("GremlinVisualsRuntime", GremlinTests.TestVisualsRuntime),
                 ("GremlinStarterCombat", GremlinTests.TestStarterCombat),
                 ("GremlinCommonCardsInCombat", GremlinTests.TestCommonCardsInCombat),
+                ("GremlinUncommonBatch1InCombat", GremlinTests.TestUncommonBatch1InCombat),
             ];
 
             foreach (var (name, run) in tests)
@@ -438,6 +439,16 @@ internal static class DownfallAutoTestRunner
                 var upgDesc = card.GetDescriptionForUpgradePreview();
                 AutoTestAssert.True(!string.IsNullOrWhiteSpace(upgDesc) && !upgDesc.Contains('{') && !upgDesc.Contains('}'),
                     $"Invalid upgrade description for {card.Id}+: {upgDesc}");
+
+                // Materialize HoverTips (base + upgraded) to catch broken or cyclic card/power tips.
+                _ = card.HoverTips.ToList();
+                if (card.IsUpgradable)
+                {
+                    var upgClone = (CardModel)card.MutableClone();
+                    upgClone.UpgradeInternal();
+                    upgClone.FinalizeUpgradeInternal();
+                    _ = upgClone.HoverTips.ToList();
+                }
             }
 
             // Validate relic pool + relics
@@ -492,6 +503,7 @@ internal static class DownfallAutoTestRunner
                 AutoTestAssert.True(!string.IsNullOrWhiteSpace(smartText) && !smartText.Contains('{') && !smartText.Contains('}'),
                     $"Invalid smartDescription for {power.Id} (Amount={testAmount}): {smartText}");
             }
+            _ = power.HoverTips.ToList();
         }
 
         // Validate character-specific gameplay UI and prompt loc keys.
