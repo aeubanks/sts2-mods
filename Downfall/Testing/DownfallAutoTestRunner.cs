@@ -145,6 +145,7 @@ internal static class DownfallAutoTestRunner
                 ("AwakenedRelicsAndPotionsInCombat", AwakenedTests.TestRelicsAndPotionsInCombat),
                 ("GremlinVisualsRuntime", GremlinTests.TestVisualsRuntime),
                 ("GremlinStarterCombat", GremlinTests.TestStarterCombat),
+                ("GremlinCommonCardsInCombat", GremlinTests.TestCommonCardsInCombat),
             ];
 
             foreach (var (name, run) in tests)
