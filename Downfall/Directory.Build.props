@@ -1,0 +1,8 @@
+<Project>
+  <PropertyGroup>
+    <Sts2Path>/home/itg/.local/share/Steam/steamapps/common/Slay the Spire 2</Sts2Path>
+    <Sts2DataDir>$(Sts2Path)/data_sts2_linuxbsd_x86_64</Sts2DataDir>
+    <ModsPath>$(Sts2Path)/mods/</ModsPath>
+    <GodotPath>/home/itg/tools/godot/Godot_v4.5.1-stable_mono_linux_x86_64/Godot_v4.5.1-stable_mono_linux.x86_64</GodotPath>
+  </PropertyGroup>
+</Project>
