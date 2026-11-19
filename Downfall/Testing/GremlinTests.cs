@@ -965,4 +965,349 @@ internal static class GremlinTests
         AutoTestAssert.Equal(1, pcs.Hand.Cards.OfType<Bang>().Count(b => !b.IsUpgraded), "MakingMagicPower added 1 base Bang on Turn 2 start");
         AutoTestAssert.Equal(1, pcs.Hand.Cards.OfType<Bang>().Count(b => b.IsUpgraded), "MakingMoreMagicPower added 1 Upgraded Bang+ on Turn 2 start");
     }
+
+    /// <summary>
+    /// End-to-end combat verification of the remaining 17 Gremlin Uncommon cards (Phase 3C-2)
+    /// and their 4 custom powers (MakeshiftArmorPower, PolishPower, ScatterPower, WizardryPower).
+    /// </summary>
+    public static async Task TestUncommonBatch2InCombat()
+    {
+        var (player, _, combatState) = await DownfallAutoTestRunner.StartCombatAsync<TheGremlins>("DFGRM04");
+        var pcs = AutoTestAssert.NotNull(player.PlayerCombatState, "PlayerCombatState");
+        var enemy1 = AutoTestAssert.NotNull(combatState.HittableEnemies.FirstOrDefault(), "First enemy");
+        var enemy2 = await CreatureCmd.Add<MegaCrit.Sts2.Core.Models.Monsters.Nibbit>(combatState);
+        var cultist = await CreatureCmd.Add<MegaCrit.Sts2.Core.Models.Monsters.CalcifiedCultist>(combatState);
+        var ctx = new ThrowingPlayerChoiceContext();
+
+        await CreatureCmd.GainMaxHp(enemy1, 1200m);
+        await CreatureCmd.GainMaxHp(enemy2, 1200m);
+        await CreatureCmd.GainMaxHp(cultist, 1200m);
+
+        async Task ResetHandAndEnergy(int energy = 10)
+        {
+            foreach (var c in pcs.Hand.Cards.ToList())
+                await CardPileCmd.Add(c, PileType.Discard);
+            if (pcs.Energy > energy)
+                await PlayerCmd.LoseEnergy(pcs.Energy - energy, player);
+            else if (pcs.Energy < energy)
+                await PlayerCmd.GainEnergy(energy - pcs.Energy, player);
+            if (player.Creature.Block > 0)
+                await CreatureCmd.LoseBlock(ctx, player.Creature, player.Creature.Block, null);
+        }
+
+        async Task CleanPlayerBuffs()
+        {
+            if (player.Creature.GetPower<WizPower>() is { } w) await PowerCmd.Remove(w);
+            if (player.Creature.GetPower<StrengthPower>() is { } s) await PowerCmd.Remove(s);
+            if (player.Creature.GetPower<DownfallTempHpPower>() is { } t) await PowerCmd.Remove(t);
+            if (player.Creature.GetPower<ArtifactPower>() is { } a) await PowerCmd.Remove(a);
+            if (player.Creature.GetPower<AccuracyPower>() is { } acc) await PowerCmd.Remove(acc);
+            if (player.Creature.GetPower<PolishPower>() is { } pol) await PowerCmd.Remove(pol);
+            if (player.Creature.GetPower<MakeshiftArmorPower>() is { } ma) await PowerCmd.Remove(ma);
+            if (player.Creature.GetPower<ScatterPower>() is { } sc) await PowerCmd.Remove(sc);
+        }
+
+        // Start as Mad Gremlin so Skill/Attack passives don't add unexpected Block/random hits.
+        await GremlinMob.SwapToSpecificAsync(player, combatState, GremlinKind.Mad, ctx);
+
+        // 1. MakeshiftArmor (base + upgraded): countdown 7 Attacks -> grants stacked Artifact!
+        await ResetHandAndEnergy();
+        await CleanPlayerBuffs();
+        var maBase = combatState.CreateCard<MakeshiftArmor>(player);
+        var maPlus = combatState.CreateCard<MakeshiftArmor>(player);
+        CardCmd.Upgrade(maPlus);
+        await CardPileCmd.Add(maBase, PileType.Hand);
+        await CardPileCmd.Add(maPlus, PileType.Hand);
+        AutoTestAssert.True(maBase.TryManualPlay(null), "Play MakeshiftArmor");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<ArtifactPower>(), "Base MakeshiftArmor grants 0 immediate Artifact");
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<MakeshiftArmorPower>(), "MakeshiftArmorPower(1) active");
+        AutoTestAssert.Equal(7, player.Creature.GetPower<MakeshiftArmorPower>()!.DisplayAmount, "MakeshiftArmor starts at 7 attacks left");
+
+        AutoTestAssert.True(maPlus.TryManualPlay(null), "Play MakeshiftArmor+");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<ArtifactPower>(), "MakeshiftArmor+ grants 1 immediate Artifact");
+        AutoTestAssert.Equal(2, player.Creature.GetPowerAmount<MakeshiftArmorPower>(), "MakeshiftArmorPower stacked to 2 Artifact/trigger");
+
+        for (int i = 0; i < 6; i++)
+        {
+            var shiv = combatState.CreateCard<MegaCrit.Sts2.Core.Models.Cards.Shiv>(player);
+            await CardPileCmd.Add(shiv, PileType.Hand);
+            AutoTestAssert.True(shiv.TryManualPlay(enemy1), $"Play Attack #{i + 1} for MakeshiftArmor");
+            await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        }
+        AutoTestAssert.Equal(1, player.Creature.GetPower<MakeshiftArmorPower>()!.DisplayAmount, "MakeshiftArmor at 1 attack left after 6 Attacks");
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<ArtifactPower>(), "Still 1 Artifact before 7th Attack");
+
+        var shiv7 = combatState.CreateCard<MegaCrit.Sts2.Core.Models.Cards.Shiv>(player);
+        await CardPileCmd.Add(shiv7, PileType.Hand);
+        AutoTestAssert.True(shiv7.TryManualPlay(enemy1), "Play 7th Attack for MakeshiftArmor");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(7, player.Creature.GetPower<MakeshiftArmorPower>()!.DisplayAmount, "MakeshiftArmor reset countdown to 7");
+        AutoTestAssert.Equal(3, player.Creature.GetPowerAmount<ArtifactPower>(), "MakeshiftArmor granted +2 stacked Artifact (1 -> 3)");
+        await CleanPlayerBuffs();
+
+        // 2. Mockery: applies Weak; gains 9 Block only if enemy has >= 3 Weak after application!
+        await ResetHandAndEnergy();
+        var mockLow = combatState.CreateCard<Mockery>(player);
+        await CardPileCmd.Add(mockLow, PileType.Hand);
+        AutoTestAssert.True(mockLow.TryManualPlay(enemy1), "Play Mockery on 0-Weak enemy1");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(1, enemy1.GetPowerAmount<WeakPower>(), "Mockery applied 1 Weak");
+        AutoTestAssert.Equal(0, player.Creature.Block, "Mockery gained 0 Block at <3 Weak");
+
+        await PowerCmd.Apply<WeakPower>(ctx, enemy1, 1m, player.Creature, null); // now 2 Weak
+        var mockHigh = combatState.CreateCard<Mockery>(player);
+        await CardPileCmd.Add(mockHigh, PileType.Hand);
+        AutoTestAssert.True(mockHigh.TryManualPlay(enemy1), "Play Mockery on 2-Weak enemy1 (becomes 3 Weak)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(3, enemy1.GetPowerAmount<WeakPower>(), "Mockery raised Weak to 3");
+        AutoTestAssert.Equal(9, player.Creature.Block, "Mockery gained 9 Block at >=3 Weak");
+        if (enemy1.GetPower<WeakPower>() is { } wClean1) await PowerCmd.Remove(wClean1);
+
+        // 3. PartyStick: Unplayable + Ethereal (removed on upgrade); Swap while in Hand -> +1 Energy; not in Hand -> 0!
+        await ResetHandAndEnergy(energy: 3);
+        var stick = combatState.CreateCard<PartyStick>(player);
+        AutoTestAssert.True(stick.Keywords.Contains(CardKeyword.Unplayable), "PartyStick is Unplayable");
+        AutoTestAssert.True(stick.Keywords.Contains(CardKeyword.Ethereal), "Base PartyStick is Ethereal");
+        await CardPileCmd.Add(stick, PileType.Hand);
+        AutoTestAssert.True(!stick.TryManualPlay(null), "PartyStick cannot be played");
+        await GremlinMob.SwapNextAsync(player, combatState, ctx);
+        AutoTestAssert.Equal(4, pcs.Energy, "PartyStick in Hand granted +1 Energy on Swap");
+
+        CardCmd.Upgrade(stick);
+        AutoTestAssert.True(!stick.Keywords.Contains(CardKeyword.Ethereal), "PartyStick+ loses Ethereal");
+        await CardPileCmd.Add(stick, PileType.Discard);
+        await GremlinMob.SwapNextAsync(player, combatState, ctx);
+        AutoTestAssert.Equal(4, pcs.Energy, "PartyStick in Discard granted 0 Energy on Swap");
+        await GremlinMob.SwapToSpecificAsync(player, combatState, GremlinKind.Mad, ctx);
+
+        // 4. Pickpocket: deals 10 dmg, gains +10 Gold, Exhausts, CanBeGeneratedInCombat == false!
+        await ResetHandAndEnergy();
+        var pick = combatState.CreateCard<Pickpocket>(player);
+        AutoTestAssert.True(!pick.CanBeGeneratedInCombat, "Pickpocket cannot be generated in combat");
+        await CardPileCmd.Add(pick, PileType.Hand);
+        int goldBefore = player.Gold;
+        int e1Hp = enemy1.CurrentHp;
+        AutoTestAssert.True(pick.TryManualPlay(enemy1), "Play Pickpocket");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(e1Hp - 10, enemy1.CurrentHp, "Pickpocket dealt 10 damage");
+        AutoTestAssert.Equal(goldBefore + 10, player.Gold, "Pickpocket gained +10 Gold");
+        AutoTestAssert.Equal(PileType.Exhaust, pick.Pile?.Type, "Pickpocket exhausted");
+
+        // 5. PinNeedle & PinNeedle+: deals 8/10 dmg, Exhausts, shuffles 2 base / 2 Upgraded Pinpricks into Draw Pile!
+        await ResetHandAndEnergy();
+        foreach (var c in PileType.Draw.GetPile(player).Cards.ToList())
+            await CardPileCmd.Add(c, PileType.Discard);
+        var needlePlus = combatState.CreateCard<PinNeedle>(player);
+        CardCmd.Upgrade(needlePlus);
+        await CardPileCmd.Add(needlePlus, PileType.Hand);
+        e1Hp = enemy1.CurrentHp;
+        AutoTestAssert.True(needlePlus.TryManualPlay(enemy1), "Play PinNeedle+");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(e1Hp - 10, enemy1.CurrentHp, "PinNeedle+ dealt 10 damage");
+        AutoTestAssert.Equal(PileType.Exhaust, needlePlus.Pile?.Type, "PinNeedle+ exhausted");
+        AutoTestAssert.Equal(2, PileType.Draw.GetPile(player).Cards.OfType<Pinprick>().Count(p => p.IsUpgraded), "PinNeedle+ shuffled 2 Upgraded Pinpricks into Draw Pile");
+
+        // 6. Polish: AccuracyPower(2) boosts Shiv (4->6) AND PolishPower(2) boosts Ward (3->5)!
+        await ResetHandAndEnergy();
+        await CleanPlayerBuffs();
+        var polish = combatState.CreateCard<Polish>(player);
+        await CardPileCmd.Add(polish, PileType.Hand);
+        AutoTestAssert.True(polish.TryManualPlay(null), "Play Polish");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(2, player.Creature.GetPowerAmount<AccuracyPower>(), "Polish applied AccuracyPower(2)");
+        AutoTestAssert.Equal(2, player.Creature.GetPowerAmount<PolishPower>(), "Polish applied PolishPower(2)");
+
+        var polShiv = combatState.CreateCard<MegaCrit.Sts2.Core.Models.Cards.Shiv>(player);
+        var polWard = combatState.CreateCard<Ward>(player);
+        await CardPileCmd.Add(polShiv, PileType.Hand);
+        await CardPileCmd.Add(polWard, PileType.Hand);
+        e1Hp = enemy1.CurrentHp;
+        AutoTestAssert.True(polShiv.TryManualPlay(enemy1), "Play Shiv under Polish");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(e1Hp - 6, enemy1.CurrentHp, "Polished Shiv dealt 4 + 2 = 6 damage");
+        AutoTestAssert.True(polWard.TryManualPlay(null), "Play Ward under Polish");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(5, player.Creature.Block, "Polished Ward granted 3 + 2 = 5 Block");
+        await CleanPlayerBuffs();
+
+        // 7. ProperTools: non-attacking cultist -> 3 Shivs; attacking Nibbit -> 3 Wards!
+        await ResetHandAndEnergy();
+        var ptCultist = combatState.CreateCard<ProperTools>(player);
+        await CardPileCmd.Add(ptCultist, PileType.Hand);
+        int cHp = cultist.CurrentHp;
+        AutoTestAssert.True(ptCultist.TryManualPlay(cultist), "Play ProperTools on non-attacking cultist");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(cHp - 5, cultist.CurrentHp, "ProperTools dealt 5 damage to cultist");
+        AutoTestAssert.Equal(3, pcs.Hand.Cards.OfType<MegaCrit.Sts2.Core.Models.Cards.Shiv>().Count(), "ProperTools added 3 Shivs for non-attacking enemy");
+
+        await ResetHandAndEnergy();
+        var attackingEnemy = combatState.HittableEnemies.FirstOrDefault(e => e.IsAlive && e.Monster is { IntendsToAttack: true });
+        AutoTestAssert.NotNull(attackingEnemy, "At least one Nibbit intends to attack");
+        var ptAtk = combatState.CreateCard<ProperTools>(player);
+        await CardPileCmd.Add(ptAtk, PileType.Hand);
+        int atkHp = attackingEnemy!.CurrentHp;
+        AutoTestAssert.True(ptAtk.TryManualPlay(attackingEnemy), "Play ProperTools on attacking Nibbit");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(atkHp - 5, attackingEnemy.CurrentHp, "ProperTools dealt 5 damage to attacking Nibbit");
+        AutoTestAssert.Equal(3, pcs.Hand.Cards.OfType<Ward>().Count(), "ProperTools added 3 Wards for attacking enemy");
+
+        // 8. RageBreak & RageBreak+: doubles Strength (3 -> 6 -> 12), + gains 5 Block, Exhausts!
+        await ResetHandAndEnergy();
+        await CleanPlayerBuffs();
+        await PowerCmd.Apply<StrengthPower>(ctx, player.Creature, 3m, player.Creature, null);
+        var rbBase = combatState.CreateCard<RageBreak>(player);
+        await CardPileCmd.Add(rbBase, PileType.Hand);
+        AutoTestAssert.True(rbBase.TryManualPlay(null), "Play RageBreak");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(6, player.Creature.GetPowerAmount<StrengthPower>(), "RageBreak doubled Strength 3 -> 6");
+        AutoTestAssert.Equal(0, player.Creature.Block, "Base RageBreak gained 0 Block");
+        AutoTestAssert.Equal(PileType.Exhaust, rbBase.Pile?.Type, "RageBreak exhausted");
+
+        var rbPlus = combatState.CreateCard<RageBreak>(player);
+        CardCmd.Upgrade(rbPlus);
+        await CardPileCmd.Add(rbPlus, PileType.Hand);
+        AutoTestAssert.True(rbPlus.TryManualPlay(null), "Play RageBreak+");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(12, player.Creature.GetPowerAmount<StrengthPower>(), "RageBreak+ doubled Strength 6 -> 12");
+        AutoTestAssert.Equal(5, player.Creature.Block, "RageBreak+ gained 5 Block");
+        AutoTestAssert.Equal(PileType.Exhaust, rbPlus.Pile?.Type, "RageBreak+ exhausted");
+        await CleanPlayerBuffs();
+
+        // 9. Raid (draws 5 for 5 living Gremlins, discards 3 -> 2 in hand) + Revel (costs 3, gains 5 Energy -> net +2)!
+        await ResetHandAndEnergy(energy: 6);
+        for (int i = 0; i < 6; i++)
+            await CardPileCmd.Add(combatState.CreateCard<GremlinDefend>(player), PileType.Draw, CardPilePosition.Top);
+        var raid = combatState.CreateCard<Raid>(player);
+        await CardPileCmd.Add(raid, PileType.Hand);
+        AutoTestAssert.True(raid.TryManualPlay(null), "Play Raid");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(2, pcs.Hand.Cards.Count, "Raid drew 5 and discarded 3 -> 2 cards remaining in Hand");
+
+        await ResetHandAndEnergy(energy: 3);
+        var revel = combatState.CreateCard<Revel>(player);
+        await CardPileCmd.Add(revel, PileType.Hand);
+        AutoTestAssert.True(revel.TryManualPlay(null), "Play Revel at 3 Energy");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(5, pcs.Energy, "Revel spent 3 and gained 5 Energy for 5 living Gremlins");
+
+        // 10. Rhythm: Swaps to next Gremlin + fetches a Basic card from Draw Pile into Hand at 0 cost (via grid picker)!
+        await ResetHandAndEnergy();
+        foreach (var c in PileType.Draw.GetPile(player).Cards.ToList())
+            await CardPileCmd.Add(c, PileType.Discard);
+        var basicStrike = combatState.CreateCard<GremlinStrike>(player);
+        var basicDefend = combatState.CreateCard<GremlinDefend>(player);
+        var nonBasic = combatState.CreateCard<Kablamo>(player);
+        await CardPileCmd.Add(basicStrike, PileType.Draw, CardPilePosition.Top);
+        await CardPileCmd.Add(basicDefend, PileType.Draw, CardPilePosition.Top);
+        await CardPileCmd.Add(nonBasic, PileType.Draw, CardPilePosition.Top);
+        var kindBeforeRhythm = GremlinMob.GetActiveKind(combatState, player);
+        var rhythm = combatState.CreateCard<Rhythm>(player);
+        await CardPileCmd.Add(rhythm, PileType.Hand);
+        using (DownfallAutoTestRunner.PreferCards(c => ReferenceEquals(c, basicStrike)))
+        {
+            AutoTestAssert.True(rhythm.TryManualPlay(null), "Play Rhythm");
+            await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        }
+        AutoTestAssert.True(GremlinMob.GetActiveKind(combatState, player) != kindBeforeRhythm, "Rhythm swapped active Gremlin");
+        AutoTestAssert.Equal(PileType.Hand, basicStrike.Pile?.Type, "Rhythm fetched Basic card into Hand");
+        AutoTestAssert.Equal(0, basicStrike.EnergyCost.GetWithModifiers(CostModifiers.All), "Fetched Basic card costs 0 this turn");
+        await GremlinMob.SwapToSpecificAsync(player, combatState, GremlinKind.Mad, ctx);
+
+        // 11. Scatter + Temp HP deterministic layering (Temp HP absorbs first; Scatter prevents next HP loss & Swaps randomly)!
+        await ResetHandAndEnergy();
+        await CleanPlayerBuffs();
+        var scatter = combatState.CreateCard<Scatter>(player);
+        await CardPileCmd.Add(scatter, PileType.Hand);
+        AutoTestAssert.True(scatter.TryManualPlay(null), "Play Scatter");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<ScatterPower>(), "ScatterPower(1) active");
+        AutoTestAssert.Equal(PileType.Exhaust, scatter.Pile?.Type, "Scatter exhausted");
+
+        await PowerCmd.Apply<DownfallTempHpPower>(ctx, player.Creature, 4m, player.Creature, null);
+        int hpBefore = player.Creature.CurrentHp;
+        var kindBeforeScatter = GremlinMob.GetActiveKind(combatState, player);
+        await CreatureCmd.Damage(ctx, player.Creature, 4m, ValueProp.Unblockable | ValueProp.Unpowered, enemy1, null, null);
+        AutoTestAssert.Equal(hpBefore, player.Creature.CurrentHp, "Temp HP absorbed 4 damage (0 HP lost)");
+        AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<DownfallTempHpPower>(), "Temp HP depleted");
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<ScatterPower>(), "ScatterPower was NOT consumed while Temp HP absorbed damage");
+
+        await CreatureCmd.Damage(ctx, player.Creature, 10m, ValueProp.Unblockable | ValueProp.Unpowered, enemy1, null, null);
+        AutoTestAssert.Equal(hpBefore, player.Creature.CurrentHp, "ScatterPower prevented 10 HP loss");
+        AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<ScatterPower>(), "ScatterPower decremented to 0");
+        AutoTestAssert.True(GremlinMob.GetActiveKind(combatState, player) != kindBeforeScatter, "ScatterPower swapped to a random Gremlin");
+        await GremlinMob.SwapToSpecificAsync(player, combatState, GremlinKind.Mad, ctx);
+
+        // 12. SharpenBlades+: draws 1 card, sets Attacks in Hand to 0 cost, leaves Skills untouched!
+        await ResetHandAndEnergy();
+        var drawnAtk = combatState.CreateCard<Pickpocket>(player); // 2-cost Attack
+        await CardPileCmd.Add(drawnAtk, PileType.Draw, CardPilePosition.Top);
+        var handAtk = combatState.CreateCard<ProperTools>(player); // 2-cost Attack
+        var handSkill = combatState.CreateCard<Revel>(player); // 3-cost Skill
+        var sharpenPlus = combatState.CreateCard<SharpenBlades>(player);
+        CardCmd.Upgrade(sharpenPlus);
+        await CardPileCmd.Add(handAtk, PileType.Hand);
+        await CardPileCmd.Add(handSkill, PileType.Hand);
+        await CardPileCmd.Add(sharpenPlus, PileType.Hand);
+        AutoTestAssert.True(sharpenPlus.TryManualPlay(null), "Play SharpenBlades+");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(PileType.Hand, drawnAtk.Pile?.Type, "SharpenBlades+ drew 1 card first");
+        AutoTestAssert.Equal(0, drawnAtk.EnergyCost.GetWithModifiers(CostModifiers.All), "SharpenBlades+ reduced drawn Attack to 0");
+        AutoTestAssert.Equal(0, handAtk.EnergyCost.GetWithModifiers(CostModifiers.All), "SharpenBlades+ reduced in-hand Attack to 0");
+        AutoTestAssert.Equal(3, handSkill.EnergyCost.GetWithModifiers(CostModifiers.All), "SharpenBlades+ left Skill cost unchanged");
+
+        // 13. ShowOfHands+: draws 1 card, gains 2 Block per card in Hand!
+        await ResetHandAndEnergy();
+        await CardPileCmd.Add(combatState.CreateCard<GremlinDefend>(player), PileType.Draw, CardPilePosition.Top);
+        for (int i = 0; i < 3; i++)
+            await CardPileCmd.Add(combatState.CreateCard<GremlinDefend>(player), PileType.Hand);
+        var sohPlus = combatState.CreateCard<ShowOfHands>(player);
+        CardCmd.Upgrade(sohPlus);
+        await CardPileCmd.Add(sohPlus, PileType.Hand);
+        AutoTestAssert.True(sohPlus.TryManualPlay(null), "Play ShowOfHands+ with 3 other cards + 1 drawn = 4 cards");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(8, player.Creature.Block, "ShowOfHands+ granted 4 x 2 = 8 Block");
+
+        // 14. SleeveOfAces+ at 3 Wiz: deals 5+7=12 dmg, adds 3 Upgraded Shivs, consumes Wiz!
+        await ResetHandAndEnergy();
+        await CleanPlayerBuffs();
+        await PowerCmd.Apply<WizPower>(ctx, player.Creature, 3m, player.Creature, null);
+        var sleevePlus = combatState.CreateCard<SleeveOfAces>(player);
+        CardCmd.Upgrade(sleevePlus);
+        await CardPileCmd.Add(sleevePlus, PileType.Hand);
+        int e2Hp = enemy2.CurrentHp;
+        AutoTestAssert.True(sleevePlus.TryManualPlay(enemy2), "Play SleeveOfAces+ at 3 Wiz");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(e2Hp - 12, enemy2.CurrentHp, "SleeveOfAces+ dealt 5 + 7 = 12 damage");
+        AutoTestAssert.Equal(3, pcs.Hand.Cards.OfType<MegaCrit.Sts2.Core.Models.Cards.Shiv>().Count(s => s.IsUpgraded), "SleeveOfAces+ added 3 Upgraded Shivs");
+        AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<WizPower>(), "SleeveOfAces+ consumed 3 Wiz");
+
+        // 15. Stupend at 3 Wiz: gains 7+7=14 Block AND deals 7+7=14 damage, consumes Wiz!
+        await ResetHandAndEnergy();
+        await PowerCmd.Apply<WizPower>(ctx, player.Creature, 3m, player.Creature, null);
+        var stupend = combatState.CreateCard<Stupend>(player);
+        await CardPileCmd.Add(stupend, PileType.Hand);
+        e2Hp = enemy2.CurrentHp;
+        AutoTestAssert.True(stupend.TryManualPlay(enemy2), "Play Stupend at 3 Wiz");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(14, player.Creature.Block, "Stupend at 3 Wiz gained 7 + 7 = 14 Block");
+        AutoTestAssert.Equal(e2Hp - 14, enemy2.CurrentHp, "Stupend at 3 Wiz dealt 7 + 7 = 14 damage");
+        AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<WizPower>(), "Stupend consumed 3 Wiz");
+
+        // 16. Wizardry+ (Innate) -> Turn 2 start grants +1 Wiz!
+        await ResetHandAndEnergy();
+        var wizCard = combatState.CreateCard<Wizardry>(player);
+        AutoTestAssert.True(!wizCard.Keywords.Contains(CardKeyword.Innate), "Base Wizardry is not Innate");
+        CardCmd.Upgrade(wizCard);
+        AutoTestAssert.True(wizCard.Keywords.Contains(CardKeyword.Innate), "Wizardry+ is Innate");
+        await CardPileCmd.Add(wizCard, PileType.Hand);
+        AutoTestAssert.True(wizCard.TryManualPlay(null), "Play Wizardry+");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<WizardryPower>(), "WizardryPower(1) active");
+
+        await CreatureCmd.GainBlock(player.Creature, 80m, ValueProp.Unpowered, null);
+        await DownfallAutoTestRunner.EndTurnAndWaitForRoundAsync(player, 2);
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<WizPower>(), "WizardryPower granted +1 Wiz on Turn 2 start");
+    }
 }

@@ -147,6 +147,7 @@ internal static class DownfallAutoTestRunner
                 ("GremlinStarterCombat", GremlinTests.TestStarterCombat),
                 ("GremlinCommonCardsInCombat", GremlinTests.TestCommonCardsInCombat),
                 ("GremlinUncommonBatch1InCombat", GremlinTests.TestUncommonBatch1InCombat),
+                ("GremlinUncommonBatch2InCombat", GremlinTests.TestUncommonBatch2InCombat),
             ];
 
             foreach (var (name, run) in tests)
@@ -538,6 +539,7 @@ internal static class DownfallAutoTestRunner
         AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-ECHO_KEYWORD.title").Exists(), "Missing Echo title loc");
         AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-ECHO_KEYWORD.description").Exists(), "Missing Echo desc loc");
         AutoTestAssert.True(new LocString("cards", "DOWNFALL-TAG_TEAM.selectionScreenPrompt").Exists(), "Missing TagTeam selectionScreenPrompt loc");
+        AutoTestAssert.True(new LocString("cards", "DOWNFALL-RHYTHM.selectionScreenPrompt").Exists(), "Missing Rhythm selectionScreenPrompt loc");
 
         return Task.CompletedTask;
     }
