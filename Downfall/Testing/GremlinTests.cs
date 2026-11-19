@@ -1310,4 +1310,357 @@ internal static class GremlinTests
         await DownfallAutoTestRunner.EndTurnAndWaitForRoundAsync(player, 2);
         AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<WizPower>(), "WizardryPower granted +1 Wiz on Turn 2 start");
     }
+
+    /// <summary>
+    /// End-to-end combat verification of all 16 Gremlin Rare cards, 3 Nob Token cards,
+    /// and 9 Rare powers (Phase 3D).
+    /// </summary>
+    public static async Task TestRareCardsInCombat()
+    {
+        var (player, _, combatState) = await DownfallAutoTestRunner.StartCombatAsync<TheGremlins>("DFGRM05");
+        var pcs = AutoTestAssert.NotNull(player.PlayerCombatState, "PlayerCombatState");
+        var enemy1 = AutoTestAssert.NotNull(combatState.HittableEnemies.FirstOrDefault(), "First enemy");
+        var enemy2 = await CreatureCmd.Add<MegaCrit.Sts2.Core.Models.Monsters.Nibbit>(combatState);
+        var cultist = await CreatureCmd.Add<MegaCrit.Sts2.Core.Models.Monsters.CalcifiedCultist>(combatState);
+        var ctx = new ThrowingPlayerChoiceContext();
+
+        await CreatureCmd.GainMaxHp(enemy1, 1500m);
+        await CreatureCmd.GainMaxHp(enemy2, 1500m);
+        await CreatureCmd.GainMaxHp(cultist, 1500m);
+
+        async Task ResetHandAndEnergy(int energy = 12)
+        {
+            foreach (var c in pcs.Hand.Cards.ToList())
+                await CardPileCmd.Add(c, PileType.Discard);
+            if (pcs.Energy > energy)
+                await PlayerCmd.LoseEnergy(pcs.Energy - energy, player);
+            else if (pcs.Energy < energy)
+                await PlayerCmd.GainEnergy(energy - pcs.Energy, player);
+            if (player.Creature.Block > 0)
+                await CreatureCmd.LoseBlock(ctx, player.Creature, player.Creature.Block, null);
+        }
+
+        async Task CleanPlayerBuffs()
+        {
+            if (player.Creature.GetPower<WizPower>() is { } w) await PowerCmd.Remove(w);
+            if (player.Creature.GetPower<StrengthPower>() is { } s) await PowerCmd.Remove(s);
+            if (player.Creature.GetPower<DownfallTempHpPower>() is { } t) await PowerCmd.Remove(t);
+            if (player.Creature.GetPower<Downfall.Gremlins.Powers.EncorePower>() is { } en) await PowerCmd.Remove(en);
+            if (player.Creature.GetPower<FuriousPower>() is { } fu) await PowerCmd.Remove(fu);
+            if (player.Creature.GetPower<HecklePower>() is { } hk) await PowerCmd.Remove(hk);
+            if (player.Creature.GetPower<ShadowShivPower>() is { } ss) await PowerCmd.Remove(ss);
+            if (player.Creature.GetPower<TargetWeaknessPower>() is { } tw) await PowerCmd.Remove(tw);
+        }
+
+        await GremlinMob.SwapToSpecificAsync(player, combatState, GremlinKind.Mad, ctx);
+
+        // 1. BrokenShin + AgonyPower: 8 Weak / 4 = 2 AgonyPower; leaves Weak intact; reduces powered attack damage by 80%!
+        await ResetHandAndEnergy();
+        await PowerCmd.Apply<WeakPower>(ctx, enemy1, 8m, player.Creature, null);
+        var broken = combatState.CreateCard<BrokenShin>(player);
+        await CardPileCmd.Add(broken, PileType.Hand);
+        AutoTestAssert.True(broken.TryManualPlay(enemy1), "Play BrokenShin on 8-Weak enemy1");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(2, enemy1.GetPowerAmount<AgonyPower>(), "BrokenShin applied 2 AgonyPower");
+        AutoTestAssert.Equal(8, enemy1.GetPowerAmount<WeakPower>(), "BrokenShin kept Weak stacks intact");
+        AutoTestAssert.Equal(PileType.Exhaust, broken.Pile?.Type, "BrokenShin exhausted");
+        var agony = AutoTestAssert.NotNull(enemy1.GetPower<AgonyPower>(), "AgonyPower instance");
+        AutoTestAssert.Equal(0.2m, agony.ModifyDamageMultiplicative(player.Creature, 10m, ValueProp.Move, enemy1, null, null), "AgonyPower reduces attack damage by 80%");
+
+        // 2. Duplicate: picks Attack in Hand -> adds 2 Echoes each costing 1 less, Exhausts, not combat-generated!
+        await ResetHandAndEnergy();
+        var dupe = combatState.CreateCard<Duplicate>(player);
+        AutoTestAssert.True(!dupe.CanBeGeneratedInCombat, "Duplicate cannot be generated in combat");
+        var atkTarget = combatState.CreateCard<Pickpocket>(player); // 2-cost Attack
+        var atkOther = combatState.CreateCard<GremlinStrike>(player); // 1-cost Attack
+        var skillIgnored = combatState.CreateCard<GremlinDefend>(player);
+        await CardPileCmd.Add(dupe, PileType.Hand);
+        await CardPileCmd.Add(atkTarget, PileType.Hand);
+        await CardPileCmd.Add(atkOther, PileType.Hand);
+        await CardPileCmd.Add(skillIgnored, PileType.Hand);
+        using (DownfallAutoTestRunner.PreferCards(c => ReferenceEquals(c, atkTarget)))
+        {
+            AutoTestAssert.True(dupe.TryManualPlay(null), "Play Duplicate selecting Pickpocket");
+            await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        }
+        AutoTestAssert.Equal(PileType.Exhaust, dupe.Pile?.Type, "Duplicate exhausted");
+        var pickEchoes = pcs.Hand.Cards.OfType<Pickpocket>().Where(GremlinMob.IsEcho).ToList();
+        AutoTestAssert.Equal(2, pickEchoes.Count, "Duplicate added 2 Echoes of Pickpocket");
+        foreach (var echo in pickEchoes)
+        {
+            AutoTestAssert.Equal(1, echo.EnergyCost.GetWithModifiers(CostModifiers.All), "Duplicate Echo costs 1 less (2 -> 1)");
+            AutoTestAssert.True(echo.Keywords.Contains(CardKeyword.Ethereal) && echo.Keywords.Contains(CardKeyword.Exhaust), "Echo has Ethereal + Exhaust");
+        }
+
+        // 3. Encore (EncorePower(4) + WizPower(3)): Strike deals 6 + 7 + 4 = 17 dmg!
+        await ResetHandAndEnergy();
+        await CleanPlayerBuffs();
+        var encore = combatState.CreateCard<Encore>(player);
+        await CardPileCmd.Add(encore, PileType.Hand);
+        AutoTestAssert.True(encore.TryManualPlay(null), "Play Encore");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(4, player.Creature.GetPowerAmount<Downfall.Gremlins.Powers.EncorePower>(), "Encore applied EncorePower(4)");
+        AutoTestAssert.Equal(3, player.Creature.GetPowerAmount<WizPower>(), "Encore applied WizPower(3)");
+        var encStrike = combatState.CreateCard<GremlinStrike>(player);
+        await CardPileCmd.Add(encStrike, PileType.Hand);
+        int e2Hp = enemy2.CurrentHp;
+        AutoTestAssert.True(encStrike.TryManualPlay(enemy2), "Play Strike under Encore + 3 Wiz");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(e2Hp - 17, enemy2.CurrentHp, "Encore boosted Wiz Strike to 6 + 7 + 4 = 17 damage");
+        AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<WizPower>(), "Wiz consumed");
+        await CleanPlayerBuffs();
+
+        // 4. FairyDust: adds 2 Wards + draws 2 cards, Exhausts!
+        await ResetHandAndEnergy();
+        for (int i = 0; i < 4; i++)
+            await CardPileCmd.Add(combatState.CreateCard<GremlinDefend>(player), PileType.Draw, CardPilePosition.Top);
+        var fairy = combatState.CreateCard<FairyDust>(player);
+        await CardPileCmd.Add(fairy, PileType.Hand);
+        AutoTestAssert.True(fairy.TryManualPlay(null), "Play FairyDust");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(2, pcs.Hand.Cards.OfType<Ward>().Count(), "FairyDust added 2 Wards");
+        AutoTestAssert.Equal(4, pcs.Hand.Cards.Count, "FairyDust added 2 Wards + drew 2 cards = 4 in Hand");
+        AutoTestAssert.Equal(PileType.Exhaust, fairy.Pile?.Type, "FairyDust exhausted");
+
+        // 5. FlipOut + FuriousPower + BashedPower guard:
+        //    Gaining 5 Block under FuriousPower -> 0 Block, ALL enemies take 5 damage, BashedPower does NOT double-fire!
+        await ResetHandAndEnergy();
+        await PowerCmd.Apply<BashedPower>(ctx, enemy1, 5m, player.Creature, null);
+        var flip = combatState.CreateCard<FlipOut>(player);
+        await CardPileCmd.Add(flip, PileType.Hand);
+        int e1Hp = enemy1.CurrentHp;
+        AutoTestAssert.True(flip.TryManualPlay(enemy1), "Play FlipOut");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(e1Hp - 11, enemy1.CurrentHp, "FlipOut dealt 11 damage");
+        AutoTestAssert.True(player.Creature.HasPower<FuriousPower>(), "FuriousPower active");
+
+        var furDef = combatState.CreateCard<GremlinDefend>(player);
+        await CardPileCmd.Add(furDef, PileType.Hand);
+        e1Hp = enemy1.CurrentHp;
+        e2Hp = enemy2.CurrentHp;
+        int cHp = cultist.CurrentHp;
+        AutoTestAssert.True(furDef.TryManualPlay(null), "Play GremlinDefend under FuriousPower");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(0, player.Creature.Block, "FuriousPower converted all 5 Block away");
+        AutoTestAssert.Equal(e1Hp - 5, enemy1.CurrentHp, "FuriousPower dealt 5 to enemy1 (and BashedPower did NOT fire)");
+        AutoTestAssert.Equal(e2Hp - 5, enemy2.CurrentHp, "FuriousPower dealt 5 to enemy2");
+        AutoTestAssert.Equal(cHp - 5, cultist.CurrentHp, "FuriousPower dealt 5 to cultist");
+        if (enemy1.GetPower<BashedPower>() is { } bashClean) await PowerCmd.Remove(bashClean);
+
+        // 6. Flurry + SecondVolley+ (counting CardPlaysFinished this turn; SecondVolley caps at 10 hand size!):
+        await ResetHandAndEnergy();
+        int playedBeforeFlurry = CombatManager.Instance.History.CardPlaysFinished.Count(e => e.HappenedThisTurn(combatState) && e.CardPlay.Player == player);
+        AutoTestAssert.True(playedBeforeFlurry >= 4, $"Expected >= 4 cards played before Flurry, got {playedBeforeFlurry}");
+        var flurry = combatState.CreateCard<Flurry>(player);
+        await CardPileCmd.Add(flurry, PileType.Hand);
+        e2Hp = enemy2.CurrentHp;
+        AutoTestAssert.True(flurry.TryManualPlay(enemy2), "Play Flurry");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(e2Hp - (3 * playedBeforeFlurry), enemy2.CurrentHp, $"Flurry dealt 3 x {playedBeforeFlurry} damage");
+        AutoTestAssert.Equal(PileType.Exhaust, flurry.Pile?.Type, "Flurry exhausted");
+
+        // Fill hand with 8 filler cards + SecondVolley+ (9 total; after playing SecondVolley+, 8 remain -> max 2 Shiv+ fit!)
+        await ResetHandAndEnergy();
+        int discardBeforeVolley = PileType.Discard.GetPile(player).Cards.Count;
+        for (int i = 0; i < 8; i++)
+            await CardPileCmd.Add(combatState.CreateCard<GremlinDefend>(player), PileType.Hand);
+        var volleyPlus = combatState.CreateCard<SecondVolley>(player);
+        CardCmd.Upgrade(volleyPlus);
+        await CardPileCmd.Add(volleyPlus, PileType.Hand);
+        e2Hp = enemy2.CurrentHp;
+        AutoTestAssert.True(volleyPlus.TryManualPlay(enemy2), "Play SecondVolley+ with 8 other cards in Hand");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(e2Hp - 6, enemy2.CurrentHp, "SecondVolley+ dealt 6 damage");
+        AutoTestAssert.Equal(2, pcs.Hand.Cards.OfType<MegaCrit.Sts2.Core.Models.Cards.Shiv>().Count(s => s.IsUpgraded), "SecondVolley+ capped Upgraded Shivs to available hand space (2)");
+        AutoTestAssert.Equal(discardBeforeVolley + 1, PileType.Discard.GetPile(player).Cards.Count, "No overflow Shivs spilled into Discard Pile (only SecondVolley+ itself)");
+
+        // 7. Heckle (HecklePower(2)): Weak -> +2 Temp HP; Artifact-blocked Weak -> 0; PiercingWail -> +2 once!
+        await ResetHandAndEnergy();
+        await CleanPlayerBuffs();
+        var heckle = combatState.CreateCard<Heckle>(player);
+        await CardPileCmd.Add(heckle, PileType.Hand);
+        AutoTestAssert.True(heckle.TryManualPlay(null), "Play Heckle");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(2, player.Creature.GetPowerAmount<HecklePower>(), "HecklePower(2) active");
+
+        await PowerCmd.Apply<WeakPower>(ctx, enemy2, 1m, player.Creature, null);
+        AutoTestAssert.Equal(2, player.Creature.GetPowerAmount<DownfallTempHpPower>(), "Heckle granted +2 Temp HP on Weak");
+
+        await PowerCmd.Apply<ArtifactPower>(ctx, cultist, 1m, cultist, null);
+        await PowerCmd.Apply<WeakPower>(ctx, cultist, 1m, player.Creature, null);
+        AutoTestAssert.Equal(2, player.Creature.GetPowerAmount<DownfallTempHpPower>(), "Heckle granted 0 Temp HP when Artifact blocked Weak");
+
+        await PowerCmd.Apply<PiercingWailPower>(ctx, enemy2, 2m, player.Creature, null);
+        AutoTestAssert.Equal(4, player.Creature.GetPowerAmount<DownfallTempHpPower>(), "Heckle granted +2 Temp HP once for PiercingWail (2 -> 4)");
+
+        // Reducing an enemy's debuff attributed to the player must NOT trigger Heckle!
+        if (enemy2.GetPower<WeakPower>() is { } weakToReduce)
+            await PowerCmd.ModifyAmount(ctx, weakToReduce, -1m, player.Creature, null);
+        AutoTestAssert.Equal(4, player.Creature.GetPowerAmount<DownfallTempHpPower>(), "Heckle granted 0 Temp HP when reducing a debuff");
+        await CleanPlayerBuffs();
+
+        // 8. Necromancy: unplayable at 2 Wiz, playable at 3 Wiz -> consumes Wiz, heals 15 HP, Exhausts!
+        await ResetHandAndEnergy();
+        await CreatureCmd.Damage(ctx, player.Creature, 25m, ValueProp.Unblockable | ValueProp.Unpowered, enemy1, null, null);
+        int injuredHp = player.Creature.CurrentHp;
+        await PowerCmd.Apply<WizPower>(ctx, player.Creature, 2m, player.Creature, null);
+        var necro = combatState.CreateCard<Necromancy>(player);
+        AutoTestAssert.True(!necro.CanBeGeneratedInCombat, "Necromancy cannot be generated in combat");
+        await CardPileCmd.Add(necro, PileType.Hand);
+        AutoTestAssert.True(!necro.TryManualPlay(null), "Necromancy unplayable at 2 Wiz");
+
+        await PowerCmd.Apply<WizPower>(ctx, player.Creature, 1m, player.Creature, null); // now 3 Wiz
+        AutoTestAssert.True(necro.TryManualPlay(null), "Play Necromancy at 3 Wiz");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<WizPower>(), "Necromancy consumed all Wiz");
+        AutoTestAssert.Equal(injuredHp + 15, player.Creature.CurrentHp, "Necromancy healed 15 HP");
+        AutoTestAssert.Equal(PileType.Exhaust, necro.Pile?.Type, "Necromancy exhausted");
+
+        // 9. ShadowShiv: non-Exhaust Attack adds Shiv; Exhaust Attack (Shiv) adds 0 Shivs!
+        await ResetHandAndEnergy();
+        var shadShiv = combatState.CreateCard<ShadowShiv>(player);
+        await CardPileCmd.Add(shadShiv, PileType.Hand);
+        AutoTestAssert.True(shadShiv.TryManualPlay(null), "Play ShadowShiv");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        var nonExAtk = combatState.CreateCard<GremlinStrike>(player);
+        await CardPileCmd.Add(nonExAtk, PileType.Hand);
+        AutoTestAssert.True(nonExAtk.TryManualPlay(enemy2), "Play non-Exhaust GremlinStrike under ShadowShiv");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        var generatedShiv = pcs.Hand.Cards.OfType<MegaCrit.Sts2.Core.Models.Cards.Shiv>().FirstOrDefault();
+        AutoTestAssert.NotNull(generatedShiv, "ShadowShiv added a Shiv to Hand");
+        AutoTestAssert.True(generatedShiv!.TryManualPlay(enemy2), "Play generated Exhaust Shiv under ShadowShiv");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(0, pcs.Hand.Cards.OfType<MegaCrit.Sts2.Core.Models.Cards.Shiv>().Count(), "Exhausting Shiv did NOT trigger ShadowShiv");
+        await CleanPlayerBuffs();
+
+        // 10. ShowStopper: unplayable at 6 or 8 Wiz; at EXACTLY 7 Wiz deals (3+7)x5 = 50 AOE and consumes Wiz!
+        await ResetHandAndEnergy();
+        var showStop = combatState.CreateCard<ShowStopper>(player);
+        await CardPileCmd.Add(showStop, PileType.Hand);
+        await PowerCmd.Apply<WizPower>(ctx, player.Creature, 6m, player.Creature, null);
+        AutoTestAssert.True(!showStop.TryManualPlay(null), "ShowStopper unplayable at 6 Wiz");
+        await PowerCmd.Apply<WizPower>(ctx, player.Creature, 2m, player.Creature, null); // 8 Wiz
+        AutoTestAssert.True(!showStop.TryManualPlay(null), "ShowStopper unplayable at 8 Wiz");
+        await PowerCmd.ModifyAmount(ctx, player.Creature.GetPower<WizPower>()!, -1m, null, null); // 7 Wiz
+        e1Hp = enemy1.CurrentHp;
+        e2Hp = enemy2.CurrentHp;
+        cHp = cultist.CurrentHp;
+        AutoTestAssert.True(showStop.TryManualPlay(null), "Play ShowStopper at exactly 7 Wiz");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(e1Hp - 50, enemy1.CurrentHp, "ShowStopper dealt 50 to enemy1");
+        AutoTestAssert.Equal(e2Hp - 50, enemy2.CurrentHp, "ShowStopper dealt 50 to enemy2");
+        AutoTestAssert.Equal(cHp - 50, cultist.CurrentHp, "ShowStopper dealt 50 to cultist");
+        AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<WizPower>(), "ShowStopper consumed all 7 Wiz");
+
+        // 11. TargetWeakness: +3 dmg vs Weak enemy2, +0 vs non-Weak cultist!
+        await ResetHandAndEnergy();
+        if (cultist.GetPower<WeakPower>() is { } wc) await PowerCmd.Remove(wc);
+        if (enemy2.GetPower<WeakPower>() is null) await PowerCmd.Apply<WeakPower>(ctx, enemy2, 2m, player.Creature, null);
+        var twCard = combatState.CreateCard<TargetWeakness>(player);
+        await CardPileCmd.Add(twCard, PileType.Hand);
+        AutoTestAssert.True(twCard.TryManualPlay(null), "Play TargetWeakness");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        var twStrike1 = combatState.CreateCard<GremlinStrike>(player);
+        var twStrike2 = combatState.CreateCard<GremlinStrike>(player);
+        await CardPileCmd.Add(twStrike1, PileType.Hand);
+        await CardPileCmd.Add(twStrike2, PileType.Hand);
+        e2Hp = enemy2.CurrentHp;
+        cHp = cultist.CurrentHp;
+        AutoTestAssert.True(twStrike1.TryManualPlay(enemy2), "Play Strike on Weak enemy2");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(e2Hp - 9, enemy2.CurrentHp, "TargetWeakness added +3 damage (6 -> 9) against Weak enemy");
+        AutoTestAssert.True(twStrike2.TryManualPlay(cultist), "Play Strike on non-Weak cultist");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(cHp - 6, cultist.CurrentHp, "TargetWeakness added 0 damage against non-Weak enemy");
+        await CleanPlayerBuffs();
+
+        // 12. Unforgiving + Erupt + CongaLine+ + Nob (transform, Nob GremlinDance, Turn 2 tokens + Erupt Strength retained + Nob revert preventing overflow)!
+        await ResetHandAndEnergy(energy: 12);
+        var unforg = combatState.CreateCard<Unforgiving>(player);
+        var erupt = combatState.CreateCard<Erupt>(player);
+        var congaPlus = combatState.CreateCard<CongaLine>(player);
+        CardCmd.Upgrade(congaPlus);
+        AutoTestAssert.True(congaPlus.Keywords.Contains(CardKeyword.Innate), "CongaLine+ is Innate");
+        var nob = combatState.CreateCard<Nob>(player);
+        await CardPileCmd.Add(unforg, PileType.Hand);
+        await CardPileCmd.Add(erupt, PileType.Hand);
+        await CardPileCmd.Add(congaPlus, PileType.Hand);
+        await CardPileCmd.Add(nob, PileType.Hand);
+
+        AutoTestAssert.True(unforg.TryManualPlay(null), "Play Unforgiving");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.True(erupt.TryManualPlay(null), "Play Erupt (+5 temp Strength)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(5, player.Creature.GetPowerAmount<StrengthPower>(), "Erupt granted 5 Strength");
+        AutoTestAssert.Equal(PileType.Exhaust, erupt.Pile?.Type, "Erupt exhausted");
+        // Direct Strength loss blocked by Unforgiving!
+        await PowerCmd.Apply<StrengthPower>(ctx, player.Creature, -3m, enemy1, null);
+        AutoTestAssert.Equal(5, player.Creature.GetPowerAmount<StrengthPower>(), "Unforgiving blocked direct -3 Strength loss");
+
+        AutoTestAssert.True(congaPlus.TryManualPlay(null), "Play CongaLine+");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.True(nob.TryManualPlay(null), "Play NOB");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.True(GremlinMob.IsNob(combatState, player), "NOB entered Gremlin Nob state");
+        AutoTestAssert.Equal(20, player.Creature.GetPowerAmount<DownfallTempHpPower>(), "NOB granted 20 Temp HP");
+        AutoTestAssert.True(!await GremlinMob.SwapNextAsync(player, combatState, ctx), "Cannot Swap while Gremlin Nob");
+
+        // Nob GremlinDance deals 6+5=11 and grants +2 Strength (5 -> 7)!
+        var nobDance = combatState.CreateCard<GremlinDance>(player);
+        await CardPileCmd.Add(nobDance, PileType.Hand);
+        cHp = cultist.CurrentHp;
+        AutoTestAssert.True(nobDance.TryManualPlay(cultist), "Play GremlinDance as Nob");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(cHp - 11, cultist.CurrentHp, "Nob GremlinDance dealt 6 + 5 Strength = 11 damage");
+        AutoTestAssert.Equal(7, player.Creature.GetPowerAmount<StrengthPower>(), "Nob GremlinDance granted +2 Strength (5 -> 7)");
+
+        // Gain 100 Block first, then apply FuriousPower so we verify its end-of-turn expiration cleanly!
+        await CreatureCmd.GainBlock(player.Creature, 100m, ValueProp.Unpowered, null);
+        await PowerCmd.Apply<FuriousPower>(ctx, player.Creature, 1m, player.Creature, null);
+        await DownfallAutoTestRunner.EndTurnAndWaitForRoundAsync(player, 2);
+
+        // Turn 2 assertions:
+        AutoTestAssert.True(!player.Creature.HasPower<FuriousPower>(), "FuriousPower expired at end of Turn 1");
+        AutoTestAssert.Equal(7, player.Creature.GetPowerAmount<StrengthPower>(), "Unforgiving retained Erupt's 5 Strength across turn end (7 total)");
+        AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<FlexPotionPower>(), "FlexPotionPower expired cleanly");
+        AutoTestAssert.Equal(1, enemy1.GetPowerAmount<AgonyPower>(), "AgonyPower ticked down 2 -> 1 at end of Enemy Turn 1");
+        AutoTestAssert.Equal(4, pcs.Energy, "CongaLinePower granted +1 Energy at Turn 2 start (3 -> 4)");
+        var bellow = pcs.Hand.Cards.OfType<Bellow>().FirstOrDefault();
+        var skullBash = pcs.Hand.Cards.OfType<SkullBash>().FirstOrDefault();
+        var rush = pcs.Hand.Cards.OfType<Rush>().FirstOrDefault();
+        AutoTestAssert.NotNull(bellow, "GremlinNobPower added Bellow at Turn 2 start");
+        AutoTestAssert.NotNull(skullBash, "GremlinNobPower added SkullBash at Turn 2 start");
+        AutoTestAssert.NotNull(rush, "GremlinNobPower added Rush at Turn 2 start");
+
+        // Play Bellow, SkullBash, Rush!
+        int nonAttackersT2 = combatState.HittableEnemies.Count(e => e.IsAlive && e.Monster is not { IntendsToAttack: true });
+        int strBeforeBellow = player.Creature.GetPowerAmount<StrengthPower>();
+        AutoTestAssert.True(bellow!.TryManualPlay(null), "Play Bellow");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(strBeforeBellow + (2 * nonAttackersT2), player.Creature.GetPowerAmount<StrengthPower>(), "Bellow granted +2 Strength per non-attacking enemy");
+        AutoTestAssert.Equal(PileType.Exhaust, bellow.Pile?.Type, "Bellow exhausted");
+
+        int curStr = player.Creature.GetPowerAmount<StrengthPower>();
+        cHp = cultist.CurrentHp;
+        AutoTestAssert.True(skullBash!.TryManualPlay(cultist), "Play SkullBash");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(cHp - (6 + curStr), cultist.CurrentHp, "SkullBash dealt 6 + Strength damage");
+        AutoTestAssert.Equal(2, cultist.GetPowerAmount<VulnerablePower>(), "SkullBash applied 2 Vulnerable");
+        AutoTestAssert.Equal(PileType.Exhaust, skullBash.Pile?.Type, "SkullBash exhausted");
+
+        e2Hp = enemy2.CurrentHp;
+        AutoTestAssert.True(rush!.TryManualPlay(enemy2), "Play Rush");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(e2Hp - (14 + curStr), enemy2.CurrentHp, "Rush dealt 14 + Strength damage");
+        AutoTestAssert.Equal(PileType.Exhaust, rush.Pile?.Type, "Rush exhausted");
+
+        // Deplete Nob's 20 Temp HP with 50 unblockable damage -> overflow prevented (0 HP lost!), Nob reverts!
+        int hpBeforePop = player.Creature.CurrentHp;
+        await CreatureCmd.Damage(ctx, player.Creature, 50m, ValueProp.Unblockable | ValueProp.Unpowered, enemy1, null, null);
+        AutoTestAssert.Equal(hpBeforePop, player.Creature.CurrentHp, "GremlinNobPower prevented 30 overflow damage when Temp HP depleted");
+        AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<DownfallTempHpPower>(), "Temp HP depleted to 0");
+        AutoTestAssert.True(!GremlinMob.IsNob(combatState, player), "Reverted out of Gremlin Nob form");
+        AutoTestAssert.True(!player.Creature.HasPower<GremlinNobPower>(), "GremlinNobPower removed on revert");
+        AutoTestAssert.True(player.Creature.Powers.OfType<GremlinActivePower>().Any(), "Active Gremlin power restored on revert");
+    }
 }

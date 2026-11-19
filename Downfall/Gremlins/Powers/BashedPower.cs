@@ -26,6 +26,7 @@ public sealed class BashedPower : GremlinPower
         CardModel? cardSource)
     {
         if ((Applier is not null ? creature != Applier : !creature.IsPlayer)
+            || creature.HasPower<FuriousPower>()
             || amount <= 0m
             || Amount <= 0
             || !Owner.IsAlive
