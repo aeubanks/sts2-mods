@@ -40,6 +40,7 @@ using Packmaster.Cards.Warlock;
 using Packmaster.Character;
 using Packmaster.Config;
 using Packmaster.Packs;
+using Packmaster.Potions;
 using Packmaster.Powers;
 using Packmaster.Relics;
 
@@ -110,6 +111,7 @@ internal static class PackmasterAutoTestRunner
                 ("PackRunStateSaveLoadPersistence", TestPackRunStateSaveLoadPersistence),
                 ("NeowInteractivePackDraft", TestNeowInteractivePackDraft),
                 ("CorePackmasterRelics", TestCorePackmasterRelics),
+                ("CorePackmasterPotions", TestCorePackmasterPotions),
                 ("StartRunAndPlayStarterCombat", TestStartRunAndPlayStarterCombat),
                 ("CoreSetCardsInCombat", TestCoreSetCardsInCombat),
                 ("QuietPackInCombat", TestQuietPackInCombat),
@@ -239,7 +241,7 @@ internal static class PackmasterAutoTestRunner
         AutoTestAssert.True(!string.IsNullOrWhiteSpace(character.Title.GetFormattedText()), "Character title empty");
 
         var relicPool = AutoTestAssert.NotNull(ModelDb.RelicPool<PackmasterRelicPool>(), "PackmasterRelicPool");
-        AutoTestAssert.NotNull(ModelDb.PotionPool<PackmasterPotionPool>(), "PackmasterPotionPool");
+        var potionPool = AutoTestAssert.NotNull(ModelDb.PotionPool<PackmasterPotionPool>(), "PackmasterPotionPool");
 
         string[] charAssets =
         [
@@ -313,6 +315,21 @@ internal static class PackmasterAutoTestRunner
             AutoTestAssert.True(!string.IsNullOrWhiteSpace(desc), $"Empty relic description for {relic.Id}");
             AutoTestAssert.True(!desc.Contains('{') && !desc.Contains('}'), $"Unresolved SmartFormat token in {relic.Id}: {desc}");
         }
+
+        // Validate potions.
+        var potions = potionPool.AllPotions.ToList();
+        AutoTestAssert.Equal(3, potions.Count, "Expected 3 core Packmaster potions");
+        foreach (var potion in potions)
+        {
+            AutoTestAssert.True(ResourceLoader.Exists(potion.ImagePath), $"Missing potion image for {potion.Id}: {potion.ImagePath}");
+            AutoTestAssert.True(potion.OutlinePath is not null && ResourceLoader.Exists(potion.OutlinePath), $"Missing potion outline for {potion.Id}: {potion.OutlinePath}");
+            AutoTestAssert.True(potion.Title.Exists(), $"Missing potion title loc for {potion.Id}");
+            AutoTestAssert.True(potion.DynamicDescription.Exists(), $"Missing potion description loc for {potion.Id}");
+            var pDesc = potion.DynamicDescription.GetFormattedText();
+            AutoTestAssert.True(!string.IsNullOrWhiteSpace(pDesc), $"Empty potion description for {potion.Id}");
+            AutoTestAssert.True(!pDesc.Contains('{') && !pDesc.Contains('}'), $"Unresolved SmartFormat token in {potion.Id}: {pDesc}");
+        }
+        AutoTestAssert.True(ModelDb.Potion<SmithingOil>().SelectionScreenPrompt.Exists(), "Missing SmithingOil selectionScreenPrompt loc");
 
         // Validate custom powers.
         var customPowers = ModelDb.AllPowers.OfType<PackmasterPower>().ToList();
@@ -2722,6 +2739,142 @@ internal static class PackmasterAutoTestRunner
         AutoTestAssert.True(pcs.DrawPile.Cards.Any(c => c is FadingEmber), "FueledByEmbers shuffled FadingEmber into draw pile");
         // Hand should have base 5 + 2 (SnowMelt) + 1 (FueledByEmbers draw) + 1 (FueledByEmbers hand ember) = 9 cards!
         AutoTestAssert.Equal(9, pcs.Hand.Cards.Count, "Turn-2 hand size = 5 base + 2 SnowMelt + 1 FueledByEmbers draw + 1 FadingEmber = 9");
+    }
+
+    private static async Task TestCorePackmasterPotions()
+    {
+        var (player, _, combatState) = await StartCombatAsync("PMPOT001");
+        var pcs = AutoTestAssert.NotNull(player.PlayerCombatState, "PlayerCombatState");
+
+        foreach (var c in pcs.Hand.Cards.ToList())
+            await CardPileCmd.Add(c, PileType.Discard);
+        foreach (var c in pcs.DrawPile.Cards.ToList())
+            await CardPileCmd.Add(c, PileType.Discard);
+
+        // 1. ModdersDelight: shuffles DiscardPile into a NON-EMPTY DrawPile and pulls up to 3 cards from DIFFERENT Packs into Hand!
+        // Put 1 CoreSet card in DrawPile and 2 Quiet + 1 Batter cards in DiscardPile so both piles merge cleanly.
+        await CardPileCmd.Add(combatState.CreateCard<Showoff>(player), PileType.Draw);
+        await CardPileCmd.Add(combatState.CreateCard<IronShield>(player), PileType.Discard);
+        await CardPileCmd.Add(combatState.CreateCard<Lie>(player), PileType.Discard);
+        await CardPileCmd.Add(combatState.CreateCard<WideAngle>(player), PileType.Discard);
+
+        var moddersResult = await PotionCmd.TryToProcure<ModdersDelight>(player);
+        AutoTestAssert.True(moddersResult.success && moddersResult.potion is not null, "Procured ModdersDelight");
+        moddersResult.potion!.EnqueueManualUse(player.Creature);
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+
+        AutoTestAssert.Equal(0, pcs.DiscardPile.Cards.Count, "ModdersDelight shuffled DiscardPile into DrawPile");
+        AutoTestAssert.Equal(3, pcs.Hand.Cards.Count, "ModdersDelight pulled 3 cards from different packs into Hand");
+        var handPacks = pcs.Hand.Cards.Select(PackRegistry.GetForCard).ToList();
+        AutoTestAssert.True(handPacks.All(p => p is not null), "All ModdersDelight pulled cards belong to a Pack");
+        AutoTestAssert.Equal(3, handPacks.Distinct().Count(), "All 3 ModdersDelight pulled cards are from DIFFERENT packs");
+
+        // 2. BoosterBrew: choose 1 of 3 Packs -> shuffles 5 random cards from it into DrawPile costing 0 this combat!
+        int drawBeforeBrew = pcs.DrawPile.Cards.Count;
+        var existingDrawCards = pcs.DrawPile.Cards.ToHashSet();
+        var brewResult = await PotionCmd.TryToProcure<BoosterBrew>(player);
+        AutoTestAssert.True(brewResult.success && brewResult.potion is not null, "Procured BoosterBrew");
+        var savedSelector = _activeCardSelector;
+        _activeCardSelector = new TakeNCardSelector(1);
+        try
+        {
+            brewResult.potion!.EnqueueManualUse(player.Creature);
+            await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        }
+        finally
+        {
+            _activeCardSelector = savedSelector;
+        }
+
+        AutoTestAssert.Equal(drawBeforeBrew + 5, pcs.DrawPile.Cards.Count, "BoosterBrew added 5 cards to DrawPile");
+        var brewCards = pcs.DrawPile.Cards.Where(c => !existingDrawCards.Contains(c)).ToList();
+        AutoTestAssert.Equal(5, brewCards.Count, "Identified 5 newly generated BoosterBrew cards");
+        AutoTestAssert.True(brewCards.All(c => c.CanBeGeneratedInCombat), "All BoosterBrew cards are combat-generatable");
+        var brewPacks = brewCards.Select(PackRegistry.GetForCard).Distinct().ToList();
+        AutoTestAssert.Equal(1, brewPacks.Count, "All 5 BoosterBrew cards come from the SAME chosen pack");
+        AutoTestAssert.NotNull(brewPacks[0], "Chosen BoosterBrew pack is registered");
+        AutoTestAssert.True(brewCards.Any(c => !c.EnergyCost.CostsX && c.EnergyCost.Canonical > 0),
+            "At least one BoosterBrew card had canonical cost > 0 to verify 0-cost override");
+        foreach (var card in brewCards)
+        {
+            if (!card.EnergyCost.CostsX && card.EnergyCost.Canonical > 0)
+            {
+                AutoTestAssert.Equal(0, card.EnergyCost.GetAmountToSpend(), $"BoosterBrew card {card.Id} costs 0 this combat");
+            }
+        }
+
+        // 3. SmithingOil:
+        // Case A: Unupgraded starter card in Hand -> upgrades BOTH combat copy AND permanent DeckVersion!
+        foreach (var c in pcs.Hand.Cards.ToList())
+            await CardPileCmd.Add(c, PileType.Discard);
+        var strikeInCombat = AutoTestAssert.NotNull(
+            pcs.DiscardPile.Cards.Concat(pcs.DrawPile.Cards).FirstOrDefault(c => c is PackmasterStrike && c.DeckVersion is { IsUpgraded: false }),
+            "Starter Strike with unupgraded DeckVersion");
+        await CardPileCmd.Add(strikeInCombat, PileType.Hand);
+
+        var oilResult1 = await PotionCmd.TryToProcure<SmithingOil>(player);
+        AutoTestAssert.True(oilResult1.success && oilResult1.potion is not null, "Procured SmithingOil #1");
+        _activeCardSelector = new TakeNCardSelector(1);
+        try
+        {
+            oilResult1.potion!.EnqueueManualUse(player.Creature);
+            await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        }
+        finally
+        {
+            _activeCardSelector = savedSelector;
+        }
+
+        AutoTestAssert.True(strikeInCombat.IsUpgraded, "SmithingOil upgraded combat Strike");
+        AutoTestAssert.True(strikeInCombat.DeckVersion!.IsUpgraded, "SmithingOil permanently upgraded Strike DeckVersion");
+        AutoTestAssert.True(player.Deck.Cards.Any(c => ReferenceEquals(c, strikeInCombat.DeckVersion) && c.IsUpgraded),
+            "Upgraded Strike DeckVersion is in player.Deck");
+
+        // Case B: Card already upgraded in combat ONLY, whose DeckVersion is still unupgraded -> SmithingOil still upgrades DeckVersion permanently!
+        foreach (var c in pcs.Hand.Cards.ToList())
+            await CardPileCmd.Add(c, PileType.Discard);
+        var defendInCombat = AutoTestAssert.NotNull(
+            pcs.DiscardPile.Cards.Concat(pcs.DrawPile.Cards).FirstOrDefault(c => c is PackmasterDefend && !c.IsUpgraded && c.DeckVersion is { IsUpgraded: false }),
+            "Starter Defend with unupgraded DeckVersion");
+        CardCmd.Upgrade(defendInCombat); // Upgrade combat copy ONLY!
+        AutoTestAssert.True(defendInCombat.IsUpgraded && !defendInCombat.DeckVersion!.IsUpgraded, "Defend upgraded in combat only, DeckVersion unupgraded");
+        await CardPileCmd.Add(defendInCombat, PileType.Hand);
+
+        var oilResult2 = await PotionCmd.TryToProcure<SmithingOil>(player);
+        AutoTestAssert.True(oilResult2.success && oilResult2.potion is not null, "Procured SmithingOil #2");
+        _activeCardSelector = new TakeNCardSelector(1);
+        try
+        {
+            oilResult2.potion!.EnqueueManualUse(player.Creature);
+            await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        }
+        finally
+        {
+            _activeCardSelector = savedSelector;
+        }
+
+        AutoTestAssert.True(defendInCombat.DeckVersion!.IsUpgraded, "SmithingOil permanently upgraded DeckVersion of already-combat-upgraded card");
+
+        // Case C: SmithingOil with 0 eligible cards in hand returns cleanly without hanging!
+        // defendInCombat is now upgraded in BOTH combat and DeckVersion (only card in hand).
+        var oilResult3 = await PotionCmd.TryToProcure<SmithingOil>(player);
+        AutoTestAssert.True(oilResult3.success && oilResult3.potion is not null, "Procured SmithingOil #3");
+        oilResult3.potion!.EnqueueManualUse(player.Creature);
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+
+        // Case D: ModdersDelight with near-full hand (9 cards) safely caps hand at 10 without throwing or hanging!
+        while (pcs.Hand.Cards.Count < 9)
+        {
+            await CardPileCmd.Add(combatState.CreateCard<PackmasterStrike>(player), PileType.Hand);
+        }
+        await CardPileCmd.Add(combatState.CreateCard<Showoff>(player), PileType.Draw);
+        await CardPileCmd.Add(combatState.CreateCard<IronShield>(player), PileType.Draw);
+        await CardPileCmd.Add(combatState.CreateCard<WideAngle>(player), PileType.Draw);
+        var moddersFull = await PotionCmd.TryToProcure<ModdersDelight>(player);
+        AutoTestAssert.True(moddersFull.success && moddersFull.potion is not null, "Procured ModdersDelight #2");
+        moddersFull.potion!.EnqueueManualUse(player.Creature);
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(10, pcs.Hand.Cards.Count, "ModdersDelight cleanly respected 10-card hand limit");
     }
 
     private static async Task WaitUntilAsync(Func<bool> predicate, int timeoutMs = 15000)
