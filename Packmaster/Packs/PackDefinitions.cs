@@ -4,6 +4,7 @@ using Packmaster.Cards.CoreSet;
 using Packmaster.Cards.EnergyAndEcho;
 using Packmaster.Cards.EvenOdd;
 using Packmaster.Cards.Farmer;
+using Packmaster.Cards.Hermit;
 using Packmaster.Cards.HighEnergy;
 using Packmaster.Cards.Quiet;
 using Packmaster.Cards.Shaman;
@@ -25,6 +26,7 @@ public static class PackDefinitions
     public const string ShamanId = "Shaman";
     public const string WardenId = "Warden";
     public const string FarmerId = "Farmer";
+    public const string HermitId = "Hermit";
 
     public static void RegisterAll()
     {
@@ -213,6 +215,23 @@ public static class PackDefinitions
                 typeof(SowTheSeeds),
                 typeof(SupplyChain),
                 typeof(TillTheEarth),
+            ]));
+
+        PackRegistry.Register(new PackDefinition(
+            Id: HermitId,
+            AlwaysInclude: false,
+            CardTypes:
+            [
+                typeof(DeadOrAlive),
+                typeof(Determination),
+                typeof(FlashPowder),
+                typeof(Glare),
+                typeof(Headshot),
+                typeof(HoleUp),
+                typeof(OverwhelmingPower),
+                typeof(Purgatory),
+                typeof(Quickdraw),
+                typeof(Virtue),
             ]));
     }
 }

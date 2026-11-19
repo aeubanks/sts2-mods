@@ -34,6 +34,7 @@ using Packmaster.Cards.CoreSet;
 using Packmaster.Cards.EnergyAndEcho;
 using Packmaster.Cards.EvenOdd;
 using Packmaster.Cards.Farmer;
+using Packmaster.Cards.Hermit;
 using Packmaster.Cards.HighEnergy;
 using Packmaster.Cards.Quiet;
 using Packmaster.Cards.Shaman;
@@ -126,6 +127,7 @@ internal static class PackmasterAutoTestRunner
                 ("ShamanPackInCombat", TestShamanPackInCombat),
                 ("WardenPackInCombat", TestWardenPackInCombat),
                 ("FarmerPackInCombat", TestFarmerPackInCombat),
+                ("HermitPackInCombat", TestHermitPackInCombat),
             ];
 
             foreach (var (name, run) in tests)
@@ -300,6 +302,8 @@ internal static class PackmasterAutoTestRunner
         }
         AutoTestAssert.True(new LocString("gameplay_ui", "PACKMASTER-ECHO_KEYWORD.title").Exists(), "Missing Echo keyword title loc");
         AutoTestAssert.True(new LocString("gameplay_ui", "PACKMASTER-ECHO_KEYWORD.description").Exists(), "Missing Echo keyword desc loc");
+        AutoTestAssert.True(new LocString("gameplay_ui", "PACKMASTER-BOUNTY_KEYWORD.title").Exists(), "Missing Bounty keyword title loc");
+        AutoTestAssert.True(new LocString("gameplay_ui", "PACKMASTER-BOUNTY_KEYWORD.description").Exists(), "Missing Bounty keyword desc loc");
         AutoTestAssert.True(new LocString("cards", "PACKMASTER-PIERCE_VEIL.selectionScreenPrompt").Exists(), "Missing PierceVeil selectionScreenPrompt loc");
         AutoTestAssert.True(new LocString("cards", "PACKMASTER-STALL.selectionScreenPrompt").Exists(), "Missing Stall selectionScreenPrompt loc");
 
@@ -3366,6 +3370,197 @@ internal static class PackmasterAutoTestRunner
         await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
         AutoTestAssert.Equal(1, soilLow.DynamicVars["UsesLeft"].IntValue, "Duplicated SoilResiliency decremented UsesLeft once (2 -> 1)");
         AutoTestAssert.True(pcs.DiscardPile.Cards.Contains(soilLow), "Duplicated SoilResiliency went to Discard instead of exhausting early");
+    }
+
+    private static async Task TestHermitPackInCombat()
+    {
+        var (player, _, combatState) = await StartCombatAsync("PMHERM01");
+        var pcs = AutoTestAssert.NotNull(player.PlayerCombatState, "PlayerCombatState");
+        var enemy = AutoTestAssert.NotNull(combatState.HittableEnemies.FirstOrDefault(), "First hittable enemy");
+        var enemy2 = await CreatureCmd.Add<MegaCrit.Sts2.Core.Models.Monsters.Nibbit>(combatState);
+
+        await CreatureCmd.GainMaxHp(enemy, 1000m);
+        await CreatureCmd.GainMaxHp(enemy2, 1000m);
+
+        foreach (var c in pcs.Hand.Cards.ToList())
+            await CardPileCmd.Add(c, PileType.Discard);
+        await PlayerCmd.GainEnergy(20, player);
+
+        // 1. Headshot: edge of 3-card hand -> 7 dmg; middle of 3-card hand (with DuplicationPower!) -> 14 + 14 = 28 dmg!
+        var leftDummy = combatState.CreateCard<PackmasterDefend>(player);
+        var midHeadshot = combatState.CreateCard<Headshot>(player);
+        var edgeHeadshot = combatState.CreateCard<Headshot>(player);
+        await CardPileCmd.Add(leftDummy, PileType.Hand);
+        await CardPileCmd.Add(midHeadshot, PileType.Hand);
+        await CardPileCmd.Add(edgeHeadshot, PileType.Hand); // Hand = [leftDummy(0), midHeadshot(1), edgeHeadshot(2)]
+
+        int e1Hp = enemy.CurrentHp;
+        AutoTestAssert.True(edgeHeadshot.TryManualPlay(enemy), "Play edge Headshot (index 2 of 3)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(e1Hp - 7, enemy.CurrentHp, "Edge Headshot dealt normal 7 damage");
+
+        // Now Hand = [leftDummy(0), midHeadshot(1)] (even size 2 -> BOTH index 0 and 1 are middle!). Add 3rd card so midHeadshot is exact index 1 of 3!
+        await CardPileCmd.Add(combatState.CreateCard<PackmasterDefend>(player), PileType.Hand);
+        await PowerCmd.Apply<DuplicationPower>(new ThrowingPlayerChoiceContext(), player.Creature, 1m, player.Creature, null);
+        e1Hp = enemy.CurrentHp;
+        AutoTestAssert.True(midHeadshot.TryManualPlay(enemy), "Play duplicated center Headshot (index 1 of 3)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(e1Hp - 28, enemy.CurrentHp, "Duplicated center Headshot dealt 14 + 14 = 28 damage");
+
+        // Regression: hover/CanPlay Headshot in middle of Hand -> move to DrawPile -> AutoPlayFromDrawPile must deal 7 (not stale 14)!
+        await CardPileCmd.Add(midHeadshot, PileType.Hand); // Hand = [leftDummy(0), defend(1), midHeadshot(2)]
+        await CardPileCmd.Add(combatState.CreateCard<PackmasterDefend>(player), PileType.Hand); // Hand = [0,1,midHeadshot(2),3] -> middle of 4!
+        AutoTestAssert.True(midHeadshot.CanPlay(), "CanPlay evaluated while Headshot is in middle of 4-card hand");
+        await CardPileCmd.Add(midHeadshot, PileType.Draw, CardPilePosition.Top);
+        e1Hp = enemy.CurrentHp;
+        await CardPileCmd.AutoPlayFromDrawPile(new ThrowingPlayerChoiceContext(), player, 1, CardPilePosition.Top, forceExhaust: false);
+        AutoTestAssert.Equal(e1Hp - 7, enemy.CurrentHp, "Auto-played Headshot from DrawPile dealt normal 7 damage (no stale Dead On)");
+
+        // Replay midHeadshot from edge of Hand -> confirms AfterCardPlayed cleared _deadOnWhenPlayed!
+        await CardPileCmd.Add(midHeadshot, PileType.Hand); // Edge index 3 of 4
+        e1Hp = enemy.CurrentHp;
+        AutoTestAssert.True(midHeadshot.TryManualPlay(enemy), "Replay Headshot from edge of Hand");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(e1Hp - 7, enemy.CurrentHp, "Replayed edge Headshot dealt normal 7 damage");
+
+        // 2. Determination+ (Innate + DeterminationPower(1)) + HoleUp (12 Block + 2 Weak -> triggers Determination +1 Str!).
+        var determination = combatState.CreateCard<Determination>(player);
+        CardCmd.Upgrade(determination);
+        AutoTestAssert.True(determination.Keywords.Contains(CardKeyword.Innate), "Determination+ is Innate");
+        await CardPileCmd.Add(determination, PileType.Hand);
+        AutoTestAssert.True(determination.TryManualPlay(null), "Play Determination+");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<DeterminationPower>(), "DeterminationPower(1) applied");
+
+        var holeUp = combatState.CreateCard<HoleUp>(player);
+        await CardPileCmd.Add(holeUp, PileType.Hand);
+        int blockBefore = player.Creature.Block;
+        AutoTestAssert.True(holeUp.TryManualPlay(null), "Play HoleUp");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(blockBefore + 12, player.Creature.Block, "HoleUp gained 12 Block");
+        AutoTestAssert.Equal(2, player.Creature.GetPowerAmount<WeakPower>(), "HoleUp applied 2 Weak to player");
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<StrengthPower>(), "DeterminationPower granted +1 Strength on Weak debuff");
+
+        // Artifact-blocked debuff must NOT trigger DeterminationPower!
+        await PowerCmd.Apply<ArtifactPower>(new ThrowingPlayerChoiceContext(), player.Creature, 1m, player.Creature, null);
+        await PowerCmd.Apply<VulnerablePower>(new ThrowingPlayerChoiceContext(), player.Creature, 2m, enemy, null);
+        AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<VulnerablePower>(), "Artifact blocked Vulnerable");
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<StrengthPower>(), "Artifact-blocked debuff did NOT trigger DeterminationPower");
+
+        // Negative Dexterity debuff DOES trigger DeterminationPower (+1 Str -> 2) and Virtue reduces BOTH Weak & negative Dexterity without triggering Determination!
+        await PowerCmd.Apply<DexterityPower>(new ThrowingPlayerChoiceContext(), player.Creature, -2m, enemy, null);
+        AutoTestAssert.Equal(2, player.Creature.GetPowerAmount<StrengthPower>(), "Negative Dexterity triggered DeterminationPower (+1 -> 2 Str)");
+        AutoTestAssert.Equal(-2, player.Creature.GetPowerAmount<DexterityPower>(), "Player has -2 Dexterity");
+
+        var virtue = combatState.CreateCard<Virtue>(player);
+        await CardPileCmd.Add(virtue, PileType.Hand);
+        AutoTestAssert.True(virtue.TryManualPlay(null), "Play Virtue #1 (reduce each debuff by 1)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<WeakPower>(), "Virtue reduced Weak 2 -> 1");
+        AutoTestAssert.Equal(-1, player.Creature.GetPowerAmount<DexterityPower>(), "Virtue reduced negative Dexterity -2 -> -1");
+        AutoTestAssert.Equal(2, player.Creature.GetPowerAmount<StrengthPower>(), "Virtue debuff reduction did NOT trigger DeterminationPower");
+
+        // Also test Virtue's PowerCmd.Remove branch (Single debuff NoDrawPower + reducing 1 -> 0 / -1 -> 0) without triggering Determination!
+        await PowerCmd.Apply<NoDrawPower>(new ThrowingPlayerChoiceContext(), player.Creature, 1m, enemy, null);
+        AutoTestAssert.Equal(3, player.Creature.GetPowerAmount<StrengthPower>(), "NoDrawPower Single debuff triggered DeterminationPower (+1 -> 3 Str)");
+        var virtue2 = combatState.CreateCard<Virtue>(player);
+        await CardPileCmd.Add(virtue2, PileType.Hand);
+        AutoTestAssert.True(virtue2.TryManualPlay(null), "Play Virtue #2 (removes Weak, negative Dexterity, and Single NoDrawPower)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<WeakPower>(), "Virtue #2 removed Weak");
+        AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<DexterityPower>(), "Virtue #2 removed negative Dexterity");
+        AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<NoDrawPower>(), "Virtue #2 removed Single debuff NoDrawPower");
+        AutoTestAssert.Equal(3, player.Creature.GetPowerAmount<StrengthPower>(), "Virtue #2 debuff removals did NOT trigger DeterminationPower");
+        // Re-apply 1 Weak so Turn-1 -> Turn-2 decay test still exercises Weak decay without Determination!
+        await PowerCmd.Apply<WeakPower>(new ThrowingPlayerChoiceContext(), player.Creature, 1m, enemy, null);
+        AutoTestAssert.Equal(4, player.Creature.GetPowerAmount<StrengthPower>(), "Re-applied Weak triggered DeterminationPower (+1 -> 4 Str)");
+
+        // 3. Glare+ (Retain + 1 Weak & 1 Vulnerable) + FlashPowder (5 Block + ALL enemies -1 Str + Exhaust) + Purgatory (24 AoE, Ethereal).
+        var glare = combatState.CreateCard<Glare>(player);
+        CardCmd.Upgrade(glare);
+        AutoTestAssert.True(glare.Keywords.Contains(CardKeyword.Retain), "Glare+ has Retain");
+        await CardPileCmd.Add(glare, PileType.Hand);
+        AutoTestAssert.True(glare.TryManualPlay(enemy), "Play Glare+");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(1, enemy.GetPowerAmount<WeakPower>(), "Glare applied 1 Weak");
+        AutoTestAssert.Equal(1, enemy.GetPowerAmount<VulnerablePower>(), "Glare applied 1 Vulnerable");
+
+        var flashPowder = combatState.CreateCard<FlashPowder>(player);
+        await CardPileCmd.Add(flashPowder, PileType.Hand);
+        int blockBeforeFlash = player.Creature.Block;
+        AutoTestAssert.True(flashPowder.TryManualPlay(null), "Play FlashPowder");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(blockBeforeFlash + 5, player.Creature.Block, "FlashPowder gained 5 Block");
+        AutoTestAssert.True(pcs.ExhaustPile.Cards.Contains(flashPowder), "FlashPowder exhausted");
+        AutoTestAssert.Equal(-1, enemy.GetPowerAmount<StrengthPower>(), "FlashPowder permanently reduced enemy 1 Strength by 1");
+        AutoTestAssert.Equal(-1, enemy2.GetPowerAmount<StrengthPower>(), "FlashPowder permanently reduced enemy 2 Strength by 1");
+
+        var purgatory = combatState.CreateCard<Purgatory>(player);
+        AutoTestAssert.True(purgatory.Keywords.Contains(CardKeyword.Ethereal), "Purgatory is Ethereal");
+        await CardPileCmd.Add(purgatory, PileType.Hand);
+        e1Hp = enemy.CurrentHp;
+        int e2Hp = enemy2.CurrentHp;
+        AutoTestAssert.True(purgatory.TryManualPlay(null), "Play Purgatory");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.True(enemy.CurrentHp < e1Hp && enemy2.CurrentHp < e2Hp, "Purgatory damaged ALL enemies");
+
+        // 4. Quickdraw (9 dmg + draw 2 + DrawLessNextTurnPower(1) -> triggers Determination +1 -> 5 Str!).
+        var quickdraw = combatState.CreateCard<Quickdraw>(player);
+        await CardPileCmd.Add(quickdraw, PileType.Hand);
+        AutoTestAssert.True(quickdraw.TryManualPlay(enemy), "Play Quickdraw");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<DrawLessNextTurnPower>(), "Quickdraw applied DrawLessNextTurnPower(1)");
+        AutoTestAssert.Equal(5, player.Creature.GetPowerAmount<StrengthPower>(), "DrawLessNextTurnPower debuff triggered DeterminationPower (+1 -> 5 Str)");
+
+        // 5. OverwhelmingPower+ (3 Energy, draw 3, OverwhelmingPowerPower(2) -> triggers Determination +1 -> 6 Str!).
+        var overwhelming = combatState.CreateCard<OverwhelmingPower>(player);
+        CardCmd.Upgrade(overwhelming);
+        await CardPileCmd.Add(overwhelming, PileType.Hand);
+        int energyBeforeOp = pcs.Energy;
+        AutoTestAssert.True(overwhelming.TryManualPlay(null), "Play OverwhelmingPower+");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(2, player.Creature.GetPowerAmount<OverwhelmingPowerPower>(), "OverwhelmingPower+ applied OverwhelmingPowerPower(2)");
+        AutoTestAssert.Equal(energyBeforeOp - 1 + 3, pcs.Energy, "OverwhelmingPower+ granted +3 Energy");
+        AutoTestAssert.Equal(6, player.Creature.GetPowerAmount<StrengthPower>(), "OverwhelmingPowerPower debuff triggered DeterminationPower (+1 -> 6 Str)");
+
+        // End Turn 1 WITH >0 Energy -> OverwhelmingPowerPower must NOT deal HP loss! Weak decays 1 -> 0 without triggering Determination!
+        // Turn 2 hand size = 5 base - 1 DrawLessNextTurnPower = 4 cards!
+        await CreatureCmd.GainBlock(player.Creature, 50m, ValueProp.Unpowered, null);
+        int hpBeforeTurn2 = player.Creature.CurrentHp;
+        await EndTurnAndWaitForRoundAsync(player, 2);
+        AutoTestAssert.Equal(hpBeforeTurn2, player.Creature.CurrentHp, "OverwhelmingPowerPower did NOT deal HP loss when ending turn with >0 Energy");
+        AutoTestAssert.Equal(4, pcs.Hand.Cards.Count, "DrawLessNextTurnPower reduced Turn-2 hand draw 5 -> 4");
+        AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<DrawLessNextTurnPower>(), "DrawLessNextTurnPower removed after modifying draw");
+        AutoTestAssert.Equal(6, player.Creature.GetPowerAmount<StrengthPower>(), "Weak turn-end decay did NOT trigger DeterminationPower");
+
+        // End Turn 2 WITH 0 Energy -> OverwhelmingPowerPower deals 2 unblockable HP loss through Block!
+        if (pcs.Energy > 0)
+            await PlayerCmd.LoseEnergy(pcs.Energy, player);
+        // Also test DeadOrAlive at X = 0 (no crash, 0 damage, Exhausts)!
+        var deadZero = combatState.CreateCard<DeadOrAlive>(player);
+        await CardPileCmd.Add(deadZero, PileType.Hand);
+        e1Hp = enemy.CurrentHp;
+        AutoTestAssert.True(deadZero.TryManualPlay(enemy), "Play DeadOrAlive at X=0");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(e1Hp, enemy.CurrentHp, "DeadOrAlive X=0 dealt 0 damage");
+        AutoTestAssert.True(pcs.ExhaustPile.Cards.Contains(deadZero), "DeadOrAlive X=0 exhausted");
+        await CreatureCmd.GainBlock(player.Creature, 50m, ValueProp.Unpowered, null);
+        int hpBeforeTurn3 = player.Creature.CurrentHp;
+        await EndTurnAndWaitForRoundAsync(player, 3);
+        AutoTestAssert.Equal(hpBeforeTurn3 - 2, player.Creature.CurrentHp, "OverwhelmingPowerPower dealt 2 unblockable HP loss when ending turn with 0 Energy");
+
+        // 6. DeadOrAlive (X cost, Exhaust, Fatal -> 15 Gold Bounty on Normal enemy!).
+        int dropHp = enemy.CurrentHp - 15;
+        if (dropHp > 0)
+            await CreatureCmd.Damage(new ThrowingPlayerChoiceContext(), enemy, dropHp, ValueProp.Unblockable | ValueProp.Unpowered, null, null);
+        var deadOrAlive = combatState.CreateCard<DeadOrAlive>(player);
+        await CardPileCmd.Add(deadOrAlive, PileType.Hand);
+        int goldBefore = player.Gold;
+        AutoTestAssert.True(deadOrAlive.TryManualPlay(enemy), "Play DeadOrAlive for Fatal kill (X=3)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.True(enemy.IsDead, "DeadOrAlive killed enemy");
+        AutoTestAssert.True(pcs.ExhaustPile.Cards.Contains(deadOrAlive), "DeadOrAlive exhausted");
+        AutoTestAssert.Equal(goldBefore + 15, player.Gold, "DeadOrAlive Fatal granted +15 Gold Bounty for Normal enemy");
     }
 
     private static async Task WaitUntilAsync(Func<bool> predicate, int timeoutMs = 15000)

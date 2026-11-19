@@ -85,5 +85,14 @@
   "PACKMASTER-OUT_TO_MARKET_POWER.smartDescription": "Whenever you play a card with a different type than the last, deal [blue]{Amount}[/blue] damage to ALL enemies.",
   "PACKMASTER-SUPPLY_CHAIN_POWER.title": "Supply Chain",
   "PACKMASTER-SUPPLY_CHAIN_POWER.description": "At the start of your turn, add Fertilizers to your Hand.",
-  "PACKMASTER-SUPPLY_CHAIN_POWER.smartDescription": "At the start of your turn, add [blue]{Amount}[/blue] [gold]{Amount:plural:Fertilizer|Fertilizers}[/gold] to your [gold]Hand[/gold]."
+  "PACKMASTER-SUPPLY_CHAIN_POWER.smartDescription": "At the start of your turn, add [blue]{Amount}[/blue] [gold]{Amount:plural:Fertilizer|Fertilizers}[/gold] to your [gold]Hand[/gold].",
+  "PACKMASTER-DETERMINATION_POWER.title": "Determination",
+  "PACKMASTER-DETERMINATION_POWER.description": "Whenever a debuff is applied to you, gain Strength.",
+  "PACKMASTER-DETERMINATION_POWER.smartDescription": "Whenever a debuff is applied to you, gain [blue]{Amount}[/blue] [gold]Strength[/gold].",
+  "PACKMASTER-OVERWHELMING_POWER_POWER.title": "Overwhelming Power",
+  "PACKMASTER-OVERWHELMING_POWER_POWER.description": "Lose HP if you end your turn with 0 Energy.",
+  "PACKMASTER-OVERWHELMING_POWER_POWER.smartDescription": "Lose [blue]{Amount}[/blue] HP if you end your turn with [blue]0[/blue] Energy.",
+  "PACKMASTER-DRAW_LESS_NEXT_TURN_POWER.title": "Draw Reduction",
+  "PACKMASTER-DRAW_LESS_NEXT_TURN_POWER.description": "Draw fewer cards at the start of your next turn.",
+  "PACKMASTER-DRAW_LESS_NEXT_TURN_POWER.smartDescription": "Draw [blue]{Amount}[/blue] fewer {Amount:plural:card|cards} at the start of your next turn."
 }
