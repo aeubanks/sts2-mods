@@ -4,5 +4,20 @@
   "PACKMASTER-MAYHEM_FORM_POWER.smartDescription": "Once per turn, when you reach 2 or fewer cards in [gold]Hand[/gold], draw 2 cards and gain [blue]{Amount}[/blue] Energy.",
   "PACKMASTER-HAMMER_THROW_POWER.title": "Hammer Throw",
   "PACKMASTER-HAMMER_THROW_POWER.description": "Whenever a card is Retained, deal damage to ALL enemies.",
-  "PACKMASTER-HAMMER_THROW_POWER.smartDescription": "Whenever a card is [gold]Retained[/gold], deal [blue]{Amount}[/blue] damage to ALL enemies."
+  "PACKMASTER-HAMMER_THROW_POWER.smartDescription": "Whenever a card is [gold]Retained[/gold], deal [blue]{Amount}[/blue] damage to ALL enemies.",
+  "PACKMASTER-FROSTBITE_POWER.title": "Frostbite",
+  "PACKMASTER-FROSTBITE_POWER.description": "At the start of its turn, loses HP equal to Frostbite and halves it. Whenever it receives attack damage, apply 1 Frostbite.",
+  "PACKMASTER-FROSTBITE_POWER.smartDescription": "At the start of its turn, loses [blue]{Amount}[/blue] HP and this is halved. Whenever this creature receives attack damage, apply [blue]1[/blue] [gold]Frostbite[/gold].",
+  "PACKMASTER-FRIGID_BODY_POWER.title": "Frigid Body",
+  "PACKMASTER-FRIGID_BODY_POWER.description": "Whenever you are attacked, apply Frostbite equal to blocked damage.",
+  "PACKMASTER-FRIGID_BODY_POWER.smartDescription": "For [blue]{Amount}[/blue] {Amount:plural:turn|turns}, whenever you are attacked, apply [gold]Frostbite[/gold] equal to blocked damage received.",
+  "PACKMASTER-FROSTED_EDGE_POWER.title": "Frosted Edge",
+  "PACKMASTER-FROSTED_EDGE_POWER.description": "Whenever you apply Frostbite, gain temporary Strength.",
+  "PACKMASTER-FROSTED_EDGE_POWER.smartDescription": "Whenever you apply [gold]Frostbite[/gold], gain [blue]{Amount}[/blue] temporary [gold]Strength[/gold].",
+  "PACKMASTER-ICE_SHATTER_POWER.title": "Ice Shatter",
+  "PACKMASTER-ICE_SHATTER_POWER.description": "Whenever this enemy loses HP during their next turn, deal damage.",
+  "PACKMASTER-ICE_SHATTER_POWER.smartDescription": "Whenever this enemy loses HP during their next turn, deal [blue]{Amount}[/blue] damage.",
+  "PACKMASTER-SNOWED_IN_POWER.title": "Snowed In",
+  "PACKMASTER-SNOWED_IN_POWER.description": "This enemy's Frostbite is not halved.",
+  "PACKMASTER-SNOWED_IN_POWER.smartDescription": "This enemy's [gold]Frostbite[/gold] is not halved for [blue]{Amount}[/blue] {Amount:plural:turn|turns}."
 }

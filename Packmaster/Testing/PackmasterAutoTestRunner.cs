@@ -20,7 +20,9 @@ using MegaCrit.Sts2.Core.Runs;
 using MegaCrit.Sts2.Core.Saves;
 using MegaCrit.Sts2.Core.Settings;
 using MegaCrit.Sts2.Core.Unlocks;
+using MegaCrit.Sts2.Core.ValueProps;
 using Packmaster.Cards;
+using Packmaster.Cards.BitingCold;
 using Packmaster.Cards.CoreSet;
 using Packmaster.Cards.Quiet;
 using Packmaster.Character;
@@ -84,6 +86,7 @@ internal static class PackmasterAutoTestRunner
                 ("StartRunAndPlayStarterCombat", TestStartRunAndPlayStarterCombat),
                 ("CoreSetCardsInCombat", TestCoreSetCardsInCombat),
                 ("QuietPackInCombat", TestQuietPackInCombat),
+                ("BitingColdPackInCombat", TestBitingColdPackInCombat),
             ];
 
             foreach (var (name, run) in tests)
@@ -816,6 +819,174 @@ internal static class PackmasterAutoTestRunner
         AutoTestAssert.Equal(0, enemy.GetPowerAmount<StrengthPower>(), "Lie temporary Strength loss restored on Turn 2");
         AutoTestAssert.Equal(2, pcs.Hand.Cards.Count(c => c is Weight), "Retained Weights stayed in hand and did not exhaust");
         AutoTestAssert.True(turn2Strikes.All(s => s.IsUpgraded), "Shine+ drawn as card #1 on Turn 2 upgraded all other drawn cards");
+    }
+
+    private static async Task TestBitingColdPackInCombat()
+    {
+        var (player, _, combatState) = await StartCombatAsync("PMCOLD01");
+        var pcs = AutoTestAssert.NotNull(player.PlayerCombatState, "PlayerCombatState");
+        var enemy = AutoTestAssert.NotNull(combatState.HittableEnemies.FirstOrDefault(), "First hittable enemy");
+
+        await CreatureCmd.GainMaxHp(enemy, 800m);
+        await CreatureCmd.GainMaxHp(player.Creature, 200m);
+
+        foreach (var c in pcs.Hand.Cards.ToList())
+            await CardPileCmd.Add(c, PileType.Discard);
+
+        async Task RefillEnergy(int target = 6)
+        {
+            if (pcs.Energy < target)
+                await PlayerCmd.GainEnergy(target - pcs.Energy, player);
+        }
+
+        // 1. Subdue before any Attack -> 6 Block.
+        await RefillEnergy();
+        var subdue1 = combatState.CreateCard<Subdue>(player);
+        await CardPileCmd.Add(subdue1, PileType.Hand);
+        int blockBefore = player.Creature.Block;
+        AutoTestAssert.True(subdue1.TryManualPlay(null), "Play Subdue before Attack");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(blockBefore + 6, player.Creature.Block, "Subdue gives single 6 Block when last card was not Attack");
+
+        // 2. GrowingAffliction (11 dmg, goes to Discard) -> Subdue after Attack -> 12 Block!
+        var growing = combatState.CreateCard<GrowingAffliction>(player);
+        var subdue2 = combatState.CreateCard<Subdue>(player);
+        await CardPileCmd.Add(growing, PileType.Hand);
+        await CardPileCmd.Add(subdue2, PileType.Hand);
+        int hpBeforeGrowing = enemy.CurrentHp;
+        AutoTestAssert.True(growing.TryManualPlay(enemy), "Play GrowingAffliction");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(hpBeforeGrowing - 11, enemy.CurrentHp, "GrowingAffliction 11 damage");
+        AutoTestAssert.True(pcs.DiscardPile.Cards.Contains(growing), "GrowingAffliction in Discard Pile");
+        growing.EnergyCost.SetThisCombat(0);
+        growing.EnergyCost.SetThisTurn(0);
+
+        blockBefore = player.Creature.Block;
+        AutoTestAssert.True(subdue2.TryManualPlay(null), "Play Subdue after Attack");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(blockBefore + 12, player.Creature.Block, "Subdue gives 6+6=12 Block when last card was Attack");
+
+        // 3. FrostedEdge (+1 temp Strength per Frostbite) + Refrigerate (11 Frostbite, Exhaust, pulls GrowingAffliction back at cost 1!).
+        await RefillEnergy();
+        var frostedEdge = combatState.CreateCard<FrostedEdge>(player);
+        var refrigerate = combatState.CreateCard<Refrigerate>(player);
+        await CardPileCmd.Add(frostedEdge, PileType.Hand);
+        await CardPileCmd.Add(refrigerate, PileType.Hand);
+        AutoTestAssert.True(frostedEdge.TryManualPlay(null), "Play FrostedEdge");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<FrostedEdgePower>(), "FrostedEdgePower(1) applied");
+
+        AutoTestAssert.True(refrigerate.TryManualPlay(enemy), "Play Refrigerate");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(11, enemy.GetPowerAmount<FrostbitePower>(), "Refrigerate applied 11 Frostbite");
+        AutoTestAssert.True(pcs.ExhaustPile.Cards.Contains(refrigerate), "Refrigerate exhausted");
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<StrengthPower>(), "FrostedEdge granted +1 temp Strength on Frostbite");
+        AutoTestAssert.True(pcs.Hand.Cards.Contains(growing), "GrowingAffliction returned from Discard to Hand on debuff");
+        AutoTestAssert.Equal(1, growing.EnergyCost.GetWithModifiers(CostModifiers.All), "GrowingAffliction cost reset to 1");
+
+        // 4. Refrigerate+ when enemy already has 11 Frostbite -> applies 11 more (=22) and immediately loses 22 HP without halving!
+        await RefillEnergy();
+        var refrigeratePlus = combatState.CreateCard<Refrigerate>(player);
+        CardCmd.Upgrade(refrigeratePlus);
+        await CardPileCmd.Add(refrigeratePlus, PileType.Hand);
+        int hpBeforeRefPlus = enemy.CurrentHp;
+        AutoTestAssert.True(refrigeratePlus.TryManualPlay(enemy), "Play Refrigerate+");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(22, enemy.GetPowerAmount<FrostbitePower>(), "Refrigerate+ stacked Frostbite to 22 without halving");
+        AutoTestAssert.Equal(hpBeforeRefPlus - 22, enemy.CurrentHp, "Refrigerate+ triggered 22 HP loss");
+        AutoTestAssert.Equal(2, player.Creature.GetPowerAmount<StrengthPower>(), "FrostedEdge granted second +1 temp Strength");
+
+        // 5. InsultToInjury: enemy has Frostbite + Weak (2 unique debuffs) -> 3 hits of (5 + 2 Str = 7) = 21 dmg, plus +3 Frostbite (on attack)!
+        await RefillEnergy();
+        await PowerCmd.Apply<WeakPower>(new ThrowingPlayerChoiceContext(), enemy, 2m, player.Creature, null);
+        var insult = combatState.CreateCard<InsultToInjury>(player);
+        await CardPileCmd.Add(insult, PileType.Hand);
+        int hpBeforeInsult = enemy.CurrentHp;
+        int frostbiteBeforeInsult = enemy.GetPowerAmount<FrostbitePower>();
+        AutoTestAssert.True(insult.TryManualPlay(enemy), "Play InsultToInjury");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        // Hits: 1st hit dmg = 5+2=7 (+1 Frostbite -> +1 Str), 2nd hit dmg = 5+3=8 (+1 Frostbite -> +1 Str), 3rd hit dmg = 5+4=9 (+1 Frostbite -> +1 Str).
+        // Total = 7 + 8 + 9 = 24 dmg, Frostbite +3!
+        AutoTestAssert.Equal(frostbiteBeforeInsult + 3, enemy.GetPowerAmount<FrostbitePower>(), "Frostbite increased by +1 on each of 3 hits");
+        AutoTestAssert.Equal(hpBeforeInsult - 24, enemy.CurrentHp, "InsultToInjury hit 3 times with scaling FrostedEdge Strength");
+
+        // 6. Frostburn: applies 18 Frostbite to ALL enemies + adds Burn to Discard Pile.
+        await RefillEnergy();
+        int frostBeforeBurn = enemy.GetPowerAmount<FrostbitePower>();
+        var frostburn = combatState.CreateCard<Frostburn>(player);
+        await CardPileCmd.Add(frostburn, PileType.Hand);
+        AutoTestAssert.True(frostburn.TryManualPlay(null), "Play Frostburn");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(frostBeforeBurn + 18, enemy.GetPowerAmount<FrostbitePower>(), "Frostburn applied 18 Frostbite");
+        AutoTestAssert.True(pcs.DiscardPile.Cards.Any(c => c is MegaCrit.Sts2.Core.Models.Cards.Burn), "Frostburn added Burn to Discard Pile");
+
+        // 7. RelentlessHail: 2 hits first play (dealing damage + triggering Frostbite +1 per hit), increases hits to 3 for next play.
+        await RefillEnergy();
+        var hail = combatState.CreateCard<RelentlessHail>(player);
+        await CardPileCmd.Add(hail, PileType.Hand);
+        AutoTestAssert.Equal(2, hail.DynamicVars.Repeat.IntValue, "RelentlessHail starts at 2 hits");
+        int hpBeforeHail = enemy.CurrentHp;
+        int strBeforeHail = player.Creature.GetPowerAmount<StrengthPower>();
+        AutoTestAssert.True(hail.TryManualPlay(null), "Play RelentlessHail");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        // Hit 1: 6 + strBeforeHail, then Frostbite +1 -> FrostedEdge +1 Str; Hit 2: 6 + strBeforeHail + 1.
+        int expectedHailDmg = (6 + strBeforeHail) + (6 + strBeforeHail + 1);
+        AutoTestAssert.Equal(hpBeforeHail - expectedHailDmg, enemy.CurrentHp, "RelentlessHail dealt 2 hits of AoE damage");
+        AutoTestAssert.Equal(3, hail.DynamicVars.Repeat.IntValue, "RelentlessHail increased to 3 hits after play");
+
+        // 8. FrigidBody: +9 Block + applies Frostbite equal to blocked attack damage.
+        await RefillEnergy();
+        var frigid = combatState.CreateCard<FrigidBody>(player);
+        await CardPileCmd.Add(frigid, PileType.Hand);
+        int blockBeforeFrigid = player.Creature.Block;
+        AutoTestAssert.True(frigid.TryManualPlay(null), "Play FrigidBody");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(blockBeforeFrigid + 9, player.Creature.Block, "FrigidBody +9 Block");
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<FrigidBodyPower>(), "FrigidBodyPower(1) applied");
+
+        // Enemy currently has WeakPower, so an 8-damage powered attack deals floor(8 * 0.75) = 6 blocked damage.
+        int frostBeforeBlockedHit = enemy.GetPowerAmount<FrostbitePower>();
+        await CreatureCmd.Damage(new ThrowingPlayerChoiceContext(), player.Creature, 8m, ValueProp.Move, dealer: enemy, cardSource: null, cardPlay: null);
+        AutoTestAssert.Equal(frostBeforeBlockedHit + 6, enemy.GetPowerAmount<FrostbitePower>(), "FrigidBody applied Frostbite equal to 6 blocked damage");
+
+        // 9. SnowedIn (+11 Frostbite, Frostbite not halved this turn) + IceShatter (9 dmg on HP loss during enemy turn).
+        await RefillEnergy(10);
+        var snowedIn = combatState.CreateCard<SnowedIn>(player);
+        var iceShatter = combatState.CreateCard<IceShatter>(player);
+        await CardPileCmd.Add(snowedIn, PileType.Hand);
+        await CardPileCmd.Add(iceShatter, PileType.Hand);
+        AutoTestAssert.True(snowedIn.TryManualPlay(enemy), "Play SnowedIn");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(1, enemy.GetPowerAmount<SnowedInPower>(), "SnowedInPower(1) applied");
+
+        AutoTestAssert.True(iceShatter.TryManualPlay(enemy), "Play IceShatter");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(9, enemy.GetPowerAmount<IceShatterPower>(), "IceShatterPower(9) applied");
+
+        // Clear player block before ending Turn 1 so enemy's Turn-1 attack doesn't add extra FrigidBody Frostbite/FrostedEdge Strength,
+        // while keeping FrigidBodyPower on the player to verify it expires after the enemy turn.
+        if (player.Creature.Block > 0)
+            await CreatureCmd.LoseBlock(new ThrowingPlayerChoiceContext(), player.Creature, player.Creature.Block, null);
+
+        // End Turn 1 -> Enemy turn: Frostbite triggers HP loss (not halved due to SnowedIn!) AND IceShatter triggers once for 9 dmg!
+        int frostAtEndTurn1 = enemy.GetPowerAmount<FrostbitePower>();
+        int enemyHpAtEndTurn1 = enemy.CurrentHp;
+        await EndTurnAndWaitForRoundAsync(player, 2);
+
+        AutoTestAssert.Equal(frostAtEndTurn1, enemy.GetPowerAmount<FrostbitePower>(), "SnowedIn prevented Frostbite from halving");
+        AutoTestAssert.Equal(0, enemy.GetPowerAmount<SnowedInPower>(), "SnowedInPower expired after enemy turn");
+        AutoTestAssert.Equal(0, enemy.GetPowerAmount<IceShatterPower>(), "IceShatterPower expired after enemy turn");
+        AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<FrigidBodyPower>(), "FrigidBodyPower expired after enemy turn");
+        AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<StrengthPower>(), "FrostedEdge temporary Strength expired on Turn 2");
+        AutoTestAssert.Equal(
+            enemyHpAtEndTurn1 - frostAtEndTurn1 - 9,
+            enemy.CurrentHp,
+            "Enemy lost exact Frostbite + single IceShatter (9) HP during enemy turn without re-entrancy");
+
+        // End Turn 2 -> Enemy turn without SnowedIn: Frostbite triggers AND halves (ceil halved -> floor remaining: amount - (amount+1)/2)!
+        int expectedAfterHalve = frostAtEndTurn1 - (frostAtEndTurn1 + 1) / 2;
+        await EndTurnAndWaitForRoundAsync(player, 3);
+        AutoTestAssert.Equal(expectedAfterHalve, enemy.GetPowerAmount<FrostbitePower>(), "Frostbite halved on Turn 2 enemy turn without SnowedIn");
     }
 
     private static async Task WaitUntilAsync(Func<bool> predicate, int timeoutMs = 15000)

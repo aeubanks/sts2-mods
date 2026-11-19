@@ -1,3 +1,4 @@
+using Packmaster.Cards.BitingCold;
 using Packmaster.Cards.CoreSet;
 using Packmaster.Cards.Quiet;
 
@@ -7,6 +8,7 @@ public static class PackDefinitions
 {
     public const string CoreSetId = "CoreSet";
     public const string QuietId = "Quiet";
+    public const string BitingColdId = "BitingCold";
 
     public static void RegisterAll()
     {
@@ -42,6 +44,23 @@ public static class PackDefinitions
                 typeof(HammerThrow),
                 typeof(Flail),
                 typeof(Wisdom),
+            ]));
+
+        PackRegistry.Register(new PackDefinition(
+            Id: BitingColdId,
+            AlwaysInclude: false,
+            CardTypes:
+            [
+                typeof(FrigidBody),
+                typeof(Frostburn),
+                typeof(FrostedEdge),
+                typeof(GrowingAffliction),
+                typeof(IceShatter),
+                typeof(InsultToInjury),
+                typeof(Refrigerate),
+                typeof(RelentlessHail),
+                typeof(SnowedIn),
+                typeof(Subdue),
             ]));
     }
 }
