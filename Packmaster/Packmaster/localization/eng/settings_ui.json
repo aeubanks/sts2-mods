@@ -1,5 +1,8 @@
 {
-  "PACKMASTER-PLACEHOLDER_OPTION.title": "Placeholder Option",
-  "PACKMASTER-PLACEHOLDER_OPTION.hover.title": "Placeholder Option",
-  "PACKMASTER-PLACEHOLDER_OPTION.hover.desc": "Does nothing yet. Verifies that the Packmaster mod and BaseLib Mod Config are working."
+  "PACKMASTER-ALL_PACKS_MODE.title": "All Packs Mode",
+  "PACKMASTER-ALL_PACKS_MODE.hover.title": "All Packs Mode",
+  "PACKMASTER-ALL_PACKS_MODE.hover.desc": "Include cards from every registered Pack in your card pool instead of limiting each run to a subset of Packs.",
+  "PACKMASTER-PACKS_PER_RUN.title": "Packs Per Run",
+  "PACKMASTER-PACKS_PER_RUN.hover.title": "Packs Per Run",
+  "PACKMASTER-PACKS_PER_RUN.hover.desc": "Total number of Packs (including Core Set) active in each Packmaster run."
 }
