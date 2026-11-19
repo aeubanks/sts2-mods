@@ -19,5 +19,11 @@
   "PACKMASTER-ICE_SHATTER_POWER.smartDescription": "Whenever this enemy loses HP during their next turn, deal [blue]{Amount}[/blue] damage.",
   "PACKMASTER-SNOWED_IN_POWER.title": "Snowed In",
   "PACKMASTER-SNOWED_IN_POWER.description": "This enemy's Frostbite is not halved.",
-  "PACKMASTER-SNOWED_IN_POWER.smartDescription": "This enemy's [gold]Frostbite[/gold] is not halved for [blue]{Amount}[/blue] {Amount:plural:turn|turns}."
+  "PACKMASTER-SNOWED_IN_POWER.smartDescription": "This enemy's [gold]Frostbite[/gold] is not halved for [blue]{Amount}[/blue] {Amount:plural:turn|turns}.",
+  "PACKMASTER-MALCHEZAARS_IMP_POWER.title": "Malchezaar's Imp",
+  "PACKMASTER-MALCHEZAARS_IMP_POWER.description": "Whenever a non-Imp card is Exhausted, add Imps to your Discard Pile.",
+  "PACKMASTER-MALCHEZAARS_IMP_POWER.smartDescription": "Whenever a non-Imp card is [gold]Exhausted[/gold], add [blue]{Amount}[/blue] [gold]{Amount:plural:Imp|Imps}[/gold] to your [gold]Discard Pile[/gold].",
+  "PACKMASTER-MALCHEZAARS_IMP_UPGRADED_POWER.title": "Malchezaar's Imp+",
+  "PACKMASTER-MALCHEZAARS_IMP_UPGRADED_POWER.description": "Whenever a non-Imp card is Exhausted, shuffle Imps into your Draw Pile.",
+  "PACKMASTER-MALCHEZAARS_IMP_UPGRADED_POWER.smartDescription": "Whenever a non-Imp card is [gold]Exhausted[/gold], shuffle [blue]{Amount}[/blue] [gold]{Amount:plural:Imp|Imps}[/gold] into your [gold]Draw Pile[/gold]."
 }

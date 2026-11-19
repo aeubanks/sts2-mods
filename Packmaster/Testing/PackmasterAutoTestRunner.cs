@@ -25,6 +25,7 @@ using Packmaster.Cards;
 using Packmaster.Cards.BitingCold;
 using Packmaster.Cards.CoreSet;
 using Packmaster.Cards.Quiet;
+using Packmaster.Cards.Warlock;
 using Packmaster.Character;
 using Packmaster.Config;
 using Packmaster.Packs;
@@ -87,6 +88,7 @@ internal static class PackmasterAutoTestRunner
                 ("CoreSetCardsInCombat", TestCoreSetCardsInCombat),
                 ("QuietPackInCombat", TestQuietPackInCombat),
                 ("BitingColdPackInCombat", TestBitingColdPackInCombat),
+                ("WarlockPackInCombat", TestWarlockPackInCombat),
             ];
 
             foreach (var (name, run) in tests)
@@ -987,6 +989,250 @@ internal static class PackmasterAutoTestRunner
         int expectedAfterHalve = frostAtEndTurn1 - (frostAtEndTurn1 + 1) / 2;
         await EndTurnAndWaitForRoundAsync(player, 3);
         AutoTestAssert.Equal(expectedAfterHalve, enemy.GetPowerAmount<FrostbitePower>(), "Frostbite halved on Turn 2 enemy turn without SnowedIn");
+    }
+
+    private static async Task TestWarlockPackInCombat()
+    {
+        var (player, _, combatState) = await StartCombatAsync("PMWARL01");
+        var pcs = AutoTestAssert.NotNull(player.PlayerCombatState, "PlayerCombatState");
+        var enemy = AutoTestAssert.NotNull(combatState.HittableEnemies.FirstOrDefault(), "First hittable enemy");
+
+        await CreatureCmd.GainMaxHp(enemy, 800m);
+
+        foreach (var c in pcs.Hand.Cards.ToList())
+            await CardPileCmd.Add(c, PileType.Discard);
+        foreach (var c in pcs.DrawPile.Cards.ToList())
+            await CardPileCmd.Add(c, PileType.Discard);
+
+        async Task RefillEnergy(int target = 8)
+        {
+            if (pcs.Energy < target)
+                await PlayerCmd.GainEnergy(target - pcs.Energy, player);
+        }
+
+        // 1. SoulShear (8 dmg + shuffles 1 Imp into draw pile) + Imp cast-on-draw + scaling across Imps!
+        await RefillEnergy();
+        var drawAfterImp = combatState.CreateCard<PackmasterStrike>(player);
+        await CardPileCmd.Add(drawAfterImp, PileType.Draw, CardPilePosition.Top);
+        var soulShear = combatState.CreateCard<SoulShear>(player);
+        await CardPileCmd.Add(soulShear, PileType.Hand);
+        int hpBeforeShear = enemy.CurrentHp;
+        AutoTestAssert.True(soulShear.TryManualPlay(enemy), "Play SoulShear");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(hpBeforeShear - 8, enemy.CurrentHp, "SoulShear dealt 8 damage");
+        var imp1 = AutoTestAssert.NotNull(pcs.DrawPile.Cards.OfType<Imp>().FirstOrDefault(), "SoulShear shuffled Imp into Draw Pile");
+
+        // Move Imp to top of draw pile above drawAfterImp and draw it.
+        await CardPileCmd.Add(imp1, PileType.Draw, CardPilePosition.Top);
+        int hpBeforeImp1 = enemy.CurrentHp;
+        await CardPileCmd.Draw(new ThrowingPlayerChoiceContext(), 1m, player);
+        AutoTestAssert.Equal(hpBeforeImp1 - 3, enemy.CurrentHp, "First Imp dealt 3 damage on draw");
+        AutoTestAssert.True(pcs.ExhaustPile.Cards.Contains(imp1), "Imp exhausted itself on draw");
+        AutoTestAssert.True(pcs.Hand.Cards.Contains(drawAfterImp), "Imp drew 1 replacement card");
+
+        // Second Imp (newly created!) should start scaled to 4 damage via AfterCardEnteredCombat!
+        var imp2 = combatState.CreateCard<Imp>(player);
+        await CardPileCmd.AddGeneratedCardToCombat(imp2, PileType.Draw, player, CardPilePosition.Top);
+        AutoTestAssert.Equal(4, imp2.DynamicVars["ImpDamage"].IntValue, "Newly created Imp synced to 4 damage on entering combat");
+        int hpBeforeImp2 = enemy.CurrentHp;
+        await CardPileCmd.Draw(new ThrowingPlayerChoiceContext(), 1m, player);
+        AutoTestAssert.Equal(hpBeforeImp2 - 4, enemy.CurrentHp, "Second Imp dealt scaled 4 damage");
+
+        // 2. MalchezaarsImp + MalchezaarsImp+ + Soulfire exhausting HighPriestessJeklik!
+        foreach (var c in pcs.Hand.Cards.ToList())
+            await CardPileCmd.Add(c, PileType.Discard);
+        await RefillEnergy(10);
+
+        var malImp = combatState.CreateCard<MalchezaarsImp>(player);
+        var malImpPlus = combatState.CreateCard<MalchezaarsImp>(player);
+        CardCmd.Upgrade(malImpPlus);
+        await CardPileCmd.Add(malImp, PileType.Hand);
+        await CardPileCmd.Add(malImpPlus, PileType.Hand);
+        AutoTestAssert.True(malImp.TryManualPlay(null), "Play MalchezaarsImp");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.True(malImpPlus.TryManualPlay(null), "Play MalchezaarsImp+");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<MalchezaarsImpPower>(), "MalchezaarsImpPower(1)");
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<MalchezaarsImpUpgradedPower>(), "MalchezaarsImpUpgradedPower(1)");
+
+        var jeklik = combatState.CreateCard<HighPriestessJeklik>(player);
+        var soulfire = combatState.CreateCard<Soulfire>(player);
+        await CardPileCmd.Add(jeklik, PileType.Hand);
+        await CardPileCmd.Add(soulfire, PileType.Hand);
+        int impsInDiscardBefore = pcs.DiscardPile.Cards.Count(c => c is Imp);
+        int impsInDrawBefore = pcs.DrawPile.Cards.Count(c => c is Imp);
+        int hpBeforeSoulfire = enemy.CurrentHp;
+        AutoTestAssert.True(soulfire.TryManualPlay(enemy), "Play Soulfire");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(hpBeforeSoulfire - 9, enemy.CurrentHp, "Soulfire dealt 9 damage");
+        AutoTestAssert.True(pcs.ExhaustPile.Cards.Contains(jeklik), "Soulfire exhausted Jeklik");
+        AutoTestAssert.Equal(2, pcs.Hand.Cards.Count(c => c is HighPriestessJeklik), "Exhausting Jeklik added 2 copies to hand");
+        AutoTestAssert.Equal(impsInDiscardBefore + 1, pcs.DiscardPile.Cards.Count(c => c is Imp), "MalchezaarsImpPower added 1 Imp to Discard");
+        AutoTestAssert.Equal(impsInDrawBefore + 1, pcs.DrawPile.Cards.Count(c => c is Imp), "MalchezaarsImpUpgradedPower shuffled 1 Imp into Draw");
+
+        // Verify exhausting an Imp does NOT trigger MalchezaarsImp powers (no infinite loop!).
+        var dummyImp = combatState.CreateCard<Imp>(player);
+        await CardPileCmd.AddGeneratedCardToCombat(dummyImp, PileType.Discard, player);
+        int impsInDiscardBeforeDummy = pcs.DiscardPile.Cards.Count(c => c is Imp) - 1;
+        int impsInDrawBeforeDummy = pcs.DrawPile.Cards.Count(c => c is Imp);
+        await CardCmd.Exhaust(new ThrowingPlayerChoiceContext(), dummyImp);
+        AutoTestAssert.Equal(impsInDiscardBeforeDummy, pcs.DiscardPile.Cards.Count(c => c is Imp), "Exhausting Imp did not trigger MalchezaarsImpPower");
+        AutoTestAssert.Equal(impsInDrawBeforeDummy, pcs.DrawPile.Cards.Count(c => c is Imp), "Exhausting Imp did not trigger MalchezaarsImpUpgradedPower");
+
+        // Remove MalchezaarsImp powers so remaining tests don't spawn extra Imps in draw/discard.
+        await PowerCmd.Remove<MalchezaarsImpPower>(player.Creature);
+        await PowerCmd.Remove<MalchezaarsImpUpgradedPower>(player.Creature);
+
+        // 2b. Soulfire+ (upgraded CardSelectCmd.FromHand branch): deals 11 damage and exhausts 1 chosen card.
+        foreach (var c in pcs.Hand.Cards.ToList())
+            await CardPileCmd.Add(c, PileType.Discard);
+        await RefillEnergy();
+        var soulfirePlus = combatState.CreateCard<Soulfire>(player);
+        CardCmd.Upgrade(soulfirePlus);
+        var exhaustTarget = combatState.CreateCard<PackmasterStrike>(player);
+        await CardPileCmd.Add(soulfirePlus, PileType.Hand);
+        await CardPileCmd.Add(exhaustTarget, PileType.Hand);
+        int hpBeforeSoulfirePlus = enemy.CurrentHp;
+        AutoTestAssert.True(soulfirePlus.TryManualPlay(enemy), "Play Soulfire+");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(hpBeforeSoulfirePlus - 11, enemy.CurrentHp, "Soulfire+ dealt 11 damage");
+        AutoTestAssert.True(pcs.ExhaustPile.Cards.Contains(exhaustTarget), "Soulfire+ exhausted chosen card");
+
+        // 3. Doomguard (21 dmg + snapshot-picks up to 2 cards): with ONLY 1 Jeklik in hand, leaves exact 2 Jekliks (never re-exhausts new copy!).
+        foreach (var c in pcs.Hand.Cards.ToList())
+            await CardPileCmd.Add(c, PileType.Discard);
+        await RefillEnergy();
+        var soloJeklik = combatState.CreateCard<HighPriestessJeklik>(player);
+        var doomguardSolo = combatState.CreateCard<Doomguard>(player);
+        await CardPileCmd.Add(soloJeklik, PileType.Hand);
+        await CardPileCmd.Add(doomguardSolo, PileType.Hand);
+        int hpBeforeDoomSolo = enemy.CurrentHp;
+        AutoTestAssert.True(doomguardSolo.TryManualPlay(enemy), "Play Doomguard with solo Jeklik");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(hpBeforeDoomSolo - 21, enemy.CurrentHp, "Doomguard dealt 21 damage");
+        AutoTestAssert.Equal(2, pcs.Hand.Cards.Count(c => c is HighPriestessJeklik), "Doomguard snapshot-pick did not re-exhaust Jeklik copies");
+
+        // 3b. Doomguard exhausting HandOfGulDan + fodder -> draws exact 3 cards into hand.
+        foreach (var c in pcs.Hand.Cards.ToList())
+            await CardPileCmd.Add(c, PileType.Discard);
+        foreach (var c in pcs.DrawPile.Cards.ToList())
+            await CardPileCmd.Add(c, PileType.Discard);
+        for (int i = 0; i < 4; i++)
+            await CardPileCmd.Add(combatState.CreateCard<PackmasterStrike>(player), PileType.Draw, CardPilePosition.Top);
+
+        await RefillEnergy();
+        var handOfGulDan = combatState.CreateCard<HandOfGulDan>(player);
+        var fodder = combatState.CreateCard<PackmasterDefend>(player);
+        var doomguard = combatState.CreateCard<Doomguard>(player);
+        await CardPileCmd.Add(handOfGulDan, PileType.Hand);
+        await CardPileCmd.Add(fodder, PileType.Hand);
+        await CardPileCmd.Add(doomguard, PileType.Hand);
+        AutoTestAssert.True(doomguard.TryManualPlay(enemy), "Play Doomguard with HandOfGulDan");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.True(pcs.ExhaustPile.Cards.Contains(handOfGulDan), "Doomguard exhausted HandOfGulDan");
+        AutoTestAssert.True(pcs.ExhaustPile.Cards.Contains(fodder), "Doomguard exhausted fodder");
+        AutoTestAssert.Equal(3, pcs.Hand.Cards.Count, "Exhausting HandOfGulDan drew exact 3 cards without Doomguard exhausting them");
+
+        // 4. SeedsOfDestruction (Choose Draw 3 Imps or Discard 4 Imps).
+        foreach (var c in pcs.Hand.Cards.ToList())
+            await CardPileCmd.Add(c, PileType.Discard);
+        await RefillEnergy();
+        int drawImpsBefore = pcs.DrawPile.Cards.Count(c => c is Imp);
+        int discardImpsBefore = pcs.DiscardPile.Cards.Count(c => c is Imp);
+        var seeds = combatState.CreateCard<SeedsOfDestruction>(player);
+        await CardPileCmd.Add(seeds, PileType.Hand);
+        AutoTestAssert.True(seeds.TryManualPlay(null), "Play SeedsOfDestruction");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        bool addedDraw = pcs.DrawPile.Cards.Count(c => c is Imp) == drawImpsBefore + 3;
+        bool addedDiscard = pcs.DiscardPile.Cards.Count(c => c is Imp) == discardImpsBefore + 4;
+        AutoTestAssert.True(addedDraw || addedDiscard, "SeedsOfDestruction added either 3 Imps to Draw or 4 Imps to Discard");
+
+        // 5. AranasiBroodmother: +5 Block, shuffles itself into Draw Pile; drawing it grants +4 Block.
+        foreach (var c in pcs.DrawPile.Cards.ToList())
+            await CardPileCmd.Add(c, PileType.Discard);
+        await RefillEnergy();
+        var aranasi = combatState.CreateCard<AranasiBroodmother>(player);
+        await CardPileCmd.Add(aranasi, PileType.Hand);
+        int blockBeforeAranasi = player.Creature.Block;
+        AutoTestAssert.True(aranasi.TryManualPlay(null), "Play AranasiBroodmother");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(blockBeforeAranasi + 5, player.Creature.Block, "AranasiBroodmother +5 Block on play");
+        AutoTestAssert.True(pcs.DrawPile.Cards.Contains(aranasi), "AranasiBroodmother shuffled itself into Draw Pile");
+
+        int blockBeforeDrawAranasi = player.Creature.Block;
+        await CardPileCmd.Draw(new ThrowingPlayerChoiceContext(), 1m, player);
+        AutoTestAssert.Equal(blockBeforeDrawAranasi + 4, player.Creature.Block, "Drawing AranasiBroodmother granted +4 Block");
+
+        // 6. TheSoularium: draws 3 cards (including HandOfGulDan + HighPriestessJeklik), gives them Ethereal, exhausts itself.
+        foreach (var c in pcs.Hand.Cards.ToList())
+            await CardPileCmd.Add(c, PileType.Discard);
+        foreach (var c in pcs.DrawPile.Cards.ToList())
+            await CardPileCmd.Add(c, PileType.Discard);
+        // Put 8 Strikes under the 3 Soularium targets so Turn 2 draws cleanly without hitting Imps.
+        for (int i = 0; i < 8; i++)
+            await CardPileCmd.Add(combatState.CreateCard<PackmasterStrike>(player), PileType.Draw, CardPilePosition.Top);
+
+        var ethStrike = combatState.CreateCard<PackmasterStrike>(player);
+        var ethGulDan = combatState.CreateCard<HandOfGulDan>(player);
+        var ethJeklik = combatState.CreateCard<HighPriestessJeklik>(player);
+        CardModel[] soulTargets = [ethStrike, ethGulDan, ethJeklik];
+        foreach (var s in soulTargets)
+            await CardPileCmd.Add(s, PileType.Draw, CardPilePosition.Top);
+
+        var soularium = combatState.CreateCard<TheSoularium>(player);
+        await CardPileCmd.Add(soularium, PileType.Hand);
+        AutoTestAssert.True(soularium.TryManualPlay(null), "Play TheSoularium");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.True(pcs.ExhaustPile.Cards.Contains(soularium), "TheSoularium exhausted itself");
+        AutoTestAssert.True(soulTargets.All(c => pcs.Hand.Cards.Contains(c) && c.Keywords.Contains(CardKeyword.Ethereal)), "TheSoularium drew 3 cards and gave them Ethereal");
+
+        // End Turn 1 with Ethereal HandOfGulDan + HighPriestessJeklik in hand -> verify clean Turn 2 (no infinite Ethereal loop, no leaked hand cards!).
+        int jeklikCopiesBeforeEnd = pcs.AllCards.Count(c => c is HighPriestessJeklik && c.Pile?.Type != PileType.Exhaust);
+        await EndTurnAndWaitForRoundAsync(player, 2);
+        AutoTestAssert.True(pcs.ExhaustPile.Cards.Contains(ethStrike), "Ethereal Strike exhausted at end of Turn 1");
+        AutoTestAssert.True(pcs.ExhaustPile.Cards.Contains(ethGulDan), "Ethereal HandOfGulDan exhausted at end of Turn 1");
+        AutoTestAssert.True(pcs.ExhaustPile.Cards.Contains(ethJeklik), "Ethereal HighPriestessJeklik exhausted at end of Turn 1");
+        AutoTestAssert.Equal(5, pcs.Hand.Cards.Count, "Turn 2 starts with clean 5-card hand (no Ethereal exhaust leaks)");
+        AutoTestAssert.Equal(
+            jeklikCopiesBeforeEnd + 1,
+            pcs.AllCards.Count(c => c is HighPriestessJeklik && c.Pile?.Type != PileType.Exhaust),
+            "Ethereal-exhausted Jeklik replaced itself (-1 exhausted, +2 clones in Discard = net +1)");
+
+        // 7. RunedMithrilRod+: Retained across turns, hits 10th draw on start-of-turn opening hand draw -> discounts ALL opening-hand >0-cost cards!
+        foreach (var c in pcs.Hand.Cards.ToList())
+            await CardPileCmd.Add(c, PileType.Discard);
+        foreach (var c in pcs.DrawPile.Cards.ToList())
+            await CardPileCmd.Add(c, PileType.Discard);
+        for (int i = 0; i < 15; i++)
+            await CardPileCmd.Add(combatState.CreateCard<PackmasterStrike>(player), PileType.Draw, CardPilePosition.Top);
+
+        var rod = combatState.CreateCard<RunedMithrilRod>(player);
+        CardCmd.Upgrade(rod);
+        await CardPileCmd.Add(rod, PileType.Hand);
+
+        // Draw 9 cards during Turn 2 (leaving rod at 9/10 drawn).
+        await CardPileCmd.Draw(new ThrowingPlayerChoiceContext(), 5m, player);
+        foreach (var c in pcs.Hand.Cards.Where(c => c != rod).ToList())
+            await CardPileCmd.Add(c, PileType.Discard);
+        await CardPileCmd.Draw(new ThrowingPlayerChoiceContext(), 4m, player);
+        AutoTestAssert.Equal(9, rod.DynamicVars["Drawn"].IntValue, "RunedMithrilRod+ at 9/10 draws before Turn 2 end");
+        AutoTestAssert.True(pcs.Hand.Cards.Contains(rod), "RunedMithrilRod+ still in hand at 9/10");
+
+        // Prepare Turn 3 draw pile: 4 one-cost Strikes + 1 zero-cost Jeklik so Turn 3 opening hand has both 1-cost and 0-cost cards.
+        foreach (var c in pcs.DrawPile.Cards.ToList())
+            await CardPileCmd.Add(c, PileType.Discard);
+        var turn3Strikes = Enumerable.Range(0, 4).Select(_ => combatState.CreateCard<PackmasterStrike>(player)).ToList();
+        var turn3ZeroCost = combatState.CreateCard<HighPriestessJeklik>(player);
+        await CardPileCmd.Add(turn3ZeroCost, PileType.Draw, CardPilePosition.Top);
+        foreach (var s in turn3Strikes)
+            await CardPileCmd.Add(s, PileType.Draw, CardPilePosition.Top);
+
+        // End Turn 2 -> Rod Retains, Turn 3 opening draw hits 10th draw on card #1, defers to AfterPlayerTurnStart -> discounts ALL 4 Strikes!
+        await EndTurnAndWaitForRoundAsync(player, 3);
+        AutoTestAssert.True(pcs.DiscardPile.Cards.Contains(rod), "RunedMithrilRod+ discarded itself after Turn-3 opening hand draw");
+        AutoTestAssert.Equal(0, rod.DynamicVars["Drawn"].IntValue, "RunedMithrilRod+ reset Drawn counter to 0");
+        AutoTestAssert.True(turn3Strikes.All(s => s.EnergyCost.GetWithModifiers(CostModifiers.All) == 0), "RunedMithrilRod+ discounted ALL 4 opening-hand Strikes to 0");
+        AutoTestAssert.Equal(0, turn3ZeroCost.EnergyCost.GetWithModifiers(CostModifiers.All), "0-cost card stayed at 0 cost");
     }
 
     private static async Task WaitUntilAsync(Func<bool> predicate, int timeoutMs = 15000)

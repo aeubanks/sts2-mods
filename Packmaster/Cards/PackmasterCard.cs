@@ -8,8 +8,13 @@ using Packmaster.Packs;
 namespace Packmaster.Cards;
 
 [Pool(typeof(PackmasterCardPool))]
-public abstract class PackmasterCard(int cost, CardType type, CardRarity rarity, TargetType target)
-    : CustomCardModel(cost, type, rarity, target), ICustomTypeTextCard
+public abstract class PackmasterCard(
+    int cost,
+    CardType type,
+    CardRarity rarity,
+    TargetType target,
+    bool showInCardLibrary = true)
+    : CustomCardModel(cost, type, rarity, target, showInCardLibrary), ICustomTypeTextCard
 {
     protected abstract string PortraitKey { get; }
 
