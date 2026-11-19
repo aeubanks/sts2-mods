@@ -2,12 +2,15 @@ using Godot;
 using MegaCrit.Sts2.Core.AutoSlay.Helpers;
 using MegaCrit.Sts2.Core.CardSelection;
 using MegaCrit.Sts2.Core.Combat;
+using MegaCrit.Sts2.Core.Commands;
 using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Entities.Players;
+using MegaCrit.Sts2.Core.GameActions;
 using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Localization;
 using MegaCrit.Sts2.Core.Map;
 using MegaCrit.Sts2.Core.Models;
+using MegaCrit.Sts2.Core.Models.Powers;
 using MegaCrit.Sts2.Core.Nodes;
 using MegaCrit.Sts2.Core.Random;
 using MegaCrit.Sts2.Core.Rooms;
@@ -17,6 +20,7 @@ using MegaCrit.Sts2.Core.Settings;
 using MegaCrit.Sts2.Core.Unlocks;
 using Packmaster.Cards;
 using Packmaster.Character;
+using Packmaster.Relics;
 
 namespace Packmaster.Testing;
 
@@ -136,10 +140,12 @@ internal static class PackmasterAutoTestRunner
     {
         var character = ModelDb.Character<ThePackmaster>();
         AutoTestAssert.Equal(75, character.StartingHp, "StartingHp");
+        AutoTestAssert.Equal(10, character.StartingDeck.Count(), "StartingDeck count");
+        AutoTestAssert.True(character.StartingRelics.Any(r => r is HandyHaversack), "HandyHaversack in StartingRelics");
         AutoTestAssert.True(character.Title.Exists(), "Character title loc missing");
         AutoTestAssert.True(!string.IsNullOrWhiteSpace(character.Title.GetFormattedText()), "Character title empty");
 
-        AutoTestAssert.NotNull(ModelDb.RelicPool<PackmasterRelicPool>(), "PackmasterRelicPool");
+        var relicPool = AutoTestAssert.NotNull(ModelDb.RelicPool<PackmasterRelicPool>(), "PackmasterRelicPool");
         AutoTestAssert.NotNull(ModelDb.PotionPool<PackmasterPotionPool>(), "PackmasterPotionPool");
 
         string[] charAssets =
@@ -160,7 +166,7 @@ internal static class PackmasterAutoTestRunner
         AutoTestAssert.True(ResourceLoader.Exists(cardPool.TextEnergyIconPath), $"Missing {cardPool.TextEnergyIconPath}");
 
         var cards = cardPool.AllCards.ToList();
-        AutoTestAssert.True(cards.Count >= 5, $"Expected at least 5 Packmaster cards, got {cards.Count}");
+        AutoTestAssert.True(cards.Count >= 7, $"Expected at least 7 Packmaster cards, got {cards.Count}");
 
         foreach (var card in cards)
         {
@@ -186,6 +192,24 @@ internal static class PackmasterAutoTestRunner
             AutoTestAssert.True(!upgradeDesc.Contains('{') && !upgradeDesc.Contains('}'), $"Unresolved SmartFormat token in {card.Id}+: {upgradeDesc}");
         }
 
+        var relics = relicPool.AllRelics.ToList();
+        AutoTestAssert.True(relics.Count >= 1, $"Expected at least 1 Packmaster relic, got {relics.Count}");
+        foreach (var relic in relics)
+        {
+            AutoTestAssert.True(ResourceLoader.Exists(relic.PackedIconPath), $"Missing relic icon for {relic.Id}: {relic.PackedIconPath}");
+            if (relic is PackmasterRelic pmRelic)
+            {
+                foreach (var iconPath in pmRelic.AllIconPaths)
+                    AutoTestAssert.True(ResourceLoader.Exists(iconPath), $"Missing relic asset for {relic.Id}: {iconPath}");
+            }
+            AutoTestAssert.True(relic.Title.Exists(), $"Missing relic title loc for {relic.Id}");
+            AutoTestAssert.True(relic.DynamicDescription.Exists(), $"Missing relic description loc for {relic.Id}");
+            AutoTestAssert.True(relic.Flavor.Exists(), $"Missing relic flavor loc for {relic.Id}");
+            var desc = relic.DynamicDescription.GetFormattedText();
+            AutoTestAssert.True(!string.IsNullOrWhiteSpace(desc), $"Empty relic description for {relic.Id}");
+            AutoTestAssert.True(!desc.Contains('{') && !desc.Contains('}'), $"Unresolved SmartFormat token in {relic.Id}: {desc}");
+        }
+
         return Task.CompletedTask;
     }
 
@@ -202,7 +226,8 @@ internal static class PackmasterAutoTestRunner
             isCustomGame: false);
 
         AutoTestAssert.Equal(75, player.Creature.MaxHp, "Run player MaxHp");
-        AutoTestAssert.Equal(2, player.Deck.Cards.Count, "Starter deck size");
+        AutoTestAssert.Equal(10, player.Deck.Cards.Count, "Starter deck size");
+        AutoTestAssert.True(player.Relics.Any(r => r is HandyHaversack), "Player starts with HandyHaversack");
 
         await RunManager.Instance.EnterRoomDebug(RoomType.Monster, MapPointType.Monster, showTransition: false);
 
@@ -216,18 +241,84 @@ internal static class PackmasterAutoTestRunner
         var pcs = AutoTestAssert.NotNull(player.PlayerCombatState, "PlayerCombatState");
         var enemy = AutoTestAssert.NotNull(combatState.HittableEnemies.FirstOrDefault(), "First hittable enemy");
 
-        var defend = AutoTestAssert.NotNull(pcs.Hand.Cards.FirstOrDefault(c => c is PackmasterDefend), "PackmasterDefend in hand");
-        var energyBeforeDefend = pcs.Energy;
-        AutoTestAssert.True(defend.TryManualPlay(null), "Play PackmasterDefend");
-        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
-        AutoTestAssert.Equal(5, player.Creature.Block, "Block after PackmasterDefend");
-        AutoTestAssert.Equal(energyBeforeDefend - 1, pcs.Energy, "Energy spent on PackmasterDefend");
+        // Handy Haversack: +1 draw (6 cards) and +1 energy (4 energy) on turn 1.
+        AutoTestAssert.Equal(6, pcs.Hand.Cards.Count, "Turn-1 hand size with HandyHaversack");
+        AutoTestAssert.Equal(4, pcs.Energy, "Turn-1 energy with HandyHaversack");
 
-        var strike = AutoTestAssert.NotNull(pcs.Hand.Cards.FirstOrDefault(c => c is PackmasterStrike), "PackmasterStrike in hand");
+        // Ensure Rummage, Cardistry, and a Defend are in hand, and a 1-cost Strike is on top of the draw pile for Rummage.
+        var rummage = AutoTestAssert.NotNull(pcs.AllCards.FirstOrDefault(c => c is Rummage), "Rummage in combat");
+        var cardistry = AutoTestAssert.NotNull(pcs.AllCards.FirstOrDefault(c => c is Cardistry), "Cardistry in combat");
+        var strikeForDraw = AutoTestAssert.NotNull(
+            pcs.DrawPile.Cards.FirstOrDefault(c => c is PackmasterStrike)
+                ?? pcs.AllCards.FirstOrDefault(c => c is PackmasterStrike),
+            "Strike for Rummage draw");
+        var defendForPlay = AutoTestAssert.NotNull(
+            pcs.Hand.Cards.FirstOrDefault(c => c is PackmasterDefend)
+                ?? pcs.AllCards.FirstOrDefault(c => c is PackmasterDefend),
+            "Defend for Cardistry rebound");
+
+        if (rummage.Pile?.Type != PileType.Hand)
+            await CardPileCmd.Add(rummage, PileType.Hand);
+        if (cardistry.Pile?.Type != PileType.Hand)
+            await CardPileCmd.Add(cardistry, PileType.Hand);
+        if (defendForPlay.Pile?.Type != PileType.Hand)
+            await CardPileCmd.Add(defendForPlay, PileType.Hand);
+        await CardPileCmd.Add(strikeForDraw, PileType.Draw, CardPilePosition.Top);
+
+        // 1. Test Rummage: 10 damage, draws top card (strikeForDraw), reduces its cost from 1 -> 0 this turn.
         var enemyHpBefore = enemy.CurrentHp;
-        AutoTestAssert.True(strike.TryManualPlay(enemy), "Play PackmasterStrike");
+        AutoTestAssert.True(rummage.TryManualPlay(enemy), "Play Rummage");
         await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
-        AutoTestAssert.Equal(enemyHpBefore - 6, enemy.CurrentHp, "Enemy HP after PackmasterStrike");
+        AutoTestAssert.Equal(enemyHpBefore - 10, enemy.CurrentHp, "Enemy HP after Rummage");
+        AutoTestAssert.True(pcs.Hand.Cards.Contains(strikeForDraw), "Rummage drew top card into hand");
+        AutoTestAssert.Equal(0, strikeForDraw.EnergyCost.GetWithModifiers(CostModifiers.All), "Rummage reduced drawn card cost to 0");
+
+        // 2. Test Cardistry: 2 Block, applies ReboundPower (does not rebound itself), next played card goes to top of draw pile.
+        AutoTestAssert.True(cardistry.TryManualPlay(null), "Play Cardistry");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(2, player.Creature.Block, "Block after Cardistry");
+        AutoTestAssert.True(pcs.DiscardPile.Cards.Contains(cardistry), "Cardistry went to discard pile");
+        AutoTestAssert.True(player.Creature.HasPower<ReboundPower>(), "Cardistry applied ReboundPower");
+
+        // 3. Play Defend next: gains +5 Block (total 7) and rebounds onto top of Draw Pile!
+        AutoTestAssert.True(defendForPlay.TryManualPlay(null), "Play Defend after Cardistry");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(7, player.Creature.Block, "Block after Cardistry + Defend");
+        AutoTestAssert.True(pcs.DrawPile.Cards.FirstOrDefault() == defendForPlay, "Rebounded Defend is on top of Draw Pile");
+
+        // 4. Play the 0-cost Rummaged Strike: deals 6 damage for 0 energy.
+        var energyBeforeFreeStrike = pcs.Energy;
+        var enemyHpBeforeStrike = enemy.CurrentHp;
+        AutoTestAssert.True(strikeForDraw.TryManualPlay(enemy), "Play 0-cost Rummaged Strike");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(energyBeforeFreeStrike, pcs.Energy, "0-cost Rummaged Strike spent 0 energy");
+        AutoTestAssert.Equal(enemyHpBeforeStrike - 6, enemy.CurrentHp, "Enemy HP after Strike");
+
+        // 5. End Turn 1 -> wait for Turn 2: verify HandyHaversack does NOT re-trigger, Rebound expired,
+        //    rebounded Defend is in Turn-2 hand, and Rummage cost reduction expired.
+        var turn2Started = new TaskCompletionSource();
+        void OnTurnStarted(CombatState state)
+        {
+            if (state.RoundNumber == 2 && state.CurrentSide == CombatSide.Player)
+                turn2Started.TrySetResult();
+        }
+        CombatManager.Instance.TurnStarted += OnTurnStarted;
+        try
+        {
+            RunManager.Instance.ActionQueueSynchronizer.RequestEnqueue(new EndPlayerTurnAction(player, pcs.TurnNumber));
+            await turn2Started.Task.WaitAsync(TimeSpan.FromSeconds(15));
+            await WaitUntilAsync(() => !CombatManager.Instance.PlayerActionsDisabled && !RunManager.Instance.ActionExecutor.IsRunning);
+        }
+        finally
+        {
+            CombatManager.Instance.TurnStarted -= OnTurnStarted;
+        }
+
+        AutoTestAssert.Equal(5, pcs.Hand.Cards.Count, "Turn-2 hand size (HandyHaversack must not re-trigger)");
+        AutoTestAssert.Equal(3, pcs.Energy, "Turn-2 energy (HandyHaversack must not re-trigger)");
+        AutoTestAssert.True(pcs.Hand.Cards.Contains(defendForPlay), "Rebounded Defend was drawn on Turn 2");
+        AutoTestAssert.True(!player.Creature.HasPower<ReboundPower>(), "ReboundPower expired after Turn 1");
+        AutoTestAssert.Equal(1, strikeForDraw.EnergyCost.GetWithModifiers(CostModifiers.All), "Rummage cost reduction expired on Turn 2");
     }
 
     private static async Task WaitUntilAsync(Func<bool> predicate, int timeoutMs = 15000)

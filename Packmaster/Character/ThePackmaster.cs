@@ -3,8 +3,8 @@ using BaseLib.Utils.NodeFactories;
 using Godot;
 using MegaCrit.Sts2.Core.Entities.Characters;
 using MegaCrit.Sts2.Core.Models;
-using MegaCrit.Sts2.Core.Models.Relics;
 using Packmaster.Cards;
+using Packmaster.Relics;
 
 namespace Packmaster.Character;
 
@@ -21,12 +21,20 @@ public class ThePackmaster : PlaceholderCharacterModel
     public override IEnumerable<CardModel> StartingDeck =>
     [
         ModelDb.Card<PackmasterStrike>(),
-        ModelDb.Card<PackmasterDefend>()
+        ModelDb.Card<PackmasterStrike>(),
+        ModelDb.Card<PackmasterStrike>(),
+        ModelDb.Card<PackmasterStrike>(),
+        ModelDb.Card<PackmasterDefend>(),
+        ModelDb.Card<PackmasterDefend>(),
+        ModelDb.Card<PackmasterDefend>(),
+        ModelDb.Card<PackmasterDefend>(),
+        ModelDb.Card<Rummage>(),
+        ModelDb.Card<Cardistry>()
     ];
 
     public override IReadOnlyList<RelicModel> StartingRelics =>
     [
-        ModelDb.Relic<BurningBlood>()
+        ModelDb.Relic<HandyHaversack>()
     ];
 
     public override CardPoolModel CardPool => ModelDb.CardPool<PackmasterCardPool>();
