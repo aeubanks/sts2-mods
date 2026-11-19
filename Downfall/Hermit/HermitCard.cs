@@ -24,10 +24,15 @@ public abstract class HermitCard(
     private static readonly ConditionalWeakTable<ICombatState, HashSet<CardPlay>> DeadOnPlaysByCombat = new();
 
     private bool _deadOnWhenPlayed;
+    private bool _forceNextDeadOn;
 
     protected override string CharacterKey => TheHermit.CharKey;
 
     public virtual bool UsesDeadOn => false;
+
+    internal void ForceDeadOnOnce() => _forceNextDeadOn = true;
+
+    internal void ClearForcedDeadOn() => _forceNextDeadOn = false;
 
     protected bool IsDeadOnInHand()
     {
@@ -50,7 +55,7 @@ public abstract class HermitCard(
         return idx >= 0 && Math.Abs(2 * idx + 1 - cards.Count) <= 1;
     }
 
-    protected bool IsDeadOnNow => Pile?.Type == PileType.Play ? _deadOnWhenPlayed : IsDeadOnInHand();
+    protected internal bool IsDeadOnNow => Pile?.Type == PileType.Play ? _deadOnWhenPlayed : IsDeadOnInHand();
 
     protected override bool ShouldGlowGoldInternal => UsesDeadOn && IsDeadOnInHand();
 
@@ -65,9 +70,26 @@ public abstract class HermitCard(
     {
         if (UsesDeadOn && ReferenceEquals(card, this) && Pile?.Type != PileType.Play && CombatState is not null)
         {
-            _deadOnWhenPlayed = Owner.Creature.HasPower<ConcentratedPower>() || IsDeadOnInHand();
+            _deadOnWhenPlayed = _forceNextDeadOn || Owner.Creature.HasPower<ConcentratedPower>() || IsDeadOnInHand();
         }
         return true;
+    }
+
+    public override Task BeforeCardPlayed(CardPlay cardPlay)
+    {
+        if (UsesDeadOn && ReferenceEquals(cardPlay.Card, this) && CombatState is not null)
+        {
+            if (_forceNextDeadOn || Owner.Creature.HasPower<ConcentratedPower>())
+            {
+                _deadOnWhenPlayed = true;
+            }
+            _forceNextDeadOn = false;
+            if (_deadOnWhenPlayed)
+            {
+                DeadOnPlaysByCombat.GetOrCreateValue(CombatState).Add(cardPlay);
+            }
+        }
+        return Task.CompletedTask;
     }
 
     public override Task AfterCardChangedPiles(CardModel card, PileType oldPileType, AbstractModel? clonedBy)
@@ -75,26 +97,24 @@ public abstract class HermitCard(
         if (ReferenceEquals(card, this) && Pile?.Type != PileType.Play && Pile?.Type != PileType.Hand)
         {
             _deadOnWhenPlayed = false;
+            _forceNextDeadOn = false;
         }
         return Task.CompletedTask;
     }
 
     public override Task AfterCardPlayed(PlayerChoiceContext choiceContext, CardPlay cardPlay)
     {
-        if (ReferenceEquals(cardPlay.Card, this))
+        if (ReferenceEquals(cardPlay.Card, this) && cardPlay.PlayIndex >= cardPlay.PlayCount - 1)
         {
-            if (UsesDeadOn && _deadOnWhenPlayed && CombatState is not null)
-            {
-                DeadOnPlaysByCombat.GetOrCreateValue(CombatState).Add(cardPlay);
-            }
-
-            if (cardPlay.PlayIndex >= cardPlay.PlayCount - 1)
-            {
-                _deadOnWhenPlayed = false;
-            }
+            _deadOnWhenPlayed = false;
         }
         return Task.CompletedTask;
     }
+
+    internal static bool WasCardPlayDeadOn(ICombatState? combatState, CardPlay cardPlay) =>
+        combatState is not null
+        && DeadOnPlaysByCombat.TryGetValue(combatState, out var deadOnPlays)
+        && deadOnPlays.Contains(cardPlay);
 
     internal static bool WasLastCardPlayedThisTurnDeadOn(Player? owner, ICombatState? combatState, CardPlay? currentPlay = null)
     {

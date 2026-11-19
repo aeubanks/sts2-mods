@@ -437,4 +437,265 @@ internal static class HermitTests
         // Exact Turn 2 hand size: any naturally retained cards + 1 retained via Coalescence + 4 drawn (5 - 1 from Quickdraw).
         AutoTestAssert.Equal(autoRetainedBeforeEnd + 1 + 4, pcs.Hand.Cards.Count, "Turn 2 hand equals retained cards + 4 drawn (DrawLess -1)");
     }
+
+    public static async Task TestUncommonBatch1InCombat()
+    {
+        var (player, _, combatState) = await DownfallAutoTestRunner.StartCombatAsync<TheHermit>("DFHRMU1");
+        var pcs = AutoTestAssert.NotNull(player.PlayerCombatState, "PlayerCombatState");
+        var enemy = AutoTestAssert.NotNull(combatState.HittableEnemies.FirstOrDefault(), "First enemy");
+
+        await CreatureCmd.GainMaxHp(enemy, 600m);
+
+        async Task ResetHandAndEnergy()
+        {
+            foreach (var c in pcs.Hand.Cards.ToList())
+                await CardPileCmd.Add(c, PileType.Discard);
+            if (pcs.Energy < 10)
+                await PlayerCmd.GainEnergy(10 - pcs.Energy, player);
+        }
+
+        // 1. BigShot (Smoking Barrel) + Combo + Deadeye (Dead On):
+        //    Deadeye triggers Dead On -> +2 Str, Combo returns Deadeye to Hand (first Dead On this turn), BigShot grants 3 Vigor!
+        //    Playing Deadeye a 2nd time -> consumes 3 Vigor, goes to Discard (Combo limit 1 used up).
+        await ResetHandAndEnergy();
+        var bigShot = combatState.CreateCard<BigShot>(player);
+        var combo = combatState.CreateCard<Combo>(player);
+        await CardPileCmd.Add(bigShot, PileType.Hand);
+        await CardPileCmd.Add(combo, PileType.Hand);
+        AutoTestAssert.True(bigShot.TryManualPlay(null), "Play BigShot");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.True(combo.TryManualPlay(null), "Play Combo");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+
+        var deadeye = combatState.CreateCard<Deadeye>(player);
+        await CardPileCmd.Add(deadeye, PileType.Hand);
+        int hpBefore = enemy.CurrentHp;
+        AutoTestAssert.True(deadeye.TryManualPlay(enemy), "Play Dead On Deadeye #1");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(hpBefore - 5, enemy.CurrentHp, "Deadeye #1 dealt 5 damage");
+        AutoTestAssert.Equal(2, player.Creature.GetPowerAmount<StrengthPower>(), "Dead On Deadeye gained 2 Strength");
+        AutoTestAssert.Equal(3, player.Creature.GetPowerAmount<VigorPower>(), "BigShotPower granted 3 Vigor after Dead On");
+        AutoTestAssert.True(pcs.Hand.Cards.Contains(deadeye), "ComboPower returned 1st Dead On card to Hand");
+
+        hpBefore = enemy.CurrentHp;
+        AutoTestAssert.True(deadeye.TryManualPlay(enemy), "Play Dead On Deadeye #2");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(hpBefore - (5 + 2 + 3), enemy.CurrentHp, "Deadeye #2 dealt 5 + 2 Str + 3 Vigor = 10 damage");
+        AutoTestAssert.True(PileType.Discard.GetPile(player).Cards.Contains(deadeye), "2nd Dead On play went to Discard (Combo limit 1)");
+        await PowerCmd.Remove<StrengthPower>(player.Creature);
+        await PowerCmd.Remove<VigorPower>(player.Creature);
+        await PowerCmd.Remove<BigShotPower>(player.Creature);
+        await PowerCmd.Remove<ComboPower>(player.Creature);
+
+        // 2. Cheat (Dead On): plays GhostlyPresence from top of draw pile AND forces its Dead On effect (8 Block + 1 Weak to enemy)!
+        await ResetHandAndEnergy();
+        var ghostly = combatState.CreateCard<GhostlyPresence>(player);
+        await CardPileCmd.Add(ghostly, PileType.Draw, CardPilePosition.Top);
+        var cheat = combatState.CreateCard<Cheat>(player);
+        await CardPileCmd.Add(cheat, PileType.Hand);
+        int blockBefore = player.Creature.Block;
+        using (DownfallAutoTestRunner.PreferCards(c => ReferenceEquals(c, ghostly)))
+        {
+            AutoTestAssert.True(cheat.TryManualPlay(null), "Play Dead On Cheat");
+            await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        }
+        AutoTestAssert.Equal(blockBefore + 8, player.Creature.Block, "Cheated GhostlyPresence gained 8 Block");
+        AutoTestAssert.Equal(1, enemy.GetPowerAmount<WeakPower>(), "Dead On Cheat forced GhostlyPresence Dead On (1 Weak)");
+        await PowerCmd.Remove<WeakPower>(enemy);
+
+        // 2b. Non-Dead-On Cheat does NOT force cheated card's Dead On, and Cheat -> TrackingShot keeps Concentration!
+        await ResetHandAndEnergy();
+        var ghostly2 = combatState.CreateCard<GhostlyPresence>(player);
+        await CardPileCmd.Add(ghostly2, PileType.Draw, CardPilePosition.Top);
+        var cheatNonDeadOn = combatState.CreateCard<Cheat>(player);
+        await CardPileCmd.Add(cheatNonDeadOn, PileType.Hand);
+        await CardPileCmd.Add(combatState.CreateCard<HermitDefend>(player), PileType.Hand);
+        await CardPileCmd.Add(combatState.CreateCard<HermitDefend>(player), PileType.Hand);
+        using (DownfallAutoTestRunner.PreferCards(c => ReferenceEquals(c, ghostly2)))
+        {
+            AutoTestAssert.True(cheatNonDeadOn.TryManualPlay(null), "Play non-Dead-On Cheat");
+            await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        }
+        AutoTestAssert.Equal(0, enemy.GetPowerAmount<WeakPower>(), "Non-Dead-On Cheat did NOT force GhostlyPresence Dead On");
+
+        await ResetHandAndEnergy();
+        var tracking = combatState.CreateCard<TrackingShot>(player);
+        await CardPileCmd.Add(tracking, PileType.Draw, CardPilePosition.Top);
+        var cheatTrack = combatState.CreateCard<Cheat>(player);
+        await CardPileCmd.Add(cheatTrack, PileType.Hand);
+        using (DownfallAutoTestRunner.PreferCards(c => ReferenceEquals(c, tracking)))
+        {
+            AutoTestAssert.True(cheatTrack.TryManualPlay(null), "Play Cheat -> TrackingShot");
+            await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        }
+        AutoTestAssert.True(player.Creature.HasPower<ConcentratedPower>(), "Cheat -> TrackingShot preserved newly applied ConcentratedPower");
+        await PowerCmd.Remove<ConcentratedPower>(player.Creature);
+
+        // 3. CursedWeapon: loses 2 HP, deals 10 damage, exhausts, permanently increases CursedWeapon BonusDamage in combat + master deck!
+        await ResetHandAndEnergy();
+        var cwDeck = player.RunState.CreateCard<CursedWeapon>(player);
+        await CardPileCmd.Add(cwDeck, PileType.Deck);
+        var cw1 = combatState.CreateCard<CursedWeapon>(player);
+        var cw2 = combatState.CreateCard<CursedWeapon>(player);
+        await CardPileCmd.Add(cw1, PileType.Hand);
+        await CardPileCmd.Add(cw2, PileType.Discard);
+        int playerHpBefore = player.Creature.CurrentHp;
+        hpBefore = enemy.CurrentHp;
+        AutoTestAssert.True(cw1.TryManualPlay(enemy), "Play CursedWeapon");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(playerHpBefore - 2, player.Creature.CurrentHp, "CursedWeapon lost 2 HP");
+        AutoTestAssert.Equal(hpBefore - 10, enemy.CurrentHp, "CursedWeapon dealt 10 damage");
+        AutoTestAssert.True(PileType.Exhaust.GetPile(player).Cards.Contains(cw1), "CursedWeapon exhausted");
+        AutoTestAssert.Equal(1, cw1.BonusDamage, "CursedWeapon self BonusDamage increased to 1");
+        AutoTestAssert.Equal(11m, cw2.DynamicVars.Damage.BaseValue, "Other CursedWeapon in combat increased to 11 damage");
+        AutoTestAssert.Equal(1, cwDeck.BonusDamage, "Master-deck CursedWeapon BonusDamage increased to 1");
+
+        // 4. DeadMansHand: discards hand and fetches 3 rarest cards from draw pile!
+        await ResetHandAndEnergy();
+        foreach (var c in PileType.Draw.GetPile(player).Cards.ToList())
+            await CardPileCmd.Add(c, PileType.Discard);
+        var dmh = combatState.CreateCard<DeadMansHand>(player);
+        var handFiller = combatState.CreateCard<HermitDefend>(player);
+        var uncommonDraw1 = combatState.CreateCard<Deadeye>(player);
+        var uncommonDraw2 = combatState.CreateCard<Brawl>(player);
+        var commonDraw = combatState.CreateCard<Headshot>(player);
+        var basicDraw = combatState.CreateCard<HermitStrike>(player);
+        await CardPileCmd.Add(dmh, PileType.Hand);
+        await CardPileCmd.Add(handFiller, PileType.Hand);
+        await CardPileCmd.Add(basicDraw, PileType.Draw, CardPilePosition.Top);
+        await CardPileCmd.Add(commonDraw, PileType.Draw, CardPilePosition.Top);
+        await CardPileCmd.Add(uncommonDraw1, PileType.Draw, CardPilePosition.Top);
+        await CardPileCmd.Add(uncommonDraw2, PileType.Draw, CardPilePosition.Top);
+        AutoTestAssert.True(dmh.TryManualPlay(null), "Play DeadMansHand");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(3, pcs.Hand.Cards.Count, "DeadMansHand fetched 3 rarest cards");
+        AutoTestAssert.True(pcs.Hand.Cards.Contains(uncommonDraw1) && pcs.Hand.Cards.Contains(uncommonDraw2) && pcs.Hand.Cards.Contains(commonDraw),
+            "DeadMansHand prioritized Uncommon & Common over Basic");
+
+        // 5. Desperado: deals 10, doubles to 20 and increases cost 1 -> 2.
+        await ResetHandAndEnergy();
+        var desperado = combatState.CreateCard<Desperado>(player);
+        await CardPileCmd.Add(desperado, PileType.Hand);
+        hpBefore = enemy.CurrentHp;
+        AutoTestAssert.True(desperado.TryManualPlay(enemy), "Play Desperado");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(hpBefore - 10, enemy.CurrentHp, "Desperado dealt 10 damage");
+        AutoTestAssert.Equal(20m, desperado.DynamicVars.Damage.BaseValue, "Desperado doubled damage to 20");
+        AutoTestAssert.Equal(2, desperado.EnergyCost.GetWithModifiers(CostModifiers.All), "Desperado cost increased to 2");
+
+        // 6. Determination + Gestalt: Gestalt grants 2 Rugged + 2 Vulnerable -> Determination triggers +1 Strength!
+        //    Decrementing Rugged or decaying Vulnerable must NOT grant Strength; negative Strength DOES grant Strength!
+        await ResetHandAndEnergy();
+        var determination = combatState.CreateCard<Determination>(player);
+        var gestalt = combatState.CreateCard<Gestalt>(player);
+        await CardPileCmd.Add(determination, PileType.Hand);
+        await CardPileCmd.Add(gestalt, PileType.Hand);
+        AutoTestAssert.True(determination.TryManualPlay(null), "Play Determination");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.True(gestalt.TryManualPlay(null), "Play Gestalt");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(2, player.Creature.GetPowerAmount<RuggedPower>(), "Gestalt granted 2 Rugged");
+        AutoTestAssert.Equal(2, player.Creature.GetPowerAmount<VulnerablePower>(), "Gestalt applied 2 Vulnerable");
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<StrengthPower>(), "Determination granted 1 Strength on Vulnerable debuff");
+        // Decrementing a buff (Rugged) and decaying a debuff (Vulnerable -1) must NOT trigger Determination:
+        var ctx = new ThrowingPlayerChoiceContext();
+        await PowerCmd.ModifyAmount(ctx, player.Creature.GetPower<RuggedPower>()!, -1m, null, null);
+        await PowerCmd.ModifyAmount(ctx, player.Creature.GetPower<VulnerablePower>()!, -1m, null, null);
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<StrengthPower>(), "Determination did NOT trigger on buff decrement or debuff decay");
+        // Negative Strength IS a debuff application -> Determination grants +1 Strength (net change: -1 + 1 = 0):
+        await PowerCmd.Apply<StrengthPower>(ctx, player.Creature, -1m, enemy, null);
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<StrengthPower>(), "Determination triggered +1 Strength on negative Strength debuff");
+        await PowerCmd.Remove<StrengthPower>(player.Creature);
+        await PowerCmd.Remove<VulnerablePower>(player.Creature);
+        await PowerCmd.Remove<RuggedPower>(player.Creature);
+        await PowerCmd.Remove<DeterminationPower>(player.Creature);
+
+        // 7. Enervate (Dead On): deals 7 damage, gains 1 Energy, draws 1 card.
+        await ResetHandAndEnergy();
+        var enervate = combatState.CreateCard<Enervate>(player);
+        await CardPileCmd.Add(enervate, PileType.Hand);
+        int energyBefore = pcs.Energy;
+        hpBefore = enemy.CurrentHp;
+        AutoTestAssert.True(enervate.TryManualPlay(enemy), "Play Dead On Enervate");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(hpBefore - 7, enemy.CurrentHp, "Enervate dealt 7 damage");
+        AutoTestAssert.Equal(energyBefore, pcs.Energy, "Dead On Enervate refunded 1 energy (spent 1, gained 1)");
+        AutoTestAssert.Equal(1, pcs.Hand.Cards.Count, "Dead On Enervate drew 1 card");
+
+        // 8. EyeOfTheStorm: Concentrates and refills energy to MaxEnergy (3), exhausts.
+        await ResetHandAndEnergy();
+        await PlayerCmd.LoseEnergy(pcs.Energy - 1, player);
+        var eye = combatState.CreateCard<EyeOfTheStorm>(player);
+        await CardPileCmd.Add(eye, PileType.Hand);
+        AutoTestAssert.True(eye.TryManualPlay(null), "Play EyeOfTheStorm at 1 energy");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.True(player.Creature.HasPower<ConcentratedPower>(), "EyeOfTheStorm applied ConcentratedPower");
+        AutoTestAssert.Equal(player.MaxEnergy, pcs.Energy, "EyeOfTheStorm refilled Energy to MaxEnergy");
+        await PowerCmd.Remove<ConcentratedPower>(player.Creature);
+
+        // 9. FlashPowder: gains 5 Block, enemy loses 1 Strength, exhausts.
+        await ResetHandAndEnergy();
+        var flash = combatState.CreateCard<FlashPowder>(player);
+        await CardPileCmd.Add(flash, PileType.Hand);
+        blockBefore = player.Creature.Block;
+        int enemyStrBefore = enemy.GetPowerAmount<StrengthPower>();
+        AutoTestAssert.True(flash.TryManualPlay(null), "Play FlashPowder");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(blockBefore + 5, player.Creature.Block, "FlashPowder gained 5 Block");
+        AutoTestAssert.Equal(enemyStrBefore - 1, enemy.GetPowerAmount<StrengthPower>(), "FlashPowder reduced enemy Strength by 1");
+
+        // 10. FullyLoaded: moves ALL Strikes & Defends from Draw Pile to Hand!
+        await ResetHandAndEnergy();
+        foreach (var c in PileType.Draw.GetPile(player).Cards.ToList())
+            await CardPileCmd.Add(c, PileType.Discard);
+        var drawStrike = combatState.CreateCard<HermitStrike>(player);
+        var drawDefend = combatState.CreateCard<HermitDefend>(player);
+        var drawOther = combatState.CreateCard<Headshot>(player);
+        await CardPileCmd.Add(drawStrike, PileType.Draw, CardPilePosition.Top);
+        await CardPileCmd.Add(drawDefend, PileType.Draw, CardPilePosition.Top);
+        await CardPileCmd.Add(drawOther, PileType.Draw, CardPilePosition.Top);
+        var loaded = combatState.CreateCard<FullyLoaded>(player);
+        await CardPileCmd.Add(loaded, PileType.Hand);
+        AutoTestAssert.True(loaded.TryManualPlay(null), "Play FullyLoaded");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.True(pcs.Hand.Cards.Contains(drawStrike) && pcs.Hand.Cards.Contains(drawDefend), "FullyLoaded fetched Strike and Defend");
+        AutoTestAssert.True(!pcs.Hand.Cards.Contains(drawOther), "FullyLoaded left non-Strike/Defend in Draw Pile");
+
+        // 11. Grudge: deals 9 + 2 * (non-Exhaust Curses in combat piles) to all enemies.
+        await ResetHandAndEnergy();
+        int curseCount = pcs.AllCards.Count(c => c.Type == CardType.Curse && c.Pile?.Type != PileType.Exhaust);
+        var extraCurse = combatState.CreateCard<StsCards.Clumsy>(player);
+        await CardPileCmd.Add(extraCurse, PileType.Discard);
+        curseCount++;
+        var exhaustedCurse = combatState.CreateCard<StsCards.Clumsy>(player);
+        await CardPileCmd.Add(exhaustedCurse, PileType.Exhaust);
+        var grudge = combatState.CreateCard<Grudge>(player);
+        await CardPileCmd.Add(grudge, PileType.Hand);
+        hpBefore = enemy.CurrentHp;
+        AutoTestAssert.True(grudge.TryManualPlay(null), "Play Grudge");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(hpBefore - (9 + 2 * curseCount), enemy.CurrentHp, $"Grudge dealt 9 + 2*{curseCount} damage (excluding Exhausted Curse)");
+
+        // 12. Brawl: applies 3 Bruise to all enemies at start of Turn 2.
+        await ResetHandAndEnergy();
+        var brawl = combatState.CreateCard<Brawl>(player);
+        await CardPileCmd.Add(brawl, PileType.Hand);
+        AutoTestAssert.True(brawl.TryManualPlay(null), "Play Brawl");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        await DownfallAutoTestRunner.EndTurnAndWaitForRoundAsync(player, 2);
+        AutoTestAssert.Equal(3, enemy.GetPowerAmount<BruisePower>(), "BrawlPower applied 3 Bruise on Turn 2 start");
+
+        // 13. GoldenBullet: Fatal permanently reduces CostReduction (3 -> 2)!
+        // Spawn a 2nd Nibbit so killing the 1st doesn't end combat prematurely before assertions.
+        await CreatureCmd.Add<MegaCrit.Sts2.Core.Models.Monsters.Nibbit>(combatState);
+        await ResetHandAndEnergy();
+        await CreatureCmd.Damage(new ThrowingPlayerChoiceContext(), enemy, enemy.CurrentHp - 5, ValueProp.Unblockable | ValueProp.Unpowered, null, null, null);
+        var bullet = combatState.CreateCard<GoldenBullet>(player);
+        await CardPileCmd.Add(bullet, PileType.Hand);
+        AutoTestAssert.True(bullet.TryManualPlay(enemy), "Play GoldenBullet for Fatal kill");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.True(enemy.IsDead, "GoldenBullet killed target");
+        AutoTestAssert.Equal(1, bullet.CostReduction, "Fatal GoldenBullet increased CostReduction to 1");
+        AutoTestAssert.Equal(2, bullet.EnergyCost.GetWithModifiers(CostModifiers.All), "Fatal GoldenBullet cost permanently reduced 3 -> 2");
+    }
 }

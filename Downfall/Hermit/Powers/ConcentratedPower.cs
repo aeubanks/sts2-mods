@@ -10,6 +10,8 @@ namespace Downfall.Hermit.Powers;
 
 public sealed class ConcentratedPower : HermitPower
 {
+    private readonly HashSet<CardPlay> _consumingPlays = [];
+
     protected override string IconKey => "concentrated_power";
 
     public override PowerType Type => PowerType.Buff;
@@ -20,10 +22,19 @@ public sealed class ConcentratedPower : HermitPower
         HermitCard.DeadOnHoverTip
     ];
 
-    public override async Task AfterCardPlayed(PlayerChoiceContext choiceContext, CardPlay cardPlay)
+    public override Task BeforeCardPlayed(CardPlay cardPlay)
     {
         if (cardPlay.Card is HermitCard { UsesDeadOn: true }
-            && cardPlay.Card.Owner == Owner.Player
+            && cardPlay.Card.Owner == Owner.Player)
+        {
+            _consumingPlays.Add(cardPlay);
+        }
+        return Task.CompletedTask;
+    }
+
+    public override async Task AfterCardPlayed(PlayerChoiceContext choiceContext, CardPlay cardPlay)
+    {
+        if (_consumingPlays.Remove(cardPlay)
             && cardPlay.PlayIndex >= cardPlay.PlayCount - 1
             && !CombatManager.Instance.IsOverOrEnding)
         {
