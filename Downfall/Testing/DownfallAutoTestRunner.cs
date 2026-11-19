@@ -152,6 +152,7 @@ internal static class DownfallAutoTestRunner
                 ("GremlinRelicsAndPotionsInCombat", GremlinTests.TestRelicsAndPotionsInCombat),
                 ("ChampVisualsRuntime", ChampTests.TestVisualsRuntime),
                 ("ChampStarterCombat", ChampTests.TestStarterCombat),
+                ("ChampCommonCardsInCombat", ChampTests.TestCommonCardsInCombat),
             ];
 
             foreach (var (name, run) in tests)
@@ -555,6 +556,7 @@ internal static class DownfallAutoTestRunner
         AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-FINISHER_KEYWORD.description").Exists(), "Missing Finisher desc loc");
         AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-COMBO_KEYWORD.title").Exists(), "Missing Combo title loc");
         AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-COMBO_KEYWORD.description").Exists(), "Missing Combo desc loc");
+        AutoTestAssert.True(new LocString("cards", "DOWNFALL-CHAMP_HEADBUTT.selectionScreenPrompt").Exists(), "Missing ChampHeadbutt selectionScreenPrompt loc");
 
         return Task.CompletedTask;
     }

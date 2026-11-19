@@ -175,6 +175,12 @@ internal static class ChampStances
         return ChampStanceKind.None;
     }
 
+    public static decimal GetBerserkerVigorAmount(Creature creature) =>
+        BaseBerserkerVigor + creature.GetPowerAmount<DoubleStyleThisTurnPower>();
+
+    public static decimal GetDefensiveCounterAmount(Creature creature) =>
+        BaseDefensiveCounter + creature.GetPowerAmount<DoubleStyleThisTurnPower>();
+
     public static async Task TriggerSkillBonusAsync(
         Player player,
         PlayerChoiceContext choiceContext,
@@ -192,14 +198,24 @@ internal static class ChampStances
 
             if (stance is ChampStanceKind.Berserker or ChampStanceKind.Ultimate)
             {
-                await PowerCmd.Apply<VigorPower>(choiceContext, player.Creature, BaseBerserkerVigor, player.Creature, null);
+                await PowerCmd.Apply<VigorPower>(
+                    choiceContext,
+                    player.Creature,
+                    GetBerserkerVigorAmount(player.Creature),
+                    player.Creature,
+                    null);
             }
 
             if (stance is ChampStanceKind.Defensive or ChampStanceKind.Ultimate
                 && player.Creature.IsAlive
                 && !CombatManager.Instance.IsOverOrEnding)
             {
-                await PowerCmd.Apply<CounterPower>(choiceContext, player.Creature, BaseDefensiveCounter, player.Creature, null);
+                await PowerCmd.Apply<CounterPower>(
+                    choiceContext,
+                    player.Creature,
+                    GetDefensiveCounterAmount(player.Creature),
+                    player.Creature,
+                    null);
             }
         }
     }

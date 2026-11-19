@@ -232,5 +232,11 @@
   "DOWNFALL-ULTIMATE_FORM_NEXT_TURN_POWER.smartDescription": "At the start of next turn, enter [gold]Ultimate Stance[/gold] for [blue]{Amount}[/blue] {Amount:plural:turn|turns}.",
   "DOWNFALL-COUNTER_POWER.title": "Counter",
   "DOWNFALL-COUNTER_POWER.description": "The next time you are attacked, add a 0-cost [gold]Riposte Strike[/gold] to your [gold]Hand[/gold] dealing damage equal to your Counter.",
-  "DOWNFALL-COUNTER_POWER.smartDescription": "The next time you are attacked, add a 0-cost [gold]Riposte Strike[/gold] to your [gold]Hand[/gold] dealing [blue]{Amount}[/blue] damage."
+  "DOWNFALL-COUNTER_POWER.smartDescription": "The next time you are attacked, add a 0-cost [gold]Riposte Strike[/gold] to your [gold]Hand[/gold] dealing [blue]{Amount}[/blue] damage.",
+  "DOWNFALL-EN_GARDE_POWER.title": "En Garde",
+  "DOWNFALL-EN_GARDE_POWER.description": "If your [gold]Block[/gold] is broken this turn, gain [gold]Block[/gold] next turn.",
+  "DOWNFALL-EN_GARDE_POWER.smartDescription": "If your [gold]Block[/gold] is broken this turn, gain [blue]{Amount}[/blue] [gold]Block[/gold] next turn.",
+  "DOWNFALL-DOUBLE_STYLE_THIS_TURN_POWER.title": "Chain Lash",
+  "DOWNFALL-DOUBLE_STYLE_THIS_TURN_POWER.description": "This turn, [gold]Skill Bonuses[/gold] grant additional effect.",
+  "DOWNFALL-DOUBLE_STYLE_THIS_TURN_POWER.smartDescription": "This turn, [gold]Skill Bonuses[/gold] grant [blue]{Amount}[/blue] additional effect."
 }
