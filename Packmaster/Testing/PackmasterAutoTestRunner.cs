@@ -25,6 +25,7 @@ using Packmaster.Cards;
 using Packmaster.Cards.BitingCold;
 using Packmaster.Cards.CoreSet;
 using Packmaster.Cards.EvenOdd;
+using Packmaster.Cards.HighEnergy;
 using Packmaster.Cards.Quiet;
 using Packmaster.Cards.Warlock;
 using Packmaster.Character;
@@ -91,6 +92,7 @@ internal static class PackmasterAutoTestRunner
                 ("BitingColdPackInCombat", TestBitingColdPackInCombat),
                 ("WarlockPackInCombat", TestWarlockPackInCombat),
                 ("EvenOddPackInCombat", TestEvenOddPackInCombat),
+                ("HighEnergyPackInCombat", TestHighEnergyPackInCombat),
             ];
 
             foreach (var (name, run) in tests)
@@ -1519,6 +1521,224 @@ internal static class PackmasterAutoTestRunner
         AutoTestAssert.True(leftHook.TryManualPlay(enemy), "Play final LeftHook (7th)");
         await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
         AutoTestAssert.True(pcs.ExhaustPile.Cards.Contains(leftHook), "LeftHook exhausted on 7th play");
+    }
+
+    private static async Task TestHighEnergyPackInCombat()
+    {
+        var (player, _, combatState) = await StartCombatAsync("PMENER01");
+        var pcs = AutoTestAssert.NotNull(player.PlayerCombatState, "PlayerCombatState");
+        var enemy = AutoTestAssert.NotNull(combatState.HittableEnemies.FirstOrDefault(), "First hittable enemy");
+
+        await CreatureCmd.GainMaxHp(enemy, 800m);
+
+        foreach (var c in pcs.Hand.Cards.ToList())
+            await CardPileCmd.Add(c, PileType.Discard);
+
+        async Task SetEnergyAsync(int target)
+        {
+            if (pcs.Energy < target)
+                await PlayerCmd.GainEnergy(target - pcs.Energy, player);
+            else if (pcs.Energy > target)
+                await PlayerCmd.LoseEnergy(pcs.Energy - target, player);
+        }
+
+        // 1. Investor (6 Block whenever you spend >= 2 Energy) + StormForm (+2 Energy at turn start).
+        // Set Investor's cost to 2 this turn to prove BeforeCardPlayed does NOT self-trigger!
+        await SetEnergyAsync(10);
+        var investor = combatState.CreateCard<Investor>(player);
+        investor.EnergyCost.SetThisTurn(2);
+        var stormForm = combatState.CreateCard<StormForm>(player);
+        await CardPileCmd.Add(investor, PileType.Hand);
+        await CardPileCmd.Add(stormForm, PileType.Hand);
+        int blockBefore = player.Creature.Block;
+        AutoTestAssert.True(investor.TryManualPlay(null), "Play 2-cost Investor");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(6, player.Creature.GetPowerAmount<InvestorPower>(), "InvestorPower(6) applied");
+        AutoTestAssert.Equal(blockBefore, player.Creature.Block, "2-cost Investor did not self-trigger InvestorPower");
+
+        // Discounted 2-cost card played for 1 Energy must NOT trigger Investor.
+        var discountedStrike = combatState.CreateCard<StruckByATrain>(player);
+        discountedStrike.EnergyCost.SetThisTurn(1);
+        await CardPileCmd.Add(discountedStrike, PileType.Hand);
+        AutoTestAssert.True(discountedStrike.TryManualPlay(null), "Play 3-cost card discounted to 1 Energy");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(blockBefore, player.Creature.Block, "Card discounted to 1 Energy did not trigger Investor");
+
+        // Duplicated 3-Energy StormForm should trigger InvestorPower ONLY ONCE (PlayIndex == 0).
+        await PowerCmd.Apply<DuplicationPower>(new ThrowingPlayerChoiceContext(), player.Creature, 1m, player.Creature, null);
+        AutoTestAssert.True(stormForm.TryManualPlay(null), "Play duplicated StormForm (3 Energy)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(4, player.Creature.GetPowerAmount<StormFormPower>(), "Duplicated StormForm applied StormFormPower(4)");
+        AutoTestAssert.Equal(blockBefore + 6, player.Creature.Block, "Duplicated 3-Energy StormForm triggered Investor exactly once (+6 Block)");
+
+        // 2. Trash: exhausts leftmost card in hand and gains 1 Energy; empty-hand Trash still grants +1 Energy!
+        var leftmostFodder = combatState.CreateCard<PackmasterStrike>(player);
+        var secondCard = combatState.CreateCard<PackmasterDefend>(player);
+        var trash = combatState.CreateCard<Trash>(player);
+        await CardPileCmd.Add(leftmostFodder, PileType.Hand);
+        await CardPileCmd.Add(secondCard, PileType.Hand);
+        await CardPileCmd.Add(trash, PileType.Hand);
+        int energyBefore = pcs.Energy;
+        AutoTestAssert.True(trash.TryManualPlay(null), "Play Trash");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.True(pcs.ExhaustPile.Cards.Contains(leftmostFodder), "Trash exhausted leftmost card");
+        AutoTestAssert.True(pcs.Hand.Cards.Contains(secondCard), "Trash left non-leftmost card untouched");
+        AutoTestAssert.Equal(energyBefore + 1, pcs.Energy, "Trash gained 1 Energy");
+
+        foreach (var c in pcs.Hand.Cards.ToList())
+            await CardPileCmd.Add(c, PileType.Discard);
+        var emptyHandTrash = combatState.CreateCard<Trash>(player);
+        await CardPileCmd.Add(emptyHandTrash, PileType.Hand);
+        energyBefore = pcs.Energy;
+        AutoTestAssert.True(emptyHandTrash.TryManualPlay(null), "Play Trash with empty hand");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(energyBefore + 1, pcs.Energy, "Empty-hand Trash still gained 1 Energy");
+
+        // 3. MiracleWorker: +9 Block, puts Miracle on top of Draw Pile; draw & play Miracle (+1 Energy, Exhaust).
+        var miracleWorker = combatState.CreateCard<MiracleWorker>(player);
+        await CardPileCmd.Add(miracleWorker, PileType.Hand);
+        blockBefore = player.Creature.Block;
+        AutoTestAssert.True(miracleWorker.TryManualPlay(null), "Play MiracleWorker");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(blockBefore + 9, player.Creature.Block, "MiracleWorker +9 Block");
+        var miracle = AutoTestAssert.NotNull(pcs.DrawPile.Cards.FirstOrDefault() as Miracle, "Miracle is on top of Draw Pile");
+        await CardPileCmd.Draw(new ThrowingPlayerChoiceContext(), 1m, player);
+        energyBefore = pcs.Energy;
+        AutoTestAssert.True(miracle.TryManualPlay(null), "Play Miracle");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(energyBefore + 1, pcs.Energy, "Miracle gained 1 Energy");
+        AutoTestAssert.True(pcs.ExhaustPile.Cards.Contains(miracle), "Miracle exhausted");
+
+        // 4. LotsOfIronWaves (4 Energy): +22 Block + 22 dmg + Investor (+6 Block).
+        await SetEnergyAsync(4);
+        var ironWaves = combatState.CreateCard<LotsOfIronWaves>(player);
+        await CardPileCmd.Add(ironWaves, PileType.Hand);
+        blockBefore = player.Creature.Block;
+        int hpBefore = enemy.CurrentHp;
+        AutoTestAssert.True(ironWaves.TryManualPlay(enemy), "Play LotsOfIronWaves");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(blockBefore + 28, player.Creature.Block, "LotsOfIronWaves (22) + Investor (6) = 28 Block");
+        AutoTestAssert.Equal(hpBefore - 22, enemy.CurrentHp, "LotsOfIronWaves 22 damage");
+
+        // 5. LastResort at X = 0 -> applies EnergyNextTurnPower(1) (and does NOT trigger Investor!).
+        AutoTestAssert.Equal(0, pcs.Energy, "Energy is 0 before LastResort(0)");
+        var lastResortZero = combatState.CreateCard<LastResort>(player);
+        await CardPileCmd.Add(lastResortZero, PileType.Hand);
+        blockBefore = player.Creature.Block;
+        AutoTestAssert.True(lastResortZero.TryManualPlay(null), "Play LastResort at X=0");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(blockBefore, player.Creature.Block, "LastResort(0) gave 0 Block and did not trigger Investor");
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<EnergyNextTurnPower>(), "LastResort(0) applied EnergyNextTurnPower(1)");
+
+        // 5b. LastResort at X = 3 -> 6x3 = 18 Block + Investor (+6 Block) = 24 Block.
+        await SetEnergyAsync(3);
+        var lastResortThree = combatState.CreateCard<LastResort>(player);
+        await CardPileCmd.Add(lastResortThree, PileType.Hand);
+        blockBefore = player.Creature.Block;
+        AutoTestAssert.True(lastResortThree.TryManualPlay(null), "Play LastResort at X=3");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(blockBefore + 24, player.Creature.Block, "LastResort(3) gained 18 + 6 (Investor) = 24 Block");
+
+        // 6. ManifestMeal+ at X = 3 -> 7x3 = 21 dmg, shuffles Food+ (Retain, 3 Energy) into Draw Pile!
+        await SetEnergyAsync(3);
+        var meal = combatState.CreateCard<ManifestMeal>(player);
+        CardCmd.Upgrade(meal);
+        await CardPileCmd.Add(meal, PileType.Hand);
+        hpBefore = enemy.CurrentHp;
+        AutoTestAssert.True(meal.TryManualPlay(enemy), "Play ManifestMeal+ at X=3");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(hpBefore - 21, enemy.CurrentHp, "ManifestMeal+(3) dealt 7x3=21 damage");
+        var food = AutoTestAssert.NotNull(pcs.DrawPile.Cards.OfType<Food>().FirstOrDefault(), "ManifestMeal+ shuffled Food+ into Draw Pile");
+        AutoTestAssert.True(food.Keywords.Contains(CardKeyword.Retain), "Food+ has Retain");
+        AutoTestAssert.Equal(3, food.DynamicVars.Energy.IntValue, "Food+ stores X=3 Energy");
+        await CardPileCmd.Add(food, PileType.Hand);
+        AutoTestAssert.True(food.TryManualPlay(null), "Play Food+(3)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(3, pcs.Energy, "Food+(3) granted 3 Energy");
+        AutoTestAssert.True(pcs.ExhaustPile.Cards.Contains(food), "Food+ exhausted");
+
+        // 6b. ManifestMeal at X = 2 with DuplicationPower(1) -> 4 hits of 6 = 24 dmg + two 2-Energy Foods; plus 0-Energy Food exhausts cleanly!
+        await SetEnergyAsync(2);
+        await PowerCmd.Apply<DuplicationPower>(new ThrowingPlayerChoiceContext(), player.Creature, 1m, player.Creature, null);
+        int foodsInDrawBefore = pcs.DrawPile.Cards.Count(c => c is Food);
+        var mealDup = combatState.CreateCard<ManifestMeal>(player);
+        await CardPileCmd.Add(mealDup, PileType.Hand);
+        hpBefore = enemy.CurrentHp;
+        AutoTestAssert.True(mealDup.TryManualPlay(enemy), "Play duplicated ManifestMeal at X=2");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(hpBefore - 24, enemy.CurrentHp, "Duplicated ManifestMeal(2) dealt 4x6=24 damage");
+        var newFoods = pcs.DrawPile.Cards.OfType<Food>().ToList();
+        AutoTestAssert.Equal(foodsInDrawBefore + 2, newFoods.Count, "Duplicated ManifestMeal shuffled 2 Foods into Draw Pile");
+        AutoTestAssert.True(newFoods.All(f => f.DynamicVars.Energy.IntValue == 2), "Both duplicated Foods store X=2 Energy");
+
+        var zeroFood = combatState.CreateCard<Food>(player);
+        await CardPileCmd.Add(zeroFood, PileType.Hand);
+        AutoTestAssert.True(zeroFood.TryManualPlay(null), "Play 0-Energy Food");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(0, pcs.Energy, "0-Energy Food granted 0 Energy");
+        AutoTestAssert.True(pcs.ExhaustPile.Cards.Contains(zeroFood), "0-Energy Food exhausted");
+
+        // 7. StruckByATrain: 24 dmg to frontmost enemy, scales to 48 damage!
+        await SetEnergyAsync(3);
+        var train = combatState.CreateCard<StruckByATrain>(player);
+        await CardPileCmd.Add(train, PileType.Hand);
+        hpBefore = enemy.CurrentHp;
+        AutoTestAssert.True(train.TryManualPlay(null), "Play StruckByATrain");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(hpBefore - 24, enemy.CurrentHp, "StruckByATrain dealt 24 damage");
+        AutoTestAssert.Equal(48, train.DynamicVars.Damage.IntValue, "StruckByATrain scaled 24 -> 48 damage");
+
+        // 8. SuperNova (6 Energy): ALL enemies lose 60 HP bypassing Block + 3 Weak + 3 Vulnerable.
+        await SetEnergyAsync(6);
+        await CreatureCmd.GainBlock(enemy, 20m, ValueProp.Unpowered, null);
+        var superNova = combatState.CreateCard<SuperNova>(player);
+        await CardPileCmd.Add(superNova, PileType.Hand);
+        hpBefore = enemy.CurrentHp;
+        AutoTestAssert.True(superNova.TryManualPlay(null), "Play SuperNova");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(hpBefore - 60, enemy.CurrentHp, "SuperNova dealt 60 HP loss bypassing 20 Block");
+        AutoTestAssert.Equal(20, enemy.Block, "SuperNova left enemy Block untouched (Unblockable HP loss)");
+        AutoTestAssert.Equal(3, enemy.GetPowerAmount<WeakPower>(), "SuperNova applied 3 Weak");
+        AutoTestAssert.Equal(3, enemy.GetPowerAmount<VulnerablePower>(), "SuperNova applied 3 Vulnerable");
+
+        // 9. MultiTool: 7 dmg + draw 1 + MultiToolPower(7); Trash+ Retains across turns; end Turn 1 with 1 unspent Energy!
+        await CreatureCmd.LoseBlock(new ThrowingPlayerChoiceContext(), enemy, enemy.Block, null);
+        await SetEnergyAsync(2);
+        var trashPlus = combatState.CreateCard<Trash>(player);
+        CardCmd.Upgrade(trashPlus);
+        await CardPileCmd.Add(trashPlus, PileType.Hand);
+        var multiTool = combatState.CreateCard<MultiTool>(player);
+        await CardPileCmd.Add(multiTool, PileType.Hand);
+        hpBefore = enemy.CurrentHp;
+        int handBeforeTool = pcs.Hand.Cards.Count;
+        AutoTestAssert.True(multiTool.TryManualPlay(enemy), "Play MultiTool");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        // Enemy has Vulnerable (from SuperNova): floor(7 * 1.5) = 10 dmg!
+        AutoTestAssert.Equal(hpBefore - 10, enemy.CurrentHp, "MultiTool dealt 7*1.5=10 Vulnerable damage");
+        AutoTestAssert.Equal(handBeforeTool, pcs.Hand.Cards.Count, "MultiTool drew 1 replacement card");
+        AutoTestAssert.Equal(7, player.Creature.GetPowerAmount<MultiToolPower>(), "MultiToolPower(7) applied");
+        AutoTestAssert.Equal(1, pcs.Energy, "1 unspent Energy remaining before end of Turn 1");
+
+        int enemyHpBeforeTurnEnd = enemy.CurrentHp;
+        await EndTurnAndWaitForRoundAsync(player, 2);
+        AutoTestAssert.Equal(enemyHpBeforeTurnEnd - 7, enemy.CurrentHp, "MultiTool dealt 7 HP loss on turn end with unused Energy");
+        AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<MultiToolPower>(), "MultiToolPower expired after turn end");
+        AutoTestAssert.True(pcs.Hand.Cards.Contains(trashPlus), "Trash+ Retained across Turn 1 -> Turn 2");
+        AutoTestAssert.Equal(8, pcs.Energy, "Turn 2 Energy = 3 base + 4 StormForm (duplicated) + 1 EnergyNextTurn");
+
+        // 9b. MultiTool at 0 unspent Energy -> deals 0 HP loss and still removes MultiToolPower!
+        await SetEnergyAsync(1);
+        var multiToolZero = combatState.CreateCard<MultiTool>(player);
+        await CardPileCmd.Add(multiToolZero, PileType.Hand);
+        AutoTestAssert.True(multiToolZero.TryManualPlay(enemy), "Play MultiTool spending last Energy");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(0, pcs.Energy, "0 unspent Energy remaining");
+        AutoTestAssert.Equal(7, player.Creature.GetPowerAmount<MultiToolPower>(), "MultiToolPower(7) applied on Turn 2");
+
+        int enemyHpBeforeZeroEnd = enemy.CurrentHp;
+        await EndTurnAndWaitForRoundAsync(player, 3);
+        AutoTestAssert.Equal(enemyHpBeforeZeroEnd, enemy.CurrentHp, "MultiTool dealt 0 HP loss when ending turn with 0 Energy");
+        AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<MultiToolPower>(), "MultiToolPower still expired at 0 Energy");
     }
 
     private static async Task WaitUntilAsync(Func<bool> predicate, int timeoutMs = 15000)

@@ -31,5 +31,14 @@
   "PACKMASTER-GAMMA_WARD_POWER.smartDescription": "Your next Skill this turn has [gold]Even:[/gold] Gain [blue]{Amount}[/blue] [gold]Block[/gold].",
   "PACKMASTER-PRIME_DIRECTIVE_POWER.title": "Prime Directive",
   "PACKMASTER-PRIME_DIRECTIVE_POWER.description": "Your Attacks have Odd: Deal additional damage.",
-  "PACKMASTER-PRIME_DIRECTIVE_POWER.smartDescription": "Your Attacks have [gold]Odd:[/gold] Deal [blue]{Amount}[/blue] additional damage."
+  "PACKMASTER-PRIME_DIRECTIVE_POWER.smartDescription": "Your Attacks have [gold]Odd:[/gold] Deal [blue]{Amount}[/blue] additional damage.",
+  "PACKMASTER-INVESTOR_POWER.title": "Investor",
+  "PACKMASTER-INVESTOR_POWER.description": "Whenever you spend 2 or more Energy on a card, gain Block.",
+  "PACKMASTER-INVESTOR_POWER.smartDescription": "Whenever you spend [blue]2[/blue] or more Energy on a card, gain [blue]{Amount}[/blue] [gold]Block[/gold].",
+  "PACKMASTER-MULTI_TOOL_POWER.title": "Multi-Tool",
+  "PACKMASTER-MULTI_TOOL_POWER.description": "If you end your turn with unused Energy, ALL enemies lose HP.",
+  "PACKMASTER-MULTI_TOOL_POWER.smartDescription": "If you end your turn with unused Energy, ALL enemies lose [blue]{Amount}[/blue] HP.",
+  "PACKMASTER-STORM_FORM_POWER.title": "Storm Form",
+  "PACKMASTER-STORM_FORM_POWER.description": "At the start of your turn, gain additional Energy.",
+  "PACKMASTER-STORM_FORM_POWER.smartDescription": "At the start of your turn, gain [blue]{Amount}[/blue] additional Energy."
 }

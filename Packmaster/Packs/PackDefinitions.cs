@@ -1,6 +1,7 @@
 using Packmaster.Cards.BitingCold;
 using Packmaster.Cards.CoreSet;
 using Packmaster.Cards.EvenOdd;
+using Packmaster.Cards.HighEnergy;
 using Packmaster.Cards.Quiet;
 using Packmaster.Cards.Warlock;
 
@@ -13,6 +14,7 @@ public static class PackDefinitions
     public const string BitingColdId = "BitingCold";
     public const string WarlockId = "Warlock";
     public const string EvenOddId = "EvenOdd";
+    public const string HighEnergyId = "HighEnergy";
 
     public static void RegisterAll()
     {
@@ -99,6 +101,23 @@ public static class PackDefinitions
                 typeof(SwordAndBoard),
                 typeof(WindUpBomb),
                 typeof(WitzBolt),
+            ]));
+
+        PackRegistry.Register(new PackDefinition(
+            Id: HighEnergyId,
+            AlwaysInclude: false,
+            CardTypes:
+            [
+                typeof(Investor),
+                typeof(LastResort),
+                typeof(LotsOfIronWaves),
+                typeof(ManifestMeal),
+                typeof(MiracleWorker),
+                typeof(MultiTool),
+                typeof(StormForm),
+                typeof(StruckByATrain),
+                typeof(SuperNova),
+                typeof(Trash),
             ]));
     }
 }
