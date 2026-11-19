@@ -30,7 +30,6 @@ public sealed class Deadeye()
     protected override async Task OnPlay(PlayerChoiceContext choiceContext, CardPlay cardPlay)
     {
         ArgumentNullException.ThrowIfNull(cardPlay.Target);
-        bool deadOn = IsDeadOnNow;
 
         await DamageCmd.Attack(DynamicVars.Damage.BaseValue)
             .FromCard(this, cardPlay)
@@ -38,9 +37,15 @@ public sealed class Deadeye()
             .WithHitFx("vfx/vfx_attack_blunt")
             .Execute(choiceContext);
 
-        if (deadOn)
+        int triggers = await ConsumeDeadOnTriggersAsync(cardPlay);
+        if (triggers > 0)
         {
-            await PowerCmd.Apply<StrengthPower>(choiceContext, Owner.Creature, DynamicVars.Strength.BaseValue, Owner.Creature, this);
+            await PowerCmd.Apply<StrengthPower>(
+                choiceContext,
+                Owner.Creature,
+                DynamicVars.Strength.BaseValue * triggers,
+                Owner.Creature,
+                this);
         }
     }
 

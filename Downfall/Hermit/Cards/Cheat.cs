@@ -21,7 +21,7 @@ public sealed class Cheat()
     protected override async Task OnPlay(PlayerChoiceContext choiceContext, CardPlay cardPlay)
     {
         ArgumentNullException.ThrowIfNull(CombatState);
-        bool deadOn = IsDeadOnNow;
+        int triggers = await ConsumeDeadOnTriggersAsync(cardPlay);
 
         var drawCards = PileType.Draw.GetPile(Owner).Cards;
         if (drawCards.Count == 0)
@@ -36,9 +36,9 @@ public sealed class Cheat()
         if (chosen.TargetType == TargetType.AnyEnemy && CombatState.HittableEnemies.Count == 0)
             return;
 
-        if (deadOn && chosen is HermitCard { UsesDeadOn: true } hermitCard)
+        if (triggers > 0 && chosen is HermitCard { UsesDeadOn: true } hermitCard)
         {
-            hermitCard.ForceDeadOnOnce();
+            hermitCard.ForceDeadOnOnce(triggers);
         }
 
         try

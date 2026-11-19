@@ -23,7 +23,6 @@ public sealed class Enervate()
     protected override async Task OnPlay(PlayerChoiceContext choiceContext, CardPlay cardPlay)
     {
         ArgumentNullException.ThrowIfNull(cardPlay.Target);
-        bool deadOn = IsDeadOnNow;
 
         await DamageCmd.Attack(DynamicVars.Damage.BaseValue)
             .FromCard(this, cardPlay)
@@ -31,7 +30,8 @@ public sealed class Enervate()
             .WithHitFx("vfx/vfx_attack_blunt")
             .Execute(choiceContext);
 
-        if (deadOn)
+        int triggers = await ConsumeDeadOnTriggersAsync(cardPlay);
+        for (int i = 0; i < triggers; i++)
         {
             await PlayerCmd.GainEnergy(DynamicVars.Energy.IntValue, Owner);
             await CardPileCmd.Draw(choiceContext, DynamicVars.Cards.IntValue, Owner);

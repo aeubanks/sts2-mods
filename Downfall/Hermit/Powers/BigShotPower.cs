@@ -26,13 +26,16 @@ public sealed class BigShotPower : HermitPower
         if (cardPlay.Card.Owner != Owner.Player
             || !Owner.IsAlive
             || Amount <= 0
-            || CombatManager.Instance.IsOverOrEnding
-            || !HermitCard.WasCardPlayDeadOn(CombatState, cardPlay))
+            || CombatManager.Instance.IsOverOrEnding)
         {
             return;
         }
 
+        int triggers = HermitCard.GetDeadOnTriggerCount(CombatState, cardPlay);
+        if (triggers <= 0)
+            return;
+
         Flash();
-        await PowerCmd.Apply<VigorPower>(choiceContext, Owner, Amount, Owner, null);
+        await PowerCmd.Apply<VigorPower>(choiceContext, Owner, Amount * triggers, Owner, null);
     }
 }

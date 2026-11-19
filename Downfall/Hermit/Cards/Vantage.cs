@@ -22,10 +22,10 @@ public sealed class Vantage()
 
     protected override async Task OnPlay(PlayerChoiceContext choiceContext, CardPlay cardPlay)
     {
-        bool deadOn = IsDeadOnNow;
         await CreatureCmd.GainBlock(Owner.Creature, DynamicVars.Block, cardPlay);
 
-        if (deadOn)
+        int triggers = await ConsumeDeadOnTriggersAsync(cardPlay);
+        for (int i = 0; i < triggers; i++)
         {
             var drawn = await CardPileCmd.Draw(choiceContext, DynamicVars.Cards.IntValue, Owner);
             foreach (var card in drawn)

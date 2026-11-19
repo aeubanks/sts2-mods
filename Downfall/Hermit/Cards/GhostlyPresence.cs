@@ -31,13 +31,13 @@ public sealed class GhostlyPresence()
     protected override async Task OnPlay(PlayerChoiceContext choiceContext, CardPlay cardPlay)
     {
         ArgumentNullException.ThrowIfNull(CombatState);
-        bool deadOn = IsDeadOnNow;
 
         await CreatureCmd.GainBlock(Owner.Creature, DynamicVars.Block, cardPlay);
 
-        if (deadOn)
+        int triggers = await ConsumeDeadOnTriggersAsync(cardPlay);
+        decimal weak = DynamicVars.Weak.BaseValue;
+        for (int i = 0; i < triggers; i++)
         {
-            decimal weak = DynamicVars.Weak.BaseValue;
             foreach (var enemy in CombatState.HittableEnemies.ToList())
             {
                 await PowerCmd.Apply<WeakPower>(choiceContext, enemy, weak, Owner.Creature, this);

@@ -31,7 +31,7 @@ public sealed class Headshot()
         if (!ReferenceEquals(cardSource, this) || !props.IsPoweredAttack())
             return 1m;
 
-        return IsDeadOnNow ? 2m : 1m;
+        return 1m + GetPendingDeadOnTriggerCount();
     }
 
     protected override async Task OnPlay(PlayerChoiceContext choiceContext, CardPlay cardPlay)
@@ -42,6 +42,8 @@ public sealed class Headshot()
             .Targeting(cardPlay.Target)
             .WithHitFx("vfx/vfx_attack_blunt")
             .Execute(choiceContext);
+
+        await ConsumeDeadOnTriggersAsync(cardPlay);
     }
 
     protected override void OnUpgrade()

@@ -30,11 +30,16 @@ public sealed class Dive()
 
     protected override async Task OnPlay(PlayerChoiceContext choiceContext, CardPlay cardPlay)
     {
-        bool deadOn = IsDeadOnNow;
         await CreatureCmd.GainBlock(Owner.Creature, DynamicVars.Block, cardPlay);
-        if (deadOn)
+        int triggers = await ConsumeDeadOnTriggersAsync(cardPlay);
+        if (triggers > 0)
         {
-            await PowerCmd.Apply<PlatingPower>(choiceContext, Owner.Creature, DynamicVars[nameof(PlatingPower)].BaseValue, Owner.Creature, this);
+            await PowerCmd.Apply<PlatingPower>(
+                choiceContext,
+                Owner.Creature,
+                DynamicVars[nameof(PlatingPower)].BaseValue * triggers,
+                Owner.Creature,
+                this);
         }
     }
 

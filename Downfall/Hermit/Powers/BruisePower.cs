@@ -32,7 +32,10 @@ public sealed class BruisePower : HermitPower
 
     public override async Task AfterSideTurnEnd(PlayerChoiceContext choiceContext, CombatSide side, IEnumerable<Creature> participants)
     {
-        if (side != Owner.Side && Owner.IsAlive && !CombatManager.Instance.IsOverOrEnding)
+        if (side != Owner.Side
+            && Owner.IsAlive
+            && !Owner.HasPower<HorrorPower>()
+            && !CombatManager.Instance.IsOverOrEnding)
         {
             await PowerCmd.Remove(this);
         }

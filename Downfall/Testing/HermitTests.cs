@@ -698,4 +698,339 @@ internal static class HermitTests
         AutoTestAssert.Equal(1, bullet.CostReduction, "Fatal GoldenBullet increased CostReduction to 1");
         AutoTestAssert.Equal(2, bullet.EnergyCost.GetWithModifiers(CostModifiers.All), "Fatal GoldenBullet cost permanently reduced 3 -> 2");
     }
+
+    public static async Task TestUncommonBatch2InCombat()
+    {
+        var (player, _, combatState) = await DownfallAutoTestRunner.StartCombatAsync<TheHermit>("DFHRMU2");
+        var pcs = AutoTestAssert.NotNull(player.PlayerCombatState, "PlayerCombatState");
+        var enemy1 = AutoTestAssert.NotNull(combatState.HittableEnemies.FirstOrDefault(), "First enemy");
+        var enemy2 = await CreatureCmd.Add<MegaCrit.Sts2.Core.Models.Monsters.Nibbit>(combatState);
+
+        await CreatureCmd.GainMaxHp(enemy1, 800m);
+        await CreatureCmd.GainMaxHp(enemy2, 800m);
+
+        async Task ResetHandAndEnergy()
+        {
+            foreach (var c in pcs.Hand.Cards.ToList())
+                await CardPileCmd.Add(c, PileType.Discard);
+            if (pcs.Energy < 10)
+                await PlayerCmd.GainEnergy(10 - pcs.Energy, player);
+        }
+
+        // 1. Snipe+ + Scavenge (Dead On) + Ricochet:
+        //    Snipe+ applies ConcentratedPower + SnipePower(1).
+        //    Scavenge gains 4 Plating and triggers Dead On TWICE -> +10 Gold (2 * 5) and records 2 Dead On triggers this turn!
+        //    Ricochet deals 7 to enemy1 + 2 random hits (7 each) -> 21 total damage across enemies!
+        await ResetHandAndEnergy();
+        var snipe = combatState.CreateCard<Snipe>(player);
+        CardCmd.Upgrade(snipe);
+        var scavenge = combatState.CreateCard<Scavenge>(player);
+        var ricochet = combatState.CreateCard<Ricochet>(player);
+        await CardPileCmd.Add(snipe, PileType.Hand);
+        await CardPileCmd.Add(scavenge, PileType.Hand);
+        await CardPileCmd.Add(ricochet, PileType.Hand);
+        int goldBefore = player.Gold;
+        AutoTestAssert.True(snipe.TryManualPlay(null), "Play Snipe+");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.True(player.Creature.HasPower<ConcentratedPower>(), "Snipe+ applied ConcentratedPower");
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<SnipePower>(), "Snipe+ applied 1 SnipePower");
+
+        AutoTestAssert.True(scavenge.TryManualPlay(null), "Play Scavenge with Snipe+Concentration");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(4, player.Creature.GetPowerAmount<PlatingPower>(), "Scavenge applied 4 Plating");
+        AutoTestAssert.Equal(goldBefore + 10, player.Gold, "Sniped Scavenge doubled Dead On Gold (+10)");
+        AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<SnipePower>(), "SnipePower consumed by Scavenge");
+        AutoTestAssert.True(PileType.Exhaust.GetPile(player).Cards.Contains(scavenge), "Scavenge exhausted");
+
+        int totalHpBefore = enemy1.CurrentHp + enemy2.CurrentHp;
+        AutoTestAssert.True(ricochet.TryManualPlay(enemy1), "Play Ricochet after 2 Dead On triggers");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(totalHpBefore - 21, enemy1.CurrentHp + enemy2.CurrentHp, "Ricochet dealt 7 + 2*7 = 21 total damage");
+        await PowerCmd.Remove<PlatingPower>(player.Creature);
+
+        // 2. Snipe + Headshot (Dead On): deals 3x damage (21 instead of 14)!
+        //    Also Snipe + Dead On Cheat -> Deadeye exercises ForceDeadOnOnce(2) -> +4 Strength without double-consuming Snipe!
+        await ResetHandAndEnergy();
+        var snipe2 = combatState.CreateCard<Snipe>(player);
+        var headshot = combatState.CreateCard<Headshot>(player);
+        await CardPileCmd.Add(snipe2, PileType.Hand);
+        await CardPileCmd.Add(headshot, PileType.Hand);
+        AutoTestAssert.True(snipe2.TryManualPlay(null), "Play Snipe");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        int hpBefore = enemy1.CurrentHp;
+        AutoTestAssert.True(headshot.TryManualPlay(enemy1), "Play Sniped Dead On Headshot");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(hpBefore - 21, enemy1.CurrentHp, "Sniped Dead On Headshot dealt 3x damage (21)");
+
+        await ResetHandAndEnergy();
+        var snipe3 = combatState.CreateCard<Snipe>(player);
+        var cheatSniped = combatState.CreateCard<Cheat>(player);
+        var cheatedDeadeye = combatState.CreateCard<Deadeye>(player);
+        await CardPileCmd.Add(cheatedDeadeye, PileType.Draw, CardPilePosition.Top);
+        await CardPileCmd.Add(snipe3, PileType.Hand);
+        await CardPileCmd.Add(cheatSniped, PileType.Hand);
+        AutoTestAssert.True(snipe3.TryManualPlay(null), "Play Snipe for Cheat");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        using (DownfallAutoTestRunner.PreferCards(c => ReferenceEquals(c, cheatedDeadeye)))
+        {
+            AutoTestAssert.True(cheatSniped.TryManualPlay(null), "Play Sniped Dead On Cheat -> Deadeye");
+            await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        }
+        AutoTestAssert.Equal(4, player.Creature.GetPowerAmount<StrengthPower>(), "Sniped Cheat -> Deadeye triggered Dead On twice (+4 Str)");
+        AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<SnipePower>(), "SnipePower cleanly consumed once");
+        await PowerCmd.Remove<StrengthPower>(player.Creature);
+
+        // 3. LoneWolf: keeps preferred card at cost 0 this turn, discards the rest of hand.
+        await ResetHandAndEnergy();
+        var loneWolf = combatState.CreateCard<LoneWolf>(player);
+        var keepCard = combatState.CreateCard<Malice>(player);
+        var discardA = combatState.CreateCard<HermitDefend>(player);
+        var discardB = combatState.CreateCard<HermitStrike>(player);
+        await CardPileCmd.Add(loneWolf, PileType.Hand);
+        await CardPileCmd.Add(keepCard, PileType.Hand);
+        await CardPileCmd.Add(discardA, PileType.Hand);
+        await CardPileCmd.Add(discardB, PileType.Hand);
+        using (DownfallAutoTestRunner.PreferCards(c => ReferenceEquals(c, keepCard)))
+        {
+            AutoTestAssert.True(loneWolf.TryManualPlay(null), "Play LoneWolf");
+            await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        }
+        AutoTestAssert.Equal(1, pcs.Hand.Cards.Count, "LoneWolf discarded rest of hand");
+        AutoTestAssert.True(pcs.Hand.Cards.Contains(keepCard), "LoneWolf kept selected card");
+        AutoTestAssert.Equal(0, keepCard.EnergyCost.GetWithModifiers(CostModifiers.All), "LoneWolf set kept card cost to 0");
+
+        // 4. LuckOfTheDraw: draws until total cost >= 3 (0 + 1 + 2 = 3 -> stops before 4th card!).
+        await ResetHandAndEnergy();
+        foreach (var c in PileType.Draw.GetPile(player).Cards.ToList())
+            await CardPileCmd.Add(c, PileType.Discard);
+        var extra4 = combatState.CreateCard<HermitStrike>(player); // cost 1 (should NOT be drawn)
+        var card2 = combatState.CreateCard<Malice>(player);        // cost 2
+        var card1 = combatState.CreateCard<HermitStrike>(player);  // cost 1
+        var card0 = combatState.CreateCard<Covet>(player);         // cost 0
+        await CardPileCmd.Add(extra4, PileType.Draw, CardPilePosition.Top);
+        await CardPileCmd.Add(card2, PileType.Draw, CardPilePosition.Top);
+        await CardPileCmd.Add(card1, PileType.Draw, CardPilePosition.Top);
+        await CardPileCmd.Add(card0, PileType.Draw, CardPilePosition.Top);
+        var luck = combatState.CreateCard<LuckOfTheDraw>(player);
+        await CardPileCmd.Add(luck, PileType.Hand);
+        AutoTestAssert.True(luck.TryManualPlay(null), "Play LuckOfTheDraw");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(3, pcs.Hand.Cards.Count, "LuckOfTheDraw drew exactly 3 cards (costs 0+1+2 = 3)");
+        AutoTestAssert.True(!pcs.Hand.Cards.Contains(extra4), "LuckOfTheDraw stopped once total cost reached 3");
+
+        // 5. Maintenance: +3 Strike damage, +1 Dexterity, cost increases 1 -> 2 this combat.
+        await ResetHandAndEnergy();
+        var maint = combatState.CreateCard<Maintenance>(player);
+        var maintStrike = combatState.CreateCard<HermitStrike>(player);
+        await CardPileCmd.Add(maint, PileType.Hand);
+        await CardPileCmd.Add(maintStrike, PileType.Hand);
+        AutoTestAssert.True(maint.TryManualPlay(null), "Play Maintenance");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(3, player.Creature.GetPowerAmount<MaintenanceStrikePower>(), "Maintenance applied 3 MaintenanceStrikePower");
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<DexterityPower>(), "Maintenance applied 1 Dexterity");
+        AutoTestAssert.Equal(2, maint.EnergyCost.GetWithModifiers(CostModifiers.All), "Maintenance cost increased 1 -> 2 this combat");
+        hpBefore = enemy1.CurrentHp;
+        AutoTestAssert.True(maintStrike.TryManualPlay(enemy1), "Play Strike buffed by Maintenance");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(hpBefore - 9, enemy1.CurrentHp, "Maintenance-buffed Strike dealt 9 damage (6+3)");
+        await PowerCmd.Remove<MaintenanceStrikePower>(player.Creature);
+        await PowerCmd.Remove<DexterityPower>(player.Creature);
+
+        // 6. Malice: exhausting non-Curse deals 16 single-target; exhausting Curse deals 16 AOE!
+        await ResetHandAndEnergy();
+        var maliceSingle = combatState.CreateCard<Malice>(player);
+        var nonCurseFodder = combatState.CreateCard<HermitDefend>(player);
+        await CardPileCmd.Add(maliceSingle, PileType.Hand);
+        await CardPileCmd.Add(nonCurseFodder, PileType.Hand);
+        int e1Before = enemy1.CurrentHp;
+        int e2Before = enemy2.CurrentHp;
+        using (DownfallAutoTestRunner.PreferCards(c => ReferenceEquals(c, nonCurseFodder)))
+        {
+            AutoTestAssert.True(maliceSingle.TryManualPlay(enemy1), "Play Malice exhausting non-Curse");
+            await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        }
+        AutoTestAssert.Equal(e1Before - 16, enemy1.CurrentHp, "Malice (non-Curse) dealt 16 to target");
+        AutoTestAssert.Equal(e2Before, enemy2.CurrentHp, "Malice (non-Curse) did not hit other enemy");
+
+        await ResetHandAndEnergy();
+        var maliceCurse = combatState.CreateCard<Malice>(player);
+        var curseFodder = combatState.CreateCard<StsCards.Clumsy>(player);
+        await CardPileCmd.Add(maliceCurse, PileType.Hand);
+        await CardPileCmd.Add(curseFodder, PileType.Hand);
+        e1Before = enemy1.CurrentHp;
+        e2Before = enemy2.CurrentHp;
+        using (DownfallAutoTestRunner.PreferCards(c => ReferenceEquals(c, curseFodder)))
+        {
+            AutoTestAssert.True(maliceCurse.TryManualPlay(enemy1), "Play Malice exhausting Curse");
+            await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        }
+        AutoTestAssert.Equal(e1Before - 16, enemy1.CurrentHp, "Malice (Curse) dealt 16 to enemy1");
+        AutoTestAssert.Equal(e2Before - 16, enemy2.CurrentHp, "Malice (Curse) dealt 16 to enemy2");
+
+        // 7. ShadowCloak + Spite: drawing a Curse grants 4 Block; Spite exhausts Unplayable Curses (+4 Block each), +8 Block, draws 3!
+        await ResetHandAndEnergy();
+        var shadowCloak = combatState.CreateCard<ShadowCloak>(player);
+        await CardPileCmd.Add(shadowCloak, PileType.Hand);
+        AutoTestAssert.True(shadowCloak.TryManualPlay(null), "Play ShadowCloak");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+
+        int blockBefore = player.Creature.Block;
+        var drawnCurse = combatState.CreateCard<StsCards.Clumsy>(player);
+        await CardPileCmd.Add(drawnCurse, PileType.Draw, CardPilePosition.Top);
+        await CardPileCmd.Draw(new ThrowingPlayerChoiceContext(), 1, player);
+        AutoTestAssert.Equal(blockBefore + 4, player.Creature.Block, "ShadowCloak gained 4 Block on drawing Curse");
+
+        blockBefore = player.Creature.Block;
+        var spite = combatState.CreateCard<Spite>(player);
+        await CardPileCmd.Add(spite, PileType.Hand);
+        int handBeforeSpite = pcs.Hand.Cards.Count;
+        AutoTestAssert.True(spite.TryManualPlay(null), "Play Spite");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.True(PileType.Exhaust.GetPile(player).Cards.Contains(drawnCurse), "Spite exhausted Unplayable Curse");
+        AutoTestAssert.Equal(blockBefore + 12, player.Creature.Block, "Spite gained 8 Block + ShadowCloak 4 Block on Curse exhaust");
+        AutoTestAssert.Equal(handBeforeSpite - 2 + 3, pcs.Hand.Cards.Count, "Spite drew 3 cards");
+        await PowerCmd.Remove<ShadowCloakPower>(player.Creature);
+
+        // 8. Shortfuse: cost 3 -> reduced by 1 per Strike/Defend played this turn -> cost 1!
+        await ResetHandAndEnergy();
+        var sf = combatState.CreateCard<Shortfuse>(player);
+        var sfStrike = combatState.CreateCard<HermitStrike>(player);
+        var sfDefend = combatState.CreateCard<HermitDefend>(player);
+        await CardPileCmd.Add(sf, PileType.Hand);
+        await CardPileCmd.Add(sfStrike, PileType.Hand);
+        await CardPileCmd.Add(sfDefend, PileType.Hand);
+        int sfCostBefore = sf.EnergyCost.GetWithModifiers(CostModifiers.All);
+        AutoTestAssert.True(sfStrike.TryManualPlay(enemy1), "Play Strike for Shortfuse discount");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.True(sfDefend.TryManualPlay(null), "Play Defend for Shortfuse discount");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(Math.Max(0, sfCostBefore - 2), sf.EnergyCost.GetWithModifiers(CostModifiers.All), "Shortfuse discounted by 2");
+        hpBefore = enemy1.CurrentHp;
+        AutoTestAssert.True(sf.TryManualPlay(enemy1), "Play discounted Shortfuse");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(hpBefore - 18, enemy1.CurrentHp, "Shortfuse dealt 18 damage");
+
+        // 9. Showdown: deals 9 damage + auto-plays all Strikes in hand!
+        await ResetHandAndEnergy();
+        var showdown = combatState.CreateCard<Showdown>(player);
+        var sdStrike1 = combatState.CreateCard<HermitStrike>(player);
+        var sdStrike2 = combatState.CreateCard<HermitStrike>(player);
+        await CardPileCmd.Add(showdown, PileType.Hand);
+        await CardPileCmd.Add(sdStrike1, PileType.Hand);
+        await CardPileCmd.Add(sdStrike2, PileType.Hand);
+        totalHpBefore = enemy1.CurrentHp + enemy2.CurrentHp;
+        AutoTestAssert.True(showdown.TryManualPlay(enemy1), "Play Showdown");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(totalHpBefore - 21, enemy1.CurrentHp + enemy2.CurrentHp, "Showdown dealt 9 + 6 + 6 = 21 total damage");
+        AutoTestAssert.Equal(0, pcs.Hand.Cards.Count, "Showdown played both Strikes from hand");
+
+        // 10. TakeCover: X-cost at 2 energy -> adds 0-cost Defend upgraded twice (5 + 6 = 11 Block)!
+        await ResetHandAndEnergy();
+        await PlayerCmd.SetEnergy(2, player);
+        var takeCover = combatState.CreateCard<TakeCover>(player);
+        await CardPileCmd.Add(takeCover, PileType.Hand);
+        AutoTestAssert.True(takeCover.TryManualPlay(null), "Play TakeCover at X=2");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        var generatedDefend = pcs.Hand.Cards.OfType<HermitDefend>().FirstOrDefault();
+        AutoTestAssert.NotNull(generatedDefend, "TakeCover added HermitDefend to hand");
+        AutoTestAssert.Equal(0, generatedDefend!.EnergyCost.GetWithModifiers(CostModifiers.All), "TakeCover Defend costs 0");
+        AutoTestAssert.Equal(11m, generatedDefend.DynamicVars.Block.BaseValue, "TakeCover X=2 upgraded Defend to 11 Block");
+        AutoTestAssert.True(PileType.Exhaust.GetPile(player).Cards.Contains(takeCover), "TakeCover exhausted");
+
+        // 11. Virtue: Retain, reduces Weak (3->2), negative Strength (-2->-1), removes 1 Vulnerable!
+        await ResetHandAndEnergy();
+        var ctx = new ThrowingPlayerChoiceContext();
+        await PowerCmd.Apply<WeakPower>(ctx, player.Creature, 3m, enemy1, null);
+        await PowerCmd.Apply<VulnerablePower>(ctx, player.Creature, 1m, enemy1, null);
+        await PowerCmd.Apply<StrengthPower>(ctx, player.Creature, -2m, enemy1, null);
+        var virtue = combatState.CreateCard<Virtue>(player);
+        await CardPileCmd.Add(virtue, PileType.Hand);
+        AutoTestAssert.True(virtue.TryManualPlay(null), "Play Virtue");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(2, player.Creature.GetPowerAmount<WeakPower>(), "Virtue reduced Weak 3 -> 2");
+        AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<VulnerablePower>(), "Virtue removed 1 Vulnerable");
+        AutoTestAssert.Equal(-1, player.Creature.GetPowerAmount<StrengthPower>(), "Virtue reduced negative Strength -2 -> -1");
+        await PowerCmd.Remove<WeakPower>(player.Creature);
+        await PowerCmd.Remove<StrengthPower>(player.Creature);
+
+        // 12. Midnight (+ImpendingDoom) + Horror + NoHoldsBarred + TakeAim across turn transitions!
+        await ResetHandAndEnergy();
+        var horror = combatState.CreateCard<Horror>(player);
+        var nhb = combatState.CreateCard<NoHoldsBarred>(player);
+        var takeAim = combatState.CreateCard<TakeAim>(player);
+        var midnight = combatState.CreateCard<Midnight>(player);
+        await CardPileCmd.Add(horror, PileType.Hand);
+        await CardPileCmd.Add(nhb, PileType.Hand);
+        await CardPileCmd.Add(takeAim, PileType.Hand);
+        await CardPileCmd.Add(midnight, PileType.Hand);
+
+        AutoTestAssert.True(horror.TryManualPlay(null), "Play Horror");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        e1Before = enemy1.CurrentHp;
+        e2Before = enemy2.CurrentHp;
+        AutoTestAssert.True(nhb.TryManualPlay(null), "Play NoHoldsBarred");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        // Horror already applied 3 Bruise -> NoHoldsBarred deals 19 + 3 = 22 AOE damage!
+        AutoTestAssert.Equal(e1Before - 22, enemy1.CurrentHp, "NoHoldsBarred dealt 19 (+3 Bruise) = 22 to enemy1");
+        AutoTestAssert.Equal(e2Before - 22, enemy2.CurrentHp, "NoHoldsBarred dealt 19 (+3 Bruise) = 22 to enemy2");
+        AutoTestAssert.True(takeAim.TryManualPlay(null), "Play TakeAim");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+
+        // Clear any leftover Block so Midnight's 12 Block vs ImpendingDoom's 13 self-damage is exact!
+        if (player.Creature.Block > 0)
+            await CreatureCmd.LoseBlock(ctx, player.Creature, player.Creature.Block, null);
+        AutoTestAssert.True(midnight.TryManualPlay(null), "Play Midnight");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(12, player.Creature.Block, "Midnight gained 12 Block");
+
+        // ImpendingDoom is the ONLY card in hand -> guaranteed Dead On at end of Turn 1!
+        var doom = pcs.Hand.Cards.OfType<ImpendingDoom>().FirstOrDefault();
+        AutoTestAssert.NotNull(doom, "Midnight added ImpendingDoom to hand");
+        AutoTestAssert.Equal(8, enemy1.GetPowerAmount<BruisePower>(), "Horror(3) + NoHoldsBarred(5) = 8 Bruise on enemy1");
+        AutoTestAssert.Equal(1, enemy1.GetPowerAmount<HorrorPower>(), "Horror applied 1 HorrorPower");
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<HermitDrainedPower>(), "NoHoldsBarred applied 1 HermitDrainedPower");
+
+        int playerHpBeforeDoom = player.Creature.CurrentHp;
+        e1Before = enemy1.CurrentHp;
+        e2Before = enemy2.CurrentHp;
+        await DownfallAutoTestRunner.EndTurnAndWaitForRoundAsync(player, 2);
+
+        // ImpendingDoom fired 13 blockable damage to player (12 blocked -> at least 1 HP lost) and 13 to both enemies!
+        AutoTestAssert.True(player.Creature.CurrentHp <= playerHpBeforeDoom - 1, "Dead On ImpendingDoom pierced Midnight's 12 Block for >=1 HP");
+        AutoTestAssert.Equal(e1Before - 13, enemy1.CurrentHp, "Dead On ImpendingDoom dealt 13 damage to enemy1");
+        AutoTestAssert.Equal(e2Before - 13, enemy2.CurrentHp, "Dead On ImpendingDoom dealt 13 damage to enemy2");
+        // Horror prevented Bruise from wearing off on Turn 1 end, then Horror decremented to 0 on Enemy turn start!
+        AutoTestAssert.Equal(8, enemy1.GetPowerAmount<BruisePower>(), "Horror kept Bruise(8) alive into Round 2");
+        AutoTestAssert.Equal(0, enemy1.GetPowerAmount<HorrorPower>(), "HorrorPower decremented and expired");
+        // Drained reduced Round 2 Energy by 1 and expired!
+        AutoTestAssert.Equal(player.MaxEnergy - 1, pcs.Energy, "HermitDrainedPower reduced Round 2 Energy by 1");
+        AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<HermitDrainedPower>(), "HermitDrainedPower expired after firing");
+        // TakeAim applied ConcentratedPower at Round 2 start!
+        AutoTestAssert.True(player.Creature.HasPower<ConcentratedPower>(), "TakeAimPower applied ConcentratedPower on Round 2");
+
+        // Verify per-turn resets on Round 2: Shortfuse back to cost 3, Ricochet deals 7 (+8 Bruise) = 15 with 0 repeats!
+        AutoTestAssert.Equal(3, sf.EnergyCost.GetWithModifiers(CostModifiers.All), "Shortfuse cost reset to 3 on Round 2");
+        await ResetHandAndEnergy();
+        var r2Ricochet = combatState.CreateCard<Ricochet>(player);
+        await CardPileCmd.Add(r2Ricochet, PileType.Hand);
+        totalHpBefore = enemy1.CurrentHp + enemy2.CurrentHp;
+        AutoTestAssert.True(r2Ricochet.TryManualPlay(enemy1), "Play Ricochet on Round 2 with 0 Dead On triggers");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(totalHpBefore - 15, enemy1.CurrentHp + enemy2.CurrentHp, "Ricochet reset to 0 repeats on Round 2 (7+8 Bruise=15)");
+
+        // Verify off-center ImpendingDoom does NOT trigger at Round 2 end!
+        await ResetHandAndEnergy();
+        var offCenterDoom = combatState.CreateCard<ImpendingDoom>(player);
+        await CardPileCmd.Add(offCenterDoom, PileType.Hand); // index 0 of 3 -> off-center!
+        await CardPileCmd.Add(combatState.CreateCard<HermitDefend>(player), PileType.Hand);
+        await CardPileCmd.Add(combatState.CreateCard<HermitDefend>(player), PileType.Hand);
+        e1Before = enemy1.CurrentHp;
+        e2Before = enemy2.CurrentHp;
+
+        // End Round 2 -> Round 3: off-center ImpendingDoom deals 0, and without HorrorPower, Bruise now wears off!
+        await DownfallAutoTestRunner.EndTurnAndWaitForRoundAsync(player, 3);
+        AutoTestAssert.Equal(e1Before, enemy1.CurrentHp, "Off-center ImpendingDoom did not damage enemy1");
+        AutoTestAssert.Equal(e2Before, enemy2.CurrentHp, "Off-center ImpendingDoom did not damage enemy2");
+        AutoTestAssert.Equal(0, enemy1.GetPowerAmount<BruisePower>(), "Bruise wore off after Horror expired");
+    }
 }

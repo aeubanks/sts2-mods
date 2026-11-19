@@ -22,7 +22,6 @@ public sealed class ItchyTrigger()
     protected override async Task OnPlay(PlayerChoiceContext choiceContext, CardPlay cardPlay)
     {
         ArgumentNullException.ThrowIfNull(cardPlay.Target);
-        bool deadOn = IsDeadOnNow;
 
         await DamageCmd.Attack(DynamicVars.Damage.BaseValue)
             .FromCard(this, cardPlay)
@@ -30,7 +29,8 @@ public sealed class ItchyTrigger()
             .WithHitFx("vfx/vfx_attack_blunt")
             .Execute(choiceContext);
 
-        if (deadOn)
+        int triggers = await ConsumeDeadOnTriggersAsync(cardPlay);
+        for (int i = 0; i < triggers; i++)
         {
             var eligible = PileType.Hand.GetPile(Owner).Cards
                 .Where(c => !ReferenceEquals(c, this)
@@ -39,14 +39,11 @@ public sealed class ItchyTrigger()
                     && c.EnergyCost.GetWithModifiers(CostModifiers.All) > 0)
                 .ToList();
 
-            if (eligible.Count > 0)
-            {
-                var chosen = Owner.RunState.Rng.CombatCardSelection.NextItem(eligible);
-                if (chosen is not null)
-                {
-                    chosen.EnergyCost.AddThisTurn(-DynamicVars["CostReduction"].IntValue, reduceOnly: true);
-                }
-            }
+            if (eligible.Count == 0)
+                break;
+
+            var chosen = Owner.RunState.Rng.CombatCardSelection.NextItem(eligible);
+            chosen?.EnergyCost.AddThisTurn(-DynamicVars["CostReduction"].IntValue, reduceOnly: true);
         }
     }
 

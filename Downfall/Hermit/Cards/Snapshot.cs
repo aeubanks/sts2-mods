@@ -21,7 +21,6 @@ public sealed class Snapshot()
     protected override async Task OnPlay(PlayerChoiceContext choiceContext, CardPlay cardPlay)
     {
         ArgumentNullException.ThrowIfNull(cardPlay.Target);
-        bool deadOn = IsDeadOnNow;
 
         var attack = await DamageCmd.Attack(DynamicVars.Damage.BaseValue)
             .FromCard(this, cardPlay)
@@ -29,12 +28,13 @@ public sealed class Snapshot()
             .WithHitFx("vfx/vfx_attack_blunt")
             .Execute(choiceContext);
 
-        if (deadOn)
+        int triggers = await ConsumeDeadOnTriggersAsync(cardPlay);
+        if (triggers > 0)
         {
             decimal unblocked = attack.Results.SelectMany(r => r).Sum(r => r.UnblockedDamage);
             if (unblocked > 0m)
             {
-                await CreatureCmd.GainBlock(Owner.Creature, unblocked, ValueProp.Unpowered, cardPlay);
+                await CreatureCmd.GainBlock(Owner.Creature, unblocked * triggers, ValueProp.Unpowered, cardPlay);
             }
         }
     }
