@@ -30,6 +30,7 @@ using Packmaster.Cards;
 using Packmaster.Cards.Batter;
 using Packmaster.Cards.BitingCold;
 using Packmaster.Cards.CoreSet;
+using Packmaster.Cards.EnergyAndEcho;
 using Packmaster.Cards.EvenOdd;
 using Packmaster.Cards.HighEnergy;
 using Packmaster.Cards.Quiet;
@@ -115,6 +116,7 @@ internal static class PackmasterAutoTestRunner
                 ("EvenOddPackInCombat", TestEvenOddPackInCombat),
                 ("HighEnergyPackInCombat", TestHighEnergyPackInCombat),
                 ("BatterPackInCombat", TestBatterPackInCombat),
+                ("EnergyAndEchoPackInCombat", TestEnergyAndEchoPackInCombat),
             ];
 
             foreach (var (name, run) in tests)
@@ -287,6 +289,8 @@ internal static class PackmasterAutoTestRunner
             foreach (var cardType in pack.CardTypes)
                 AutoTestAssert.True(poolTypes.Contains(cardType), $"Pack {pack.Id} card {cardType.Name} not in PackmasterCardPool");
         }
+        AutoTestAssert.True(new LocString("gameplay_ui", "PACKMASTER-ECHO_KEYWORD.title").Exists(), "Missing Echo keyword title loc");
+        AutoTestAssert.True(new LocString("gameplay_ui", "PACKMASTER-ECHO_KEYWORD.description").Exists(), "Missing Echo keyword desc loc");
 
         // Validate relics.
         var relics = relicPool.AllRelics.ToList();
@@ -2353,6 +2357,185 @@ internal static class PackmasterAutoTestRunner
         {
             PackmasterConfig.AllPacksMode = savedAllPacks;
         }
+    }
+
+    private static async Task TestEnergyAndEchoPackInCombat()
+    {
+        var (player, _, combatState) = await StartCombatAsync("PMECHO01");
+        var pcs = AutoTestAssert.NotNull(player.PlayerCombatState, "PlayerCombatState");
+        var enemy = AutoTestAssert.NotNull(combatState.HittableEnemies.FirstOrDefault(), "First hittable enemy");
+
+        await CreatureCmd.GainMaxHp(enemy, 800m);
+
+        // Advance to Turn 2 so HandyHaversack's Turn-1 extra Energy is gone.
+        await EndTurnAndWaitForRoundAsync(player, 2);
+
+        foreach (var c in pcs.Hand.Cards.ToList())
+            await CardPileCmd.Add(c, PileType.Discard);
+
+        // 1. MagnetRise costs 1 before generating extra Energy, then drops to 0 after Flashlight+!
+        var magnetRise = combatState.CreateCard<MagnetRise>(player);
+        var flashlight = combatState.CreateCard<Flashlight>(player);
+        CardCmd.Upgrade(flashlight);
+        await CardPileCmd.Add(magnetRise, PileType.Hand);
+        await CardPileCmd.Add(flashlight, PileType.Hand);
+
+        AutoTestAssert.Equal(1, magnetRise.EnergyCost.GetAmountToSpend(), "MagnetRise costs 1 before extra Energy");
+        int energyBeforeFlash = pcs.Energy;
+        AutoTestAssert.True(flashlight.TryManualPlay(null), "Play Flashlight+");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(energyBeforeFlash + 1, pcs.Energy, "Flashlight+ granted +1 Energy");
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<EnergyNextTurnPower>(), "Flashlight+ applied EnergyNextTurnPower(1)");
+        AutoTestAssert.True(pcs.ExhaustPile.Cards.Contains(flashlight), "Flashlight+ exhausted");
+        AutoTestAssert.Equal(0, magnetRise.EnergyCost.GetAmountToSpend(), "MagnetRise costs 0 after generating extra Energy");
+
+        int energyBeforeMagnet = pcs.Energy;
+        int blockBeforeMagnet = player.Creature.Block;
+        AutoTestAssert.True(magnetRise.TryManualPlay(null), "Play 0-cost MagnetRise");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(energyBeforeMagnet, pcs.Energy, "0-cost MagnetRise spent 0 Energy");
+        AutoTestAssert.Equal(blockBeforeMagnet + 8, player.Creature.Block, "MagnetRise granted 8 Block");
+
+        // 2. Panacher (0 cost -> 10 AoE every 5 cards created) + Slowing (2 cost -> SlowingPower(1) + 2 Wounds -> countdown 5 -> 3).
+        var panacher = combatState.CreateCard<Panacher>(player);
+        var slowing = combatState.CreateCard<Slowing>(player);
+        await CardPileCmd.Add(panacher, PileType.Hand);
+        await CardPileCmd.Add(slowing, PileType.Hand);
+
+        AutoTestAssert.True(panacher.TryManualPlay(null), "Play Panacher");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        var panacherPower = AutoTestAssert.NotNull(player.Creature.GetPower<PanacherPower>(), "PanacherPower applied");
+        AutoTestAssert.Equal(10, panacherPower.Amount, "PanacherPower amount = 10");
+        AutoTestAssert.Equal(5, panacherPower.DynamicVars["Countdown"].IntValue, "Panacher countdown starts at 5");
+
+        AutoTestAssert.True(slowing.TryManualPlay(null), "Play Slowing (2 Energy)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<SlowingPower>(), "SlowingPower(1) applied");
+        AutoTestAssert.Equal(2, pcs.Hand.Cards.Count(c => c is MegaCrit.Sts2.Core.Models.Cards.Wound), "Slowing added 2 Wounds to hand");
+        AutoTestAssert.Equal(3, panacherPower.DynamicVars["Countdown"].IntValue, "2 Wounds reduced Panacher countdown 5 -> 3");
+
+        // 3. Discharge (1 cost -> 5x Energy spent prior to play): 2 (Slowing) -> preview 10, deals 10 (does not count own cost)!
+        var discharge = combatState.CreateCard<Discharge>(player);
+        await CardPileCmd.Add(discharge, PileType.Hand);
+        AutoTestAssert.Equal(10m, discharge.DynamicVars.CalculatedDamage.Calculate(enemy), "Discharge preview = 5 * 2 = 10");
+        int hpBeforeDischarge = enemy.CurrentHp + enemy.Block;
+        AutoTestAssert.True(discharge.TryManualPlay(enemy), "Play Discharge (1 Energy)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        int dischargeDealt = hpBeforeDischarge - (enemy.CurrentHp + enemy.Block);
+        AutoTestAssert.Equal(10, dischargeDealt, "Discharge dealt exact 5 * 2 = 10 damage (matches hand preview)");
+
+        // 4. Overload (1 cost -> 10 dmg, then +20 dmg & +1 cost this combat; 2nd play deals 30 dmg and costs 2!).
+        await PlayerCmd.GainEnergy(5, player);
+        var overload = combatState.CreateCard<Overload>(player);
+        await CardPileCmd.Add(overload, PileType.Hand);
+        int hpBeforeOverload1 = enemy.CurrentHp + enemy.Block;
+        AutoTestAssert.True(overload.TryManualPlay(enemy), "Play Overload #1 (1 Energy)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(hpBeforeOverload1 - 10, enemy.CurrentHp + enemy.Block, "Overload #1 dealt 10 damage");
+        AutoTestAssert.Equal(2, overload.EnergyCost.GetAmountToSpend(), "Overload cost increased 1 -> 2");
+        AutoTestAssert.Equal(30, overload.DynamicVars.Damage.IntValue, "Overload damage increased 10 -> 30");
+
+        await CardPileCmd.Add(overload, PileType.Hand);
+        int hpBeforeOverload2 = enemy.CurrentHp + enemy.Block;
+        int energyBeforeOverload2 = pcs.Energy;
+        AutoTestAssert.True(overload.TryManualPlay(enemy), "Play Overload #2 (2 Energy)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(energyBeforeOverload2 - 2, pcs.Energy, "Overload #2 spent 2 Energy");
+        AutoTestAssert.Equal(hpBeforeOverload2 - 30, enemy.CurrentHp + enemy.Block, "Overload #2 dealt 30 damage");
+        AutoTestAssert.Equal(3, overload.EnergyCost.GetAmountToSpend(), "Overload cost increased 2 -> 3");
+
+        // 5. Crystallize (1 cost -> 3 Block per Energy available when played):
+        // At 4 Energy: preview 12, actual 12. At 1 Energy: preview 3, actual 3 (never 0!).
+        async Task SetEnergyAsync(int target)
+        {
+            if (pcs.Energy < target)
+                await PlayerCmd.GainEnergy(target - pcs.Energy, player);
+            else if (pcs.Energy > target)
+                await PlayerCmd.LoseEnergy(pcs.Energy - target, player);
+        }
+
+        await SetEnergyAsync(4);
+        var crystallize = combatState.CreateCard<Crystallize>(player);
+        await CardPileCmd.Add(crystallize, PileType.Hand);
+        AutoTestAssert.Equal(12m, crystallize.DynamicVars.CalculatedBlock.Calculate(null), "Crystallize preview at 4 Energy = 12");
+        int blockBeforeCrystallize = player.Creature.Block;
+        AutoTestAssert.True(crystallize.TryManualPlay(null), "Play Crystallize at 4 Energy");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(blockBeforeCrystallize + 12, player.Creature.Block, "Crystallize at 4 Energy granted 12 Block (matches preview)");
+
+        await SetEnergyAsync(1);
+        await CardPileCmd.Add(crystallize, PileType.Hand);
+        AutoTestAssert.Equal(3m, crystallize.DynamicVars.CalculatedBlock.Calculate(null), "Crystallize preview at 1 Energy = 3");
+        int blockBeforeCrystallize1 = player.Creature.Block;
+        AutoTestAssert.True(crystallize.TryManualPlay(null), "Play Crystallize at 1 Energy");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(blockBeforeCrystallize1 + 3, player.Creature.Block, "Crystallize at 1 Energy granted 3 Block (not 0)");
+
+        // === TURN 3: SlowingPower (+1) + Flashlight+ EnergyNextTurnPower (+1) = 5 Energy; Echo chain + Panacher trigger + TearApart non-lethal & lethal! ===
+        await EndTurnAndWaitForRoundAsync(player, 3);
+        AutoTestAssert.Equal(5, pcs.Energy, "Turn-3 Energy = 3 base + 1 SlowingPower + 1 EnergyNextTurnPower");
+
+        foreach (var c in pcs.Hand.Cards.ToList())
+            await CardPileCmd.Add(c, PileType.Discard);
+        await PlayerCmd.GainEnergy(7, player);
+
+        // ShadowStrike+ Echo (#1): deals 10 dmg, creates UPGRADED Exhaust+Ethereal ShadowStrike+ copy (Panacher countdown 3 -> 2).
+        var shadowStrike = combatState.CreateCard<ShadowStrike>(player);
+        CardCmd.Upgrade(shadowStrike);
+        await CardPileCmd.Add(shadowStrike, PileType.Hand);
+        int hpBeforeShadow = enemy.CurrentHp + enemy.Block;
+        AutoTestAssert.True(shadowStrike.TryManualPlay(enemy), "Play ShadowStrike+");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(hpBeforeShadow - 10, enemy.CurrentHp + enemy.Block, "ShadowStrike+ dealt 10 damage");
+        var shadowEcho = AutoTestAssert.NotNull(pcs.Hand.Cards.OfType<ShadowStrike>().FirstOrDefault(), "ShadowStrike+ Echo added to hand");
+        AutoTestAssert.True(shadowEcho.IsUpgraded, "ShadowStrike+ Echo preserved upgrade");
+        AutoTestAssert.True(shadowEcho.Keywords.Contains(CardKeyword.Exhaust) && shadowEcho.Keywords.Contains(CardKeyword.Ethereal),
+            "ShadowStrike Echo has Exhaust and Ethereal");
+        AutoTestAssert.Equal(2, panacherPower.DynamicVars["Countdown"].IntValue, "ShadowStrike Echo reduced Panacher countdown 3 -> 2");
+
+        // Play ShadowStrike+ Echo (#2): Exhausts, creates another Echo (Panacher countdown 2 -> 1).
+        AutoTestAssert.True(shadowEcho.TryManualPlay(enemy), "Play ShadowStrike+ Echo");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.True(pcs.ExhaustPile.Cards.Contains(shadowEcho), "ShadowStrike Echo exhausted on play");
+        AutoTestAssert.Equal(1, panacherPower.DynamicVars["Countdown"].IntValue, "2nd ShadowStrike Echo reduced Panacher countdown 2 -> 1");
+
+        // Voices (1 cost, Exhaust -> draw 3 + Echo -> 5th generated card triggers PanacherPower 10 AoE damage and resets countdown to 5!).
+        var voices = combatState.CreateCard<Voices>(player);
+        await CardPileCmd.Add(voices, PileType.Hand);
+        int handBeforeVoices = pcs.Hand.Cards.Count;
+        int hpBeforeVoices = enemy.CurrentHp + enemy.Block;
+        AutoTestAssert.True(voices.TryManualPlay(null), "Play Voices");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.True(pcs.ExhaustPile.Cards.Contains(voices), "Voices exhausted on play");
+        AutoTestAssert.Equal(handBeforeVoices - 1 + 3 + 1, pcs.Hand.Cards.Count, "Voices drew 3 cards and added 1 Echo (net +3)");
+        AutoTestAssert.True(pcs.Hand.Cards.OfType<Voices>().Any(c => c.Keywords.Contains(CardKeyword.Ethereal)), "Voices Echo added to hand");
+        AutoTestAssert.Equal(hpBeforeVoices - 10, enemy.CurrentHp + enemy.Block, "PanacherPower triggered 10 AoE damage on 5th created card");
+        AutoTestAssert.Equal(5, panacherPower.DynamicVars["Countdown"].IntValue, "PanacherPower countdown reset to 5");
+
+        // TearApart non-lethal (2 cost -> 17 dmg, NO Energy refund, adds Echo).
+        await CreatureCmd.Add<MegaCrit.Sts2.Core.Models.Monsters.Nibbit>(combatState);
+        var tearNonLethal = combatState.CreateCard<TearApart>(player);
+        await CardPileCmd.Add(tearNonLethal, PileType.Hand);
+        int energyBeforeNonLethal = pcs.Energy;
+        AutoTestAssert.True(tearNonLethal.TryManualPlay(enemy), "Play non-lethal TearApart");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.True(enemy.IsAlive, "Enemy survived non-lethal TearApart");
+        AutoTestAssert.Equal(energyBeforeNonLethal - 2, pcs.Energy, "Non-lethal TearApart spent 2 Energy with no refund");
+
+        // TearApart lethal (2 cost -> 17 dmg -> kills enemy -> +1 Energy refund + Echo).
+        int hpToDrop = enemy.CurrentHp - 10;
+        if (hpToDrop > 0)
+        {
+            await CreatureCmd.Damage(new ThrowingPlayerChoiceContext(), enemy, hpToDrop, ValueProp.Unblockable | ValueProp.Unpowered, null, null);
+        }
+        var tearLethal = AutoTestAssert.NotNull(pcs.Hand.Cards.OfType<TearApart>().FirstOrDefault(), "TearApart Echo in hand");
+        int energyBeforeTear = pcs.Energy;
+        AutoTestAssert.True(tearLethal.TryManualPlay(enemy), "Play TearApart Echo for lethal");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.True(enemy.IsDead, "TearApart killed enemy");
+        AutoTestAssert.Equal(energyBeforeTear - 1, pcs.Energy, "TearApart lethal net Energy = -2 cost + 1 kill refund = -1");
+        AutoTestAssert.True(pcs.Hand.Cards.OfType<TearApart>().Any(c => c.Keywords.Contains(CardKeyword.Exhaust) && c.Keywords.Contains(CardKeyword.Ethereal)),
+            "TearApart Echo added to hand after lethal kill");
     }
 
     private static async Task WaitUntilAsync(Func<bool> predicate, int timeoutMs = 15000)

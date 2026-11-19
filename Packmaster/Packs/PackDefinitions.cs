@@ -1,6 +1,7 @@
 using Packmaster.Cards.Batter;
 using Packmaster.Cards.BitingCold;
 using Packmaster.Cards.CoreSet;
+using Packmaster.Cards.EnergyAndEcho;
 using Packmaster.Cards.EvenOdd;
 using Packmaster.Cards.HighEnergy;
 using Packmaster.Cards.Quiet;
@@ -17,6 +18,7 @@ public static class PackDefinitions
     public const string EvenOddId = "EvenOdd";
     public const string HighEnergyId = "HighEnergy";
     public const string BatterId = "Batter";
+    public const string EnergyAndEchoId = "EnergyAndEcho";
 
     public static void RegisterAll()
     {
@@ -137,6 +139,23 @@ public static class PackDefinitions
                 typeof(UltimateHomerun),
                 typeof(WideAngle),
                 typeof(WindUp),
+            ]));
+
+        PackRegistry.Register(new PackDefinition(
+            Id: EnergyAndEchoId,
+            AlwaysInclude: false,
+            CardTypes:
+            [
+                typeof(Crystallize),
+                typeof(Discharge),
+                typeof(Flashlight),
+                typeof(MagnetRise),
+                typeof(Overload),
+                typeof(Panacher),
+                typeof(ShadowStrike),
+                typeof(Slowing),
+                typeof(TearApart),
+                typeof(Voices),
             ]));
     }
 }

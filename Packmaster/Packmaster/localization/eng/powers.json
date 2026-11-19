@@ -52,5 +52,11 @@
   "PACKMASTER-OPEN_BRACKET_POWER.smartDescription": "You can only play Attacks for the rest of the turn.",
   "PACKMASTER-OPTIMIZED_BLUR_POWER.title": "Optimized Blur",
   "PACKMASTER-OPTIMIZED_BLUR_POWER.description": "Whenever you deal unblocked attack damage, gain Block.",
-  "PACKMASTER-OPTIMIZED_BLUR_POWER.smartDescription": "Whenever you deal unblocked attack damage, gain [blue]{Amount}[/blue] [gold]Block[/gold]."
+  "PACKMASTER-OPTIMIZED_BLUR_POWER.smartDescription": "Whenever you deal unblocked attack damage, gain [blue]{Amount}[/blue] [gold]Block[/gold].",
+  "PACKMASTER-PANACHER_POWER.title": "Panacher",
+  "PACKMASTER-PANACHER_POWER.description": "Every time 5 cards are created, deal damage to ALL enemies.",
+  "PACKMASTER-PANACHER_POWER.smartDescription": "After [blue]{Countdown}[/blue] more {Countdown:plural:card is|cards are} created, deal [blue]{Amount}[/blue] damage to ALL enemies.",
+  "PACKMASTER-SLOWING_POWER.title": "Slowing",
+  "PACKMASTER-SLOWING_POWER.description": "At the start of your turn, gain Energy.",
+  "PACKMASTER-SLOWING_POWER.smartDescription": "At the start of your turn, gain [blue]{Amount}[/blue] Energy."
 }
