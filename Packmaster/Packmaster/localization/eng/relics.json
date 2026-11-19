@@ -1,5 +1,22 @@
 {
   "PACKMASTER-HANDY_HAVERSACK.title": "Handy Haversack",
   "PACKMASTER-HANDY_HAVERSACK.description": "At the start of each combat, gain {Energy:energyIcons()} and draw {Cards} {Cards:plural:card|cards}.",
-  "PACKMASTER-HANDY_HAVERSACK.flavor": "Helps heroic hoarders handle hindrances."
+  "PACKMASTER-HANDY_HAVERSACK.flavor": "Helps heroic hoarders handle hindrances.",
+  "PACKMASTER-BAG_OF_HOLDING.title": "Bag of Holding",
+  "PACKMASTER-BAG_OF_HOLDING.description": "Replaces [gold]Handy Haversack[/gold].\nGain {Energy:energyIcons()} at the start of each turn, lasting 1 turn for every 5 cards in your deck.",
+  "PACKMASTER-BAG_OF_HOLDING.flavor": "\"Incredible! It appears that this bag connects to an extradimensional space. What if I jump inside?\" - Ranwid",
+  "PACKMASTER-COLLECTOR_BADGE.title": "Collector Badge",
+  "PACKMASTER-COLLECTOR_BADGE.description": "Each turn, after you play a card from 3 different Packs, gain {Energy:energyIcons()} next turn.",
+  "PACKMASTER-COLLECTOR_BADGE.flavor": "Gotta collect 'em all.",
+  "PACKMASTER-GEM_OF_UNITY.title": "Gem of Unity",
+  "PACKMASTER-GEM_OF_UNITY.description": "Once per combat, after you play a card from each active Pack this run, gain {Block} [gold]Block[/gold], {StrengthPower} [gold]Strength[/gold], {DexterityPower} [gold]Dexterity[/gold], and heal {Heal} HP.",
+  "PACKMASTER-GEM_OF_UNITY.flavor": "In union there is strength.",
+  "PACKMASTER-PM_BOOSTER_PACK.title": "P.M. Booster Pack",
+  "PACKMASTER-PM_BOOSTER_PACK.description": "Upon pickup, choose 1 card from a random Pack to add to your deck.",
+  "PACKMASTER-PM_BOOSTER_PACK.flavor": "A package of cards in a foil wrapper. How did it end up in the Spire?",
+  "PACKMASTER-PM_BOOSTER_PACK.selectionScreenPrompt": "Choose a card from this Pack to add to your deck.",
+  "PACKMASTER-PM_COLLECTION.title": "P.M. Collection",
+  "PACKMASTER-PM_COLLECTION.description": "Upon pickup, you may add any number of cards from a random Pack to your deck.",
+  "PACKMASTER-PM_COLLECTION.flavor": "Said to have been assembled by a consortium of wizards.",
+  "PACKMASTER-PM_COLLECTION.selectionScreenPrompt": "Choose any number of cards from this Pack to add to your deck."
 }

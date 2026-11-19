@@ -4,8 +4,10 @@ using MegaCrit.Sts2.Core.AutoSlay.Helpers;
 using MegaCrit.Sts2.Core.CardSelection;
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Commands;
+using MegaCrit.Sts2.Core.Entities.CardRewardAlternatives;
 using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Entities.Players;
+using MegaCrit.Sts2.Core.Entities.Relics;
 using MegaCrit.Sts2.Core.Factories;
 using MegaCrit.Sts2.Core.GameActions;
 using MegaCrit.Sts2.Core.GameActions.Multiplayer;
@@ -21,6 +23,7 @@ using MegaCrit.Sts2.Core.Rooms;
 using MegaCrit.Sts2.Core.Runs;
 using MegaCrit.Sts2.Core.Saves;
 using MegaCrit.Sts2.Core.Settings;
+using MegaCrit.Sts2.Core.TestSupport;
 using MegaCrit.Sts2.Core.Unlocks;
 using MegaCrit.Sts2.Core.ValueProps;
 using Packmaster.Cards;
@@ -42,6 +45,18 @@ namespace Packmaster.Testing;
 internal static class PackmasterAutoTestRunner
 {
     private static int _unhandledErrors;
+    private static ICardSelector _activeCardSelector = new AutoSlayCardSelector(new Rng(1));
+
+    private sealed class DelegatingCardSelector : ICardSelector
+    {
+        public Task<IEnumerable<CardModel>> GetSelectedCards(IEnumerable<CardModel> options, int minSelect, int maxSelect) =>
+            _activeCardSelector.GetSelectedCards(options, minSelect, maxSelect);
+
+        public CardRewardSelection GetSelectedCardReward(
+            IReadOnlyList<CardCreationResult> options,
+            IReadOnlyList<CardRewardAlternative> alternatives) =>
+            _activeCardSelector.GetSelectedCardReward(options, alternatives);
+    }
 
     public static void Start()
     {
@@ -91,6 +106,7 @@ internal static class PackmasterAutoTestRunner
                 ("PackSystemAndCardPoolFiltering", TestPackSystemAndCardPoolFiltering),
                 ("PackRunStateSaveLoadPersistence", TestPackRunStateSaveLoadPersistence),
                 ("NeowInteractivePackDraft", TestNeowInteractivePackDraft),
+                ("CorePackmasterRelics", TestCorePackmasterRelics),
                 ("StartRunAndPlayStarterCombat", TestStartRunAndPlayStarterCombat),
                 ("CoreSetCardsInCombat", TestCoreSetCardsInCombat),
                 ("QuietPackInCombat", TestQuietPackInCombat),
@@ -109,7 +125,8 @@ internal static class PackmasterAutoTestRunner
                 var errorsBefore = Volatile.Read(ref _unhandledErrors);
                 try
                 {
-                    using var selectorScope = CardSelectorStack.SetTestSelector(new AutoSlayCardSelector(new Rng(1)));
+                    _activeCardSelector = new AutoSlayCardSelector(new Rng(1));
+                    using var selectorScope = CardSelectorStack.SetTestSelector(new DelegatingCardSelector());
                     Log($"RUN  {name}");
                     await run().WaitAsync(TimeSpan.FromSeconds(30));
                     AutoTestAssert.Equal(errorsBefore, Volatile.Read(ref _unhandledErrors), $"{name} triggered unhandled background exceptions");
@@ -326,6 +343,8 @@ internal static class PackmasterAutoTestRunner
         AutoTestAssert.True(new LocString("gameplay_ui", "PACKMASTER-PACK_CARD_TYPE").Exists(), "Missing PACKMASTER-PACK_CARD_TYPE loc key");
         AutoTestAssert.True(new LocString("gameplay_ui", "PACKMASTER-DRAFT_PAGE.description").Exists(), "Missing PACKMASTER-DRAFT_PAGE.description loc key");
         AutoTestAssert.True(new LocString("gameplay_ui", "PACKMASTER-DRAFT_OPTION.description").Exists(), "Missing PACKMASTER-DRAFT_OPTION.description loc key");
+        AutoTestAssert.True(new LocString("relics", "PACKMASTER-PM_BOOSTER_PACK.selectionScreenPrompt").Exists(), "Missing PACKMASTER-PM_BOOSTER_PACK.selectionScreenPrompt loc key");
+        AutoTestAssert.True(new LocString("relics", "PACKMASTER-PM_COLLECTION.selectionScreenPrompt").Exists(), "Missing PACKMASTER-PM_COLLECTION.selectionScreenPrompt loc key");
 
         return Task.CompletedTask;
     }
@@ -2157,6 +2176,182 @@ internal static class PackmasterAutoTestRunner
         {
             PackmasterConfig.AllPacksMode = savedAllPacks;
             PackmasterConfig.PacksPerRun = savedPacksPerRun;
+        }
+    }
+
+    private sealed class TakeNCardSelector(int count) : ICardSelector
+    {
+        public Task<IEnumerable<CardModel>> GetSelectedCards(IEnumerable<CardModel> options, int minSelect, int maxSelect)
+        {
+            int take = Math.Clamp(count, minSelect, maxSelect);
+            return Task.FromResult(options.Take(take));
+        }
+
+        public CardRewardSelection GetSelectedCardReward(
+            IReadOnlyList<CardCreationResult> options,
+            IReadOnlyList<CardRewardAlternative> alternatives) =>
+            new AutoSlayCardSelector(new Rng(1)).GetSelectedCardReward(options, alternatives);
+    }
+
+    private static async Task TestCorePackmasterRelics()
+    {
+        bool savedAllPacks = PackmasterConfig.AllPacksMode;
+        PackmasterConfig.AllPacksMode = false;
+        try
+        {
+            var player = Player.CreateForNewRun<ThePackmaster>(new UnlockState(SaveManager.Instance.Progress), 1uL);
+            var runState = await NGame.Instance!.StartNewSingleplayerRun(
+                player,
+                shouldSave: false,
+                ActModel.GetDefaultList(),
+                Array.Empty<ModifierModel>(),
+                "PMRELIC1",
+                GameMode.Standard,
+                isCustomGame: false);
+
+            // Set 3 active packs so GemOfUnity can be cleanly triggered in 3 plays!
+            PackRunState.SetActivePacksForRun(runState, [PackDefinitions.CoreSetId, PackDefinitions.QuietId, PackDefinitions.BatterId]);
+
+            // 1. PmBoosterPack: adds 1 card from a registered Packmaster pack to deck!
+            var deckSnapshotBeforeBooster = player.Deck.Cards.ToHashSet();
+            await RelicCmd.Obtain<PmBoosterPack>(player);
+            var addedByBooster = player.Deck.Cards.Where(c => !deckSnapshotBeforeBooster.Contains(c)).ToList();
+            AutoTestAssert.Equal(1, addedByBooster.Count, "PmBoosterPack added 1 card to deck");
+            AutoTestAssert.NotNull(PackRegistry.GetForCard(addedByBooster[0]), "PmBoosterPack card belongs to a registered Pack");
+
+            // 2. PmCollection: minSelect=0, maxSelect=int.MaxValue; test selector picks 2 cards from the SAME pack (and 0-pick confirm also works)!
+            var deckSnapshotBeforeCollection = player.Deck.Cards.ToHashSet();
+            var prevSelector = _activeCardSelector;
+            _activeCardSelector = new TakeNCardSelector(2);
+            try
+            {
+                await RelicCmd.Obtain<PmCollection>(player);
+            }
+            finally
+            {
+                _activeCardSelector = prevSelector;
+            }
+            var addedByCollection = player.Deck.Cards.Where(c => !deckSnapshotBeforeCollection.Contains(c)).ToList();
+            AutoTestAssert.Equal(2, addedByCollection.Count, "PmCollection added 2 chosen pack cards to deck (10+1+2=13)");
+            var collectionPack = AutoTestAssert.NotNull(PackRegistry.GetForCard(addedByCollection[0]), "PmCollection card 1 has pack");
+            AutoTestAssert.Equal(collectionPack, PackRegistry.GetForCard(addedByCollection[1]), "PmCollection cards come from the same pack");
+
+            // 3. BagOfHolding: allowed when HandyHaversack is owned, removes HandyHaversack, then IsAllowed becomes false!
+            AutoTestAssert.True(ModelDb.Relic<BagOfHolding>().IsAllowed(runState), "BagOfHolding allowed while player owns HandyHaversack");
+            var bag = await RelicCmd.Obtain<BagOfHolding>(player);
+            AutoTestAssert.True(!player.Relics.Any(r => r is HandyHaversack), "BagOfHolding removed HandyHaversack");
+            AutoTestAssert.True(!ModelDb.Relic<BagOfHolding>().IsAllowed(runState), "BagOfHolding no longer allowed after HandyHaversack removed");
+
+            // 4. GemOfUnity IsAllowed check: true when !AllPacksMode, false when AllPacksMode == true.
+            AutoTestAssert.True(ModelDb.Relic<GemOfUnity>().IsAllowed(runState), "GemOfUnity allowed in normal mode");
+            PackmasterConfig.AllPacksMode = true;
+            AutoTestAssert.True(!ModelDb.Relic<GemOfUnity>().IsAllowed(runState), "GemOfUnity disallowed in AllPacksMode");
+            PackmasterConfig.AllPacksMode = false;
+
+            var badge = await RelicCmd.Obtain<CollectorBadge>(player);
+            var gem = await RelicCmd.Obtain<GemOfUnity>(player);
+
+            // Enter combat: Deck has 13 cards -> BagOfHolding gives 13 / 5 = 2 turns of +1 Energy!
+            await RunManager.Instance.EnterRoomDebug(RoomType.Monster, MapPointType.Monster, showTransition: false);
+            await WaitUntilAsync(() =>
+                CombatManager.Instance.IsInProgress
+                && !CombatManager.Instance.PlayerActionsDisabled
+                && player.PlayerCombatState is not null
+                && !RunManager.Instance.ActionExecutor.IsRunning);
+
+            var pcs = AutoTestAssert.NotNull(player.PlayerCombatState, "PlayerCombatState");
+            var combatState = AutoTestAssert.NotNull(player.Creature.CombatState, "CombatState");
+            var enemy = AutoTestAssert.NotNull(combatState.HittableEnemies.FirstOrDefault(), "First hittable enemy");
+            await CreatureCmd.GainMaxHp(enemy, 500m);
+
+            // Turn 1: 3 base + 1 BagOfHolding = 4 Energy (HandyHaversack is gone -> 5-card hand, 4 Energy, BagOfHolding counter = 1 remaining!).
+            AutoTestAssert.Equal(5, pcs.Hand.Cards.Count, "Turn-1 hand size is 5 (HandyHaversack was replaced)");
+            AutoTestAssert.Equal(4, pcs.Energy, "Turn-1 Energy = 3 base + 1 BagOfHolding");
+            AutoTestAssert.Equal(1, bag.DisplayAmount, "BagOfHolding counter decremented 2 -> 1");
+            AutoTestAssert.Equal(3, gem.DisplayAmount, "GemOfUnity counter starts at 3 active packs");
+            AutoTestAssert.Equal(0, badge.DisplayAmount, "CollectorBadge counter starts at 0");
+
+            // Take 10 HP damage so GemOfUnity's +5 Heal is observable.
+            await CreatureCmd.Damage(new ThrowingPlayerChoiceContext(), player.Creature, 10m, ValueProp.Unblockable | ValueProp.Unpowered, null, null);
+            int hpBeforeGem = player.Creature.CurrentHp;
+
+            foreach (var c in pcs.Hand.Cards.ToList())
+                await CardPileCmd.Add(c, PileType.Discard);
+            await PlayerCmd.GainEnergy(6, player);
+
+            // Play non-pack Strike (must NOT affect badge or gem!), CoreSet #1, duplicate CoreSet #2, Quiet #1, Batter #1, and inactive Warlock #1 (4th pack -> badge stays capped at 3, gem does NOT re-trigger!).
+            var nonPackStrike = combatState.CreateCard<PackmasterStrike>(player);
+            var core1 = combatState.CreateCard<Showoff>(player);
+            var core2 = combatState.CreateCard<Sideboard>(player);
+            var quiet1 = combatState.CreateCard<IronShield>(player);
+            var batter1 = combatState.CreateCard<WideAngle>(player);
+            var inactiveWarlock = combatState.CreateCard<HighPriestessJeklik>(player);
+            await CardPileCmd.Add(nonPackStrike, PileType.Hand);
+            await CardPileCmd.Add(core1, PileType.Hand);
+            await CardPileCmd.Add(core2, PileType.Hand);
+            await CardPileCmd.Add(quiet1, PileType.Hand);
+            await CardPileCmd.Add(batter1, PileType.Hand);
+            await CardPileCmd.Add(inactiveWarlock, PileType.Hand);
+
+            AutoTestAssert.True(nonPackStrike.TryManualPlay(enemy), "Play non-pack Strike");
+            await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+            AutoTestAssert.Equal(0, badge.DisplayAmount, "Non-pack card did not increment CollectorBadge");
+            AutoTestAssert.Equal(3, gem.DisplayAmount, "Non-pack card did not decrement GemOfUnity");
+
+            AutoTestAssert.True(core1.TryManualPlay(null), "Play CoreSet #1");
+            await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+            AutoTestAssert.Equal(1, badge.DisplayAmount, "CollectorBadge count = 1 after CoreSet");
+            AutoTestAssert.Equal(2, gem.DisplayAmount, "GemOfUnity remaining = 2 after CoreSet");
+
+            AutoTestAssert.True(core2.TryManualPlay(null), "Play CoreSet #2 (duplicate pack)");
+            await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+            AutoTestAssert.Equal(1, badge.DisplayAmount, "Duplicate pack did not increment CollectorBadge");
+            AutoTestAssert.Equal(2, gem.DisplayAmount, "Duplicate pack did not decrement GemOfUnity");
+
+            AutoTestAssert.True(quiet1.TryManualPlay(null), "Play Quiet #1");
+            await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+            AutoTestAssert.Equal(2, badge.DisplayAmount, "CollectorBadge count = 2 after Quiet");
+            AutoTestAssert.Equal(1, gem.DisplayAmount, "GemOfUnity remaining = 1 after Quiet");
+            AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<EnergyNextTurnPower>(), "CollectorBadge has not triggered at 2 packs");
+
+            int blockBeforeThird = player.Creature.Block;
+            AutoTestAssert.True(batter1.TryManualPlay(enemy), "Play Batter #1 (3rd pack -> triggers BOTH CollectorBadge & GemOfUnity!)");
+            await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+
+            AutoTestAssert.Equal(3, badge.DisplayAmount, "CollectorBadge reached 3 packs");
+            AutoTestAssert.Equal(RelicStatus.Disabled, badge.Status, "CollectorBadge disabled for rest of turn");
+            AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<EnergyNextTurnPower>(), "CollectorBadge applied EnergyNextTurnPower(1)");
+
+            AutoTestAssert.Equal(RelicStatus.Disabled, gem.Status, "GemOfUnity disabled after triggering once");
+            AutoTestAssert.True(!gem.ShowCounter, "GemOfUnity hides counter after triggering");
+            AutoTestAssert.Equal(blockBeforeThird + 20, player.Creature.Block, "GemOfUnity granted +20 Block");
+            AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<StrengthPower>(), "GemOfUnity granted +1 Strength");
+            AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<DexterityPower>(), "GemOfUnity granted +1 Dexterity");
+            AutoTestAssert.Equal(hpBeforeGem + 5, player.Creature.CurrentHp, "GemOfUnity healed +5 HP");
+
+            // 4th distinct pack card (inactive Warlock): CollectorBadge stays capped at 3 (no 2nd EnergyNextTurnPower), GemOfUnity does not re-trigger!
+            AutoTestAssert.True(inactiveWarlock.TryManualPlay(null), "Play 4th pack card (Warlock)");
+            await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+            AutoTestAssert.Equal(3, badge.DisplayAmount, "CollectorBadge stayed capped at 3 after 4th pack");
+            AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<EnergyNextTurnPower>(), "CollectorBadge did not grant extra EnergyNextTurnPower");
+            AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<StrengthPower>(), "GemOfUnity did not re-trigger");
+
+            // Turn 2: Energy = 3 base + 1 BagOfHolding (last turn!) + 1 CollectorBadge = 5 Energy; CollectorBadge reset to 0!
+            await EndTurnAndWaitForRoundAsync(player, 2);
+            AutoTestAssert.Equal(5, pcs.Energy, "Turn-2 Energy = 3 base + 1 BagOfHolding + 1 CollectorBadge");
+            AutoTestAssert.Equal(0, bag.DisplayAmount, "BagOfHolding counter reached 0 on Turn 2");
+            AutoTestAssert.True(!bag.ShowCounter, "BagOfHolding hides counter once exhausted");
+            AutoTestAssert.Equal(RelicStatus.Disabled, bag.Status, "BagOfHolding disabled after 2 turns");
+            AutoTestAssert.Equal(0, badge.DisplayAmount, "CollectorBadge reset to 0 on Turn 2");
+            AutoTestAssert.Equal(RelicStatus.Normal, badge.Status, "CollectorBadge re-enabled on Turn 2");
+
+            // Turn 3: BagOfHolding exhausted, no CollectorBadge -> 3 base Energy!
+            await EndTurnAndWaitForRoundAsync(player, 3);
+            AutoTestAssert.Equal(3, pcs.Energy, "Turn-3 Energy = 3 base (BagOfHolding exhausted after 2 turns)");
+        }
+        finally
+        {
+            PackmasterConfig.AllPacksMode = savedAllPacks;
         }
     }
 
