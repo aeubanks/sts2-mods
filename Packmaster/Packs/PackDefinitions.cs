@@ -1,3 +1,4 @@
+using Packmaster.Cards.Batter;
 using Packmaster.Cards.BitingCold;
 using Packmaster.Cards.CoreSet;
 using Packmaster.Cards.EvenOdd;
@@ -15,6 +16,7 @@ public static class PackDefinitions
     public const string WarlockId = "Warlock";
     public const string EvenOddId = "EvenOdd";
     public const string HighEnergyId = "HighEnergy";
+    public const string BatterId = "Batter";
 
     public static void RegisterAll()
     {
@@ -118,6 +120,23 @@ public static class PackDefinitions
                 typeof(StruckByATrain),
                 typeof(SuperNova),
                 typeof(Trash),
+            ]));
+
+        PackRegistry.Register(new PackDefinition(
+            Id: BatterId,
+            AlwaysInclude: false,
+            CardTypes:
+            [
+                typeof(AvatarBeat),
+                typeof(BatterUp),
+                typeof(HardCaramel),
+                typeof(Homerun),
+                typeof(OpenBracket),
+                typeof(OptimizedBlur),
+                typeof(Tragedy),
+                typeof(UltimateHomerun),
+                typeof(WideAngle),
+                typeof(WindUp),
             ]));
     }
 }

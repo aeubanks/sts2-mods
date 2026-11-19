@@ -40,5 +40,17 @@
   "PACKMASTER-MULTI_TOOL_POWER.smartDescription": "If you end your turn with unused Energy, ALL enemies lose [blue]{Amount}[/blue] HP.",
   "PACKMASTER-STORM_FORM_POWER.title": "Storm Form",
   "PACKMASTER-STORM_FORM_POWER.description": "At the start of your turn, gain additional Energy.",
-  "PACKMASTER-STORM_FORM_POWER.smartDescription": "At the start of your turn, gain [blue]{Amount}[/blue] additional Energy."
+  "PACKMASTER-STORM_FORM_POWER.smartDescription": "At the start of your turn, gain [blue]{Amount}[/blue] additional Energy.",
+  "PACKMASTER-AVATAR_BEAT_POWER.title": "Avatar Beat",
+  "PACKMASTER-AVATAR_BEAT_POWER.description": "Whenever you deal enough unblocked attack damage, gain Strength, draw cards, and raise the threshold by 5.",
+  "PACKMASTER-AVATAR_BEAT_POWER.smartDescription": "Whenever you deal at least [blue]{Threshold}[/blue] unblocked attack damage, gain [blue]{Amount}[/blue] [gold]Strength[/gold], draw [blue]{Draws}[/blue] {Draws:plural:card|cards}, and raise this threshold by [blue]5[/blue].",
+  "PACKMASTER-HARD_CARAMEL_POWER.title": "Hard Caramel",
+  "PACKMASTER-HARD_CARAMEL_POWER.description": "After attacking, apply Vulnerable if the target does not have any.",
+  "PACKMASTER-HARD_CARAMEL_POWER.smartDescription": "After attacking, apply [blue]{Amount}[/blue] [gold]Vulnerable[/gold] if the target does not have any.",
+  "PACKMASTER-OPEN_BRACKET_POWER.title": "Open Bracket",
+  "PACKMASTER-OPEN_BRACKET_POWER.description": "You can only play Attacks for the rest of the turn.",
+  "PACKMASTER-OPEN_BRACKET_POWER.smartDescription": "You can only play Attacks for the rest of the turn.",
+  "PACKMASTER-OPTIMIZED_BLUR_POWER.title": "Optimized Blur",
+  "PACKMASTER-OPTIMIZED_BLUR_POWER.description": "Whenever you deal unblocked attack damage, gain Block.",
+  "PACKMASTER-OPTIMIZED_BLUR_POWER.smartDescription": "Whenever you deal unblocked attack damage, gain [blue]{Amount}[/blue] [gold]Block[/gold]."
 }

@@ -22,6 +22,7 @@ using MegaCrit.Sts2.Core.Settings;
 using MegaCrit.Sts2.Core.Unlocks;
 using MegaCrit.Sts2.Core.ValueProps;
 using Packmaster.Cards;
+using Packmaster.Cards.Batter;
 using Packmaster.Cards.BitingCold;
 using Packmaster.Cards.CoreSet;
 using Packmaster.Cards.EvenOdd;
@@ -93,6 +94,7 @@ internal static class PackmasterAutoTestRunner
                 ("WarlockPackInCombat", TestWarlockPackInCombat),
                 ("EvenOddPackInCombat", TestEvenOddPackInCombat),
                 ("HighEnergyPackInCombat", TestHighEnergyPackInCombat),
+                ("BatterPackInCombat", TestBatterPackInCombat),
             ];
 
             foreach (var (name, run) in tests)
@@ -1739,6 +1741,209 @@ internal static class PackmasterAutoTestRunner
         await EndTurnAndWaitForRoundAsync(player, 3);
         AutoTestAssert.Equal(enemyHpBeforeZeroEnd, enemy.CurrentHp, "MultiTool dealt 0 HP loss when ending turn with 0 Energy");
         AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<MultiToolPower>(), "MultiToolPower still expired at 0 Energy");
+    }
+
+    private static async Task TestBatterPackInCombat()
+    {
+        var (player, _, combatState) = await StartCombatAsync("PMBATT01");
+        var pcs = AutoTestAssert.NotNull(player.PlayerCombatState, "PlayerCombatState");
+        var enemy = AutoTestAssert.NotNull(combatState.HittableEnemies.FirstOrDefault(), "First hittable enemy");
+
+        await CreatureCmd.GainMaxHp(enemy, 800m);
+
+        foreach (var c in pcs.Hand.Cards.ToList())
+            await CardPileCmd.Add(c, PileType.Discard);
+
+        async Task RefillEnergy(int target = 15)
+        {
+            if (pcs.Energy < target)
+                await PlayerCmd.GainEnergy(target - pcs.Energy, player);
+        }
+
+        // 1. WideAngle: steals up to 7 Block from enemy (10 -> 3) and applies 1 Weak.
+        await RefillEnergy();
+        await CreatureCmd.GainBlock(enemy, 10m, ValueProp.Unpowered, null);
+        var wideAngle = combatState.CreateCard<WideAngle>(player);
+        await CardPileCmd.Add(wideAngle, PileType.Hand);
+        int blockBefore = player.Creature.Block;
+        AutoTestAssert.True(wideAngle.TryManualPlay(enemy), "Play WideAngle");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(3, enemy.Block, "WideAngle stole 7 of enemy's 10 Block");
+        AutoTestAssert.Equal(blockBefore + 7, player.Creature.Block, "WideAngle granted 7 stolen Block");
+        AutoTestAssert.Equal(1, enemy.GetPowerAmount<WeakPower>(), "WideAngle applied 1 Weak");
+
+        // Clear enemy block and also verify WideAngle against 0-Block enemy grants 0 Block + still applies Weak!
+        await CreatureCmd.LoseBlock(new ThrowingPlayerChoiceContext(), enemy, enemy.Block, null);
+        var wideAngleZero = combatState.CreateCard<WideAngle>(player);
+        await CardPileCmd.Add(wideAngleZero, PileType.Hand);
+        blockBefore = player.Creature.Block;
+        AutoTestAssert.True(wideAngleZero.TryManualPlay(enemy), "Play WideAngle against 0-Block enemy");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(blockBefore, player.Creature.Block, "WideAngle against 0-Block enemy gained 0 Block");
+        AutoTestAssert.Equal(2, enemy.GetPowerAmount<WeakPower>(), "WideAngle against 0-Block enemy still applied 1 Weak");
+
+        // 2. Homerun on Turn 1 already has 2 prior cards (wideAngle, wideAngleZero) -> 1.5x crit (24 dmg)!
+        // Test non-crit Homerun on Turn 2 (0 prior cards) below.
+        var homerunCrit = combatState.CreateCard<Homerun>(player);
+        await CardPileCmd.Add(homerunCrit, PileType.Hand);
+        int hpBefore = enemy.CurrentHp;
+        AutoTestAssert.True(homerunCrit.TryManualPlay(enemy), "Play Homerun with 2 prior cards");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(hpBefore - 24, enemy.CurrentHp, "Homerun dealt 1.5x crit (24) damage with >= 2 prior cards");
+
+        // 4. UltimateHomerun: highest unblocked attack damage so far is 24 -> verify InCombat description AND 24 damage!
+        var ultHomerun = combatState.CreateCard<UltimateHomerun>(player);
+        await CardPileCmd.Add(ultHomerun, PileType.Hand);
+        string ultDesc = ultHomerun.GetDescriptionForPile(PileType.Hand);
+        AutoTestAssert.True(!ultDesc.Contains('{') && !ultDesc.Contains('}') && ultDesc.Contains("24"), $"UltimateHomerun InCombat description rendered cleanly: {ultDesc}");
+        hpBefore = enemy.CurrentHp;
+        AutoTestAssert.True(ultHomerun.TryManualPlay(enemy), "Play UltimateHomerun");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(hpBefore - 24, enemy.CurrentHp, "UltimateHomerun dealt highest prior unblocked attack damage (24)");
+
+        // 5. OptimizedBlur (+2 Block per unblocked attack), HardCaramel (apply 1 Vuln if none), AvatarBeat (+2 Str + draw 1 at >=10, raises to 15).
+        await RefillEnergy();
+        var blur = combatState.CreateCard<OptimizedBlur>(player);
+        var caramel = combatState.CreateCard<HardCaramel>(player);
+        var avatar = combatState.CreateCard<AvatarBeat>(player);
+        await CardPileCmd.Add(blur, PileType.Hand);
+        await CardPileCmd.Add(caramel, PileType.Hand);
+        await CardPileCmd.Add(avatar, PileType.Hand);
+        AutoTestAssert.True(blur.TryManualPlay(null), "Play OptimizedBlur");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.True(caramel.TryManualPlay(null), "Play HardCaramel");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.True(avatar.TryManualPlay(null), "Play AvatarBeat");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(2, player.Creature.GetPowerAmount<OptimizedBlurPower>(), "OptimizedBlurPower(2)");
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<HardCaramelPower>(), "HardCaramelPower(1)");
+        AutoTestAssert.Equal(2, player.Creature.GetPowerAmount<AvatarBeatPower>(), "AvatarBeatPower(2)");
+
+        // 5b. Blocked attack gate: enemy has 20 Block -> 6-dmg Strike deals 0 unblocked dmg -> OptimizedBlur does NOT grant Block, HardCaramel DOES apply 1 Vuln!
+        await CreatureCmd.GainBlock(enemy, 20m, ValueProp.Unpowered, null);
+        var blockedStrike = combatState.CreateCard<PackmasterStrike>(player);
+        await CardPileCmd.Add(blockedStrike, PileType.Hand);
+        blockBefore = player.Creature.Block;
+        AutoTestAssert.True(blockedStrike.TryManualPlay(enemy), "Play Strike fully blocked by enemy");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(blockBefore, player.Creature.Block, "OptimizedBlur did not trigger on 0 unblocked damage");
+        AutoTestAssert.Equal(1, enemy.GetPowerAmount<VulnerablePower>(), "HardCaramel still applied 1 Vulnerable on blocked attack");
+        await CreatureCmd.LoseBlock(new ThrowingPlayerChoiceContext(), enemy, enemy.Block, null);
+        await PowerCmd.Remove<VulnerablePower>(enemy);
+
+        // 6. BatterUp against attacking enemy (Nibbit Turn 1 BUTT_MOVE): exact 1.5x crit (15 dmg) -> triggers OptimizedBlur (+2 Block), HardCaramel (1 Vuln), AvatarBeat (+2 Str, +1 draw, threshold 10 -> 15)!
+        AutoTestAssert.True(enemy.Monster?.IntendsToAttack == true, "Seed PMBATT01 Turn-1 enemy intends to attack so BatterUp crit is exercised");
+        var batterUp = combatState.CreateCard<BatterUp>(player);
+        await CardPileCmd.Add(batterUp, PileType.Hand);
+        hpBefore = enemy.CurrentHp;
+        blockBefore = player.Creature.Block;
+        int handBeforeBatter = pcs.Hand.Cards.Count;
+        AutoTestAssert.True(batterUp.TryManualPlay(enemy), "Play BatterUp (crit)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(hpBefore - 15, enemy.CurrentHp, "BatterUp crit dealt 10*1.5=15 damage");
+        AutoTestAssert.Equal(blockBefore + 2, player.Creature.Block, "OptimizedBlur granted +2 Block on unblocked attack");
+        AutoTestAssert.Equal(1, enemy.GetPowerAmount<VulnerablePower>(), "HardCaramel applied 1 Vulnerable");
+        AutoTestAssert.Equal(2, player.Creature.GetPowerAmount<StrengthPower>(), "AvatarBeat granted +2 Strength (>= 10 dmg)");
+        AutoTestAssert.Equal(handBeforeBatter, pcs.Hand.Cards.Count, "AvatarBeat drew 1 replacement card");
+        var avatarPower = AutoTestAssert.NotNull(player.Creature.GetPower<AvatarBeatPower>(), "AvatarBeatPower");
+        AutoTestAssert.Equal(15, avatarPower.DynamicVars["Threshold"].IntValue, "AvatarBeat raised threshold 10 -> 15");
+
+        // Verify HardCaramel does NOT apply extra Vulnerable when target already has Vulnerable!
+        var followStrike = combatState.CreateCard<PackmasterStrike>(player);
+        await CardPileCmd.Add(followStrike, PileType.Hand);
+        AutoTestAssert.True(followStrike.TryManualPlay(enemy), "Play follow-up Strike against Vulnerable enemy");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(1, enemy.GetPowerAmount<VulnerablePower>(), "HardCaramel did not add Vulnerable when target already had it");
+
+        // 7. WindUp: applies 1 Vulnerable (1 -> 2), gains 1 Energy, Exhausts.
+        var windUp = combatState.CreateCard<WindUp>(player);
+        await CardPileCmd.Add(windUp, PileType.Hand);
+        int energyBefore = pcs.Energy;
+        AutoTestAssert.True(windUp.TryManualPlay(enemy), "Play WindUp");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(2, enemy.GetPowerAmount<VulnerablePower>(), "WindUp applied 1 Vulnerable");
+        AutoTestAssert.Equal(energyBefore + 1, pcs.Energy, "WindUp gained 1 Energy");
+        AutoTestAssert.True(pcs.ExhaustPile.Cards.Contains(windUp), "WindUp exhausted");
+
+        // 8. Tragedy: 5 cards in hand -> non-crit (13 dmg < 15 threshold -> AvatarBeat does NOT trigger!); then stack 2nd AvatarBeat (Amount=4, Draws=2, Threshold stays 15) -> Tragedy with 6 cards -> 20 dmg >= 15 -> +4 Str, +2 cards drawn, Threshold 15 -> 20!
+        foreach (var c in pcs.Hand.Cards.ToList())
+            await CardPileCmd.Add(c, PileType.Discard);
+        await RefillEnergy();
+        for (int i = 0; i < 4; i++)
+            await CardPileCmd.Add(combatState.CreateCard<PackmasterDefend>(player), PileType.Hand);
+        var tragedy5 = combatState.CreateCard<Tragedy>(player);
+        await CardPileCmd.Add(tragedy5, PileType.Hand);
+        AutoTestAssert.Equal(5, pcs.Hand.Cards.Count, "5 cards in hand before non-crit Tragedy");
+        hpBefore = enemy.CurrentHp;
+        AutoTestAssert.True(tragedy5.TryManualPlay(null), "Play Tragedy with 5 cards");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(hpBefore - 13, enemy.CurrentHp, "Tragedy with 5 cards dealt non-crit floor(9*1.5)=13 damage");
+        AutoTestAssert.Equal(2, player.Creature.GetPowerAmount<StrengthPower>(), "13 < 15 threshold did not trigger AvatarBeat");
+        AutoTestAssert.Equal(15, avatarPower.DynamicVars["Threshold"].IntValue, "AvatarBeat threshold stayed at 15");
+
+        // Stack a 2nd AvatarBeat: Amount 2 -> 4, Draws 1 -> 2, Threshold stays 15!
+        var avatar2 = combatState.CreateCard<AvatarBeat>(player);
+        await CardPileCmd.Add(avatar2, PileType.Hand);
+        AutoTestAssert.True(avatar2.TryManualPlay(null), "Play 2nd AvatarBeat to stack");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(4, avatarPower.Amount, "2nd AvatarBeat stacked Amount 2 -> 4");
+        AutoTestAssert.Equal(2, avatarPower.DynamicVars["Draws"].IntValue, "2nd AvatarBeat stacked Draws 1 -> 2");
+        AutoTestAssert.Equal(15, avatarPower.DynamicVars["Threshold"].IntValue, "2nd AvatarBeat kept Threshold at 15");
+
+        // Add 1 Defend + Tragedy = 6 cards total -> 1.5x crit: floor((7 + 2 Str) * 1.5 * 1.5) = 20 dmg >= 15 -> AvatarBeat triggers (+4 Str -> 6, +2 draws, Threshold -> 20)!
+        await CardPileCmd.Add(combatState.CreateCard<PackmasterDefend>(player), PileType.Hand);
+        var tragedy6 = combatState.CreateCard<Tragedy>(player);
+        await CardPileCmd.Add(tragedy6, PileType.Hand);
+        AutoTestAssert.Equal(6, pcs.Hand.Cards.Count, "6 cards in hand before crit Tragedy");
+        hpBefore = enemy.CurrentHp;
+        AutoTestAssert.True(tragedy6.TryManualPlay(null), "Play Tragedy with 6 cards");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(hpBefore - 20, enemy.CurrentHp, "Tragedy with 6 cards dealt 1.5x crit + Vuln = 20 damage");
+        AutoTestAssert.Equal(6, player.Creature.GetPowerAmount<StrengthPower>(), "Stacked AvatarBeat granted +4 Strength (2 -> 6)");
+        AutoTestAssert.Equal(7, pcs.Hand.Cards.Count, "Stacked AvatarBeat drew 2 cards (5 remaining + 2 drawn = 7)");
+        AutoTestAssert.Equal(20, avatarPower.DynamicVars["Threshold"].IntValue, "AvatarBeat raised threshold 15 -> 20");
+
+        // 8b. UltimateHomerun with 6 Strength + Vulnerable: base 24 + 6 Str = 30, * 1.5 Vuln = 45 dmg!
+        var ultScaled = combatState.CreateCard<UltimateHomerun>(player);
+        await CardPileCmd.Add(ultScaled, PileType.Hand);
+        hpBefore = enemy.CurrentHp;
+        AutoTestAssert.True(ultScaled.TryManualPlay(enemy), "Play UltimateHomerun with 6 Strength + Vulnerable");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(hpBefore - 45, enemy.CurrentHp, "UltimateHomerun scaled with Strength (24+6=30) and Vulnerable (*1.5=45)");
+
+        // 9. OpenBracket: draws 2 cards, prevents playing Skills for rest of turn, allows Attacks, expires on Turn 2!
+        foreach (var c in pcs.Hand.Cards.ToList())
+            await CardPileCmd.Add(c, PileType.Discard);
+        await RefillEnergy();
+        var openBracket = combatState.CreateCard<OpenBracket>(player);
+        var blockedDefend = combatState.CreateCard<PackmasterDefend>(player);
+        var allowedStrike = combatState.CreateCard<PackmasterStrike>(player);
+        await CardPileCmd.Add(openBracket, PileType.Hand);
+        await CardPileCmd.Add(blockedDefend, PileType.Hand);
+        await CardPileCmd.Add(allowedStrike, PileType.Hand);
+        int handBeforeBracket = pcs.Hand.Cards.Count;
+        AutoTestAssert.True(openBracket.TryManualPlay(null), "Play OpenBracket");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(handBeforeBracket - 1 + 2, pcs.Hand.Cards.Count, "OpenBracket drew 2 cards");
+        AutoTestAssert.True(player.Creature.HasPower<OpenBracketPower>(), "OpenBracketPower applied");
+        AutoTestAssert.True(!blockedDefend.CanPlay(), "OpenBracketPower prevents playing Skills");
+        AutoTestAssert.True(allowedStrike.CanPlay(), "OpenBracketPower still allows playing Attacks");
+        AutoTestAssert.True(allowedStrike.TryManualPlay(enemy), "Play Attack under OpenBracketPower");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+
+        await EndTurnAndWaitForRoundAsync(player, 2);
+        AutoTestAssert.True(!player.Creature.HasPower<OpenBracketPower>(), "OpenBracketPower expired on Turn 2");
+
+        // 10. Non-crit Homerun on Turn 2 (0 prior cards played this turn -> no 1.5x crit)!
+        await RefillEnergy();
+        await PowerCmd.Remove<VulnerablePower>(enemy);
+        var homerunNoCrit = combatState.CreateCard<Homerun>(player);
+        await CardPileCmd.Add(homerunNoCrit, PileType.Hand);
+        int strOnTurn2 = player.Creature.GetPowerAmount<StrengthPower>();
+        int effectiveHpBefore = enemy.CurrentHp + enemy.Block;
+        AutoTestAssert.True(homerunNoCrit.TryManualPlay(enemy), "Play non-crit Homerun as 1st card of Turn 2");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(effectiveHpBefore - (16 + strOnTurn2), enemy.CurrentHp + enemy.Block, "Homerun dealt non-crit 16+Str damage with 0 prior cards");
     }
 
     private static async Task WaitUntilAsync(Func<bool> predicate, int timeoutMs = 15000)
