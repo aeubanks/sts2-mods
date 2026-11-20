@@ -226,6 +226,7 @@ internal static class DownfallAutoTestRunner
                 ("AutomatonVisualsRuntime", AutomatonTests.TestVisualsRuntime),
                 ("AutomatonStarterEncodeAndFunctionCompile", AutomatonTests.TestStarterEncodeAndFunctionCompile),
                 ("AutomatonCommonCardsInCombat", AutomatonTests.TestCommonCardsInCombat),
+                ("AutomatonUncommonBatch1InCombat", AutomatonTests.TestUncommonBatch1InCombat),
             ];
 
             int matchedIndex = 0;

@@ -52,8 +52,7 @@ public sealed class BugBarrage() : BronzeCard(1, CardType.Attack, CardRarity.Com
             if (!owner.Creature.IsAlive || CombatManager.Instance.IsOverOrEnding)
                 return;
             var wound = combatState.CreateCard<Wound>(owner);
-            var dest = hand.Cards.Count < CardPile.MaxCardsInHand ? PileType.Hand : PileType.Discard;
-            await CardPileCmd.AddGeneratedCardToCombat(wound, dest, owner);
+            await AutomatonMechanics.AddGeneratedCardToHandOrDiscardAsync(wound, owner);
         }
 
         var statusesInHand = hand.Cards.Where(c => c.Type == CardType.Status).ToList();

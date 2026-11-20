@@ -19,7 +19,7 @@ namespace Downfall.Automaton;
 /// </summary>
 public interface IEncodeCopyProvider
 {
-    int ConsumeExtraEncodeCopies(Player player, BronzeCard card, bool isFromCardPlay);
+    Task<int> ConsumeExtraEncodeCopiesAsync(PlayerChoiceContext choiceContext, Player player, BronzeCard card, bool isFromCardPlay);
 }
 
 /// <summary>
@@ -115,6 +115,14 @@ public static class AutomatonMechanics
         NCombatRoom.Instance?.GetCreatureNode(player.Creature)?.OrbManager?.UpdateVisuals(OrbEvokeType.None);
     }
 
+    public static Task AddGeneratedCardToHandOrDiscardAsync(CardModel card, Player player)
+    {
+        var dest = PileType.Hand.GetPile(player).Cards.Count < CardPile.MaxCardsInHand
+            ? PileType.Hand
+            : PileType.Discard;
+        return CardPileCmd.AddGeneratedCardToCombat(card, dest, player);
+    }
+
     /// <summary>
     /// Insert: shuffles <paramref name="count"/> newly generated cards of type <typeparamref name="TCard"/>
     /// into the player's Draw Pile.
@@ -167,6 +175,54 @@ public static class AutomatonMechanics
         }
 
         return chosen;
+    }
+
+    /// <summary>
+    /// Creates a random non-Basic, non-Token Encodable Automaton card for GetLatest / Library / SpaghettiCode / BuildAFunctionPotion.
+    /// </summary>
+    public static BronzeCard CreateRandomEncodableCard(Player player)
+    {
+        var combatState = player.Creature.CombatState!;
+        var candidates = GetRandomEncodableCandidates(player);
+        CardModel canonical = candidates.Count > 0
+            ? player.RunState.Rng.CombatCardGeneration.NextItem(candidates)!
+            : ModelDb.Card<Replicate>();
+        return (BronzeCard)combatState.CreateCard(canonical, player);
+    }
+
+    public static List<BronzeCard> CreateDistinctRandomEncodableChoices(Player player, int count = 3)
+    {
+        var combatState = player.Creature.CombatState!;
+        var pool = GetRandomEncodableCandidates(player);
+        var rng = player.RunState.Rng.CombatCardGeneration;
+        var result = new List<BronzeCard>(count);
+
+        int picks = Math.Min(count, pool.Count);
+        for (int i = 0; i < picks; i++)
+        {
+            int idx = rng.NextInt(pool.Count);
+            var canonical = pool[idx];
+            pool.RemoveAt(idx);
+            result.Add((BronzeCard)combatState.CreateCard(canonical, player));
+        }
+
+        while (result.Count < count)
+        {
+            result.Add((BronzeCard)combatState.CreateCard<Replicate>(player));
+        }
+
+        return result;
+    }
+
+    private static List<CardModel> GetRandomEncodableCandidates(Player player)
+    {
+        return ModelDb.CardPool<AutomatonCardPool>()
+            .GetUnlockedCards(player.UnlockState, player.RunState.CardMultiplayerConstraint)
+            .Where(c => c is BronzeCard { Encodes: true }
+                && c.CanBeGeneratedInCombat
+                && c.Rarity is CardRarity.Common or CardRarity.Uncommon or CardRarity.Rare)
+            .Distinct()
+            .ToList();
     }
 
     /// <summary>
@@ -236,7 +292,9 @@ public static class AutomatonMechanics
         {
             foreach (var provider in GetListeners<IEncodeCopyProvider>(player))
             {
-                extraCopies += Math.Max(0, provider.ConsumeExtraEncodeCopies(player, card, isFromCardPlay));
+                if (!player.Creature.IsAlive || CombatManager.Instance.IsOverOrEnding)
+                    return;
+                extraCopies += Math.Max(0, await provider.ConsumeExtraEncodeCopiesAsync(choiceContext, player, card, isFromCardPlay));
             }
             if (extraCopies > 0)
                 cloneTemplate = (BronzeCard)card.CreateClone();
@@ -387,13 +445,13 @@ public static class AutomatonMechanics
         int extraCopies = state.ExtraFunctionCopiesQueued;
         state.ExtraFunctionCopiesQueued = 0;
 
-        await CardPileCmd.AddGeneratedCardToCombat(function, PileType.Hand, player);
+        await AddGeneratedCardToHandOrDiscardAsync(function, player);
         for (int i = 0; i < extraCopies; i++)
         {
             if (!player.Creature.IsAlive || CombatManager.Instance.IsOverOrEnding)
                 break;
             var dup = (FunctionCard)function.CreateClone();
-            await CardPileCmd.AddGeneratedCardToCombat(dup, PileType.Hand, player);
+            await AddGeneratedCardToHandOrDiscardAsync(dup, player);
         }
 
         // 8. Post-output listeners (DefaultPower / Class Default re-encoding Slot 0).
@@ -412,7 +470,7 @@ public static class AutomatonMechanics
         if (player.PlayerCombatState is not { } pcs)
             return;
 
-        foreach (var pile in new[] { pcs.Hand, pcs.DrawPile, pcs.DiscardPile, pcs.ExhaustPile })
+        foreach (var pile in new[] { pcs.Hand, pcs.DrawPile, pcs.DiscardPile, pcs.ExhaustPile, pcs.PlayPile })
         {
             foreach (var card in pile.Cards)
             {

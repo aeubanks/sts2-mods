@@ -69,7 +69,7 @@ public sealed class FunctionCard() : BronzeTokenCard(1, CardType.Skill, CardRari
         _encodedCards = encodedCards.Select(c => (BronzeCard)c.CreateClone()).ToList();
         _isFullRelease = false;
         _playTwice = false;
-        _compiledTitle = BuildCompiledTitle(_encodedCards);
+        _compiledTitle = BuildCompiledTitle(encodedCards);
     }
 
     internal void SetFullRelease()
