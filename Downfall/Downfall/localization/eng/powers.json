@@ -307,5 +307,20 @@
   "DOWNFALL-BIG_GUNS_STRENGTH_POWER.smartDescription": "Whenever you play a card that costs [blue]3[/blue] or more, gain [blue]{Amount}[/blue] [gold]Strength[/gold].",
   "DOWNFALL-CHEAP_STOCK_POWER.title": "Cheap Stock",
   "DOWNFALL-CHEAP_STOCK_POWER.description": "At the start of your turn, [gold]Muddle[/gold] the highest-cost card in your [gold]Hand[/gold].",
-  "DOWNFALL-CHEAP_STOCK_POWER.smartDescription": "At the start of your turn, [gold]Muddle[/gold] the {Amount:plural:highest-cost card|[blue]{}[/blue] highest-cost cards} in your [gold]Hand[/gold]."
+  "DOWNFALL-CHEAP_STOCK_POWER.smartDescription": "At the start of your turn, [gold]Muddle[/gold] the {Amount:plural:highest-cost card|[blue]{}[/blue] highest-cost cards} in your [gold]Hand[/gold].",
+  "DOWNFALL-OVERWHELMING_PRESENCE_POWER.title": "Overwhelming",
+  "DOWNFALL-OVERWHELMING_PRESENCE_POWER.description": "The first time you play an [gold]Offclass[/gold] card each turn, draw cards.",
+  "DOWNFALL-OVERWHELMING_PRESENCE_POWER.smartDescription": "The first time you play an [gold]Offclass[/gold] card each turn, draw [blue]{Amount}[/blue] {Amount:plural:card|cards}.",
+  "DOWNFALL-SERPENTS_NEST_POWER.title": "Serpent's Nest",
+  "DOWNFALL-SERPENTS_NEST_POWER.description": "Whenever you play a Power, deal damage to ALL enemies.",
+  "DOWNFALL-SERPENTS_NEST_POWER.smartDescription": "Whenever you play a Power, deal [blue]{Amount}[/blue] damage to ALL enemies.",
+  "DOWNFALL-TRASH_CAN_POWER.title": "Trash Can",
+  "DOWNFALL-TRASH_CAN_POWER.description": "At the end of your turn, you may [gold]Exhaust[/gold] cards from your [gold]Hand[/gold].",
+  "DOWNFALL-TRASH_CAN_POWER.smartDescription": "At the end of your turn, you may [gold]Exhaust[/gold] up to [blue]{Amount}[/blue] {Amount:plural:card|cards} from your [gold]Hand[/gold].",
+  "DOWNFALL-TSUNAMI_POWER.title": "Tsunami",
+  "DOWNFALL-TSUNAMI_POWER.description": "[gold]Overflow[/gold] effects also grant [gold]Block[/gold].",
+  "DOWNFALL-TSUNAMI_POWER.smartDescription": "[gold]Overflow[/gold] effects also grant [blue]{Amount}[/blue] [gold]Block[/gold].",
+  "DOWNFALL-UNENDING_SUPPLY_POWER.title": "Unending Supply",
+  "DOWNFALL-UNENDING_SUPPLY_POWER.description": "At the start of your turn, add an [gold]Echo[/gold] of a random [gold]Offclass[/gold] card to your [gold]Hand[/gold].",
+  "DOWNFALL-UNENDING_SUPPLY_POWER.smartDescription": "At the start of your turn, add {Amount:plural:an [gold]Echo[/gold] of a random [gold]Offclass[/gold] card|[blue]{}[/blue] [gold]Echoes[/gold] of random [gold]Offclass[/gold] cards} to your [gold]Hand[/gold]."
 }

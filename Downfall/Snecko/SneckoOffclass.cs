@@ -129,7 +129,7 @@ internal static class SneckoOffclass
         return chosen;
     }
 
-    internal static int CountUniqueSuitsInHand(Player? owner)
+    internal static int CountUniqueSuitsInHand(Player? owner, CardModel? includeCard = null)
     {
         if (owner?.PlayerCombatState is null)
             return 0;
@@ -140,6 +140,12 @@ internal static class SneckoOffclass
             if (card.Rarity == CardRarity.Token || card.Type is not (CardType.Attack or CardType.Skill or CardType.Power))
                 continue;
             pools.Add(card.Pool);
+        }
+        if (includeCard is not null
+            && includeCard.Rarity != CardRarity.Token
+            && includeCard.Type is CardType.Attack or CardType.Skill or CardType.Power)
+        {
+            pools.Add(includeCard.Pool);
         }
         return pools.Count;
     }

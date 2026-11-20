@@ -33,5 +33,6 @@
   "DOWNFALL-GIFT_KEYWORD.description": "When you add this card to your [gold]Deck[/gold], choose an [gold]Offclass[/gold] card reward to add to your [gold]Deck[/gold].",
   "DOWNFALL-LUCKY_KEYWORD.title": "Lucky",
   "DOWNFALL-LUCKY_KEYWORD.description": "[gold]Overflow[/gold] effects always activate regardless of [gold]Hand[/gold] size.",
-  "DOWNFALL-SNECKO_MUDDLE.selectionScreenPrompt": "Choose card(s) to Muddle."
+  "DOWNFALL-SNECKO_MUDDLE.selectionScreenPrompt": "Choose card(s) to Muddle.",
+  "DOWNFALL-TRASH_CAN.selectionScreenPrompt": "Choose card(s) to Exhaust."
 }

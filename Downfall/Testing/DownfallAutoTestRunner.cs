@@ -185,6 +185,7 @@ internal static class DownfallAutoTestRunner
                 ("SneckoStarterCombat", SneckoTests.TestStarterCombat),
                 ("SneckoCommonCardsInCombat", SneckoTests.TestCommonCardsInCombat),
                 ("SneckoUncommonBatch1InCombat", SneckoTests.TestUncommonBatch1InCombat),
+                ("SneckoUncommonBatch2InCombat", SneckoTests.TestUncommonBatch2InCombat),
             ];
 
             int matchedIndex = 0;
@@ -633,6 +634,8 @@ internal static class DownfallAutoTestRunner
         AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-SNECKO_MUDDLE.selectionScreenPrompt").Exists(), "Missing Snecko Muddle prompt loc");
         AutoTestAssert.True(new LocString("cards", "DOWNFALL-CRYSTAL_BOOMERANG.selectionScreenPrompt").Exists(), "Missing CrystalBoomerang prompt loc");
         AutoTestAssert.True(new LocString("cards", "DOWNFALL-NOPE.selectionScreenPrompt").Exists(), "Missing Nope prompt loc");
+        AutoTestAssert.True(new LocString("cards", "DOWNFALL-ROUNDABOUT_SWING.selectionScreenPrompt").Exists(), "Missing RoundaboutSwing prompt loc");
+        AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-TRASH_CAN.selectionScreenPrompt").Exists(), "Missing TrashCan prompt loc");
 
         return Task.CompletedTask;
     }

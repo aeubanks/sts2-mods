@@ -1,3 +1,4 @@
+using Downfall.Core;
 using Downfall.Hermit.Cards;
 using Downfall.Hermit.Powers;
 using Downfall.Snecko;
@@ -631,6 +632,231 @@ internal static class SneckoTests
         await DownfallAutoTestRunner.EndTurnAndWaitForRoundAsync(player, 2);
         AutoTestAssert.Equal(7, pcs.Hand.Cards.Count, "Round 2 drew 5 + 2 (FlashInThePan) = 7 cards");
         AutoTestAssert.True(highCard.EnergyCost.GetWithModifiers(CostModifiers.All) != 3, "CheapStock muddled the 3-cost LaserEyes at start of Round 2");
+    }
+
+    internal static async Task TestUncommonBatch2InCombat()
+    {
+        var (player, _, combatState) = await DownfallAutoTestRunner.StartCombatAsync<TheSnecko>("SNECKO_UNC2");
+        var pcs = AutoTestAssert.NotNull(player.PlayerCombatState, "Snecko PlayerCombatState");
+        var enemy1 = AutoTestAssert.NotNull(combatState.HittableEnemies.FirstOrDefault(), "Enemy 1");
+        var enemy2 = await CreatureCmd.Add<MegaCrit.Sts2.Core.Models.Monsters.Nibbit>(combatState);
+        await CreatureCmd.GainMaxHp(enemy1, 800m);
+        await CreatureCmd.GainMaxHp(enemy2, 800m);
+
+        // 1. OverwhelmingPresence (draw 1 on FIRST offclass played each turn only) + SerpentsNest (7 dmg ALL whenever Power played)!
+        await ClearHandAndRefillEnergy(player, pcs);
+        var overwhelming = combatState.CreateCard<OverwhelmingPresence>(player);
+        var nest = combatState.CreateCard<SerpentsNest>(player);
+        await CardPileCmd.Add(overwhelming, PileType.Hand);
+        await CardPileCmd.Add(nest, PileType.Hand);
+        AutoTestAssert.True(overwhelming.TryManualPlay(null), "Play OverwhelmingPresence");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        int e1HpBeforeNest = enemy1.CurrentHp;
+        int e2HpBeforeNest = enemy2.CurrentHp;
+        AutoTestAssert.True(nest.TryManualPlay(null), "Play SerpentsNest");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(7, player.Creature.GetPowerAmount<SerpentsNestPower>(), "SerpentsNestPower(7)");
+        AutoTestAssert.Equal(e1HpBeforeNest, enemy1.CurrentHp, "SerpentsNest did NOT self-trigger on enemy 1");
+        AutoTestAssert.Equal(e2HpBeforeNest, enemy2.CurrentHp, "SerpentsNest did NOT self-trigger on enemy 2");
+
+        // Play Offclass Power (Inflame) -> triggers SerpentsNest (7 dmg ALL) AND OverwhelmingPresence (+1 draw)!
+        await CardPileCmd.Add(combatState.CreateCard<SneckoDefend>(player), PileType.Draw, CardPilePosition.Top);
+        await CardPileCmd.Add(combatState.CreateCard<SneckoDefend>(player), PileType.Draw, CardPilePosition.Top);
+        var offPower = combatState.CreateCard<Inflame>(player);
+        var offSecond = combatState.CreateCard<Neutralize>(player);
+        await CardPileCmd.Add(offPower, PileType.Hand);
+        await CardPileCmd.Add(offSecond, PileType.Hand);
+        int e1Hp = enemy1.CurrentHp;
+        int e2Hp = enemy2.CurrentHp;
+        int handBefore = pcs.Hand.Cards.Count;
+        AutoTestAssert.True(offPower.TryManualPlay(null), "Play Inflame (Offclass Power)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(e1Hp - 7, enemy1.CurrentHp, "SerpentsNest dealt 7 damage to enemy 1");
+        AutoTestAssert.Equal(e2Hp - 7, enemy2.CurrentHp, "SerpentsNest dealt 7 damage to enemy 2");
+        AutoTestAssert.Equal(handBefore - 1 + 1, pcs.Hand.Cards.Count, "OverwhelmingPresence drew 1 card on 1st offclass play");
+
+        // 2nd offclass play this turn must NOT draw again!
+        handBefore = pcs.Hand.Cards.Count;
+        AutoTestAssert.True(offSecond.TryManualPlay(enemy1), "Play Neutralize (2nd offclass play)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(handBefore - 1, pcs.Hand.Cards.Count, "OverwhelmingPresence did NOT trigger a 2nd time this turn");
+        await PowerCmd.Remove<StrengthPower>(player.Creature);
+        await PowerCmd.Remove<SerpentsNestPower>(player.Creature);
+        await PowerCmd.Remove<OverwhelmingPresencePower>(player.Creature);
+        await PowerCmd.Remove<WeakPower>(enemy1);
+
+        // 2. PureSnecko (draw 3 & muddle them) + RiskySword (gains +8 dmg when muddled) + RainOfDice (6 dmg, muddle 1, Exhaust, add copy to Hand)!
+        await ClearHandAndRefillEnergy(player, pcs);
+        var d1 = combatState.CreateCard<SneckoStrike>(player);
+        var d2 = combatState.CreateCard<SneckoDefend>(player);
+        var d3 = combatState.CreateCard<RiskySword>(player);
+        await CardPileCmd.Add(d1, PileType.Draw, CardPilePosition.Top);
+        await CardPileCmd.Add(d2, PileType.Draw, CardPilePosition.Top);
+        await CardPileCmd.Add(d3, PileType.Draw, CardPilePosition.Top);
+        var pureSnecko = combatState.CreateCard<PureSnecko>(player);
+        await CardPileCmd.Add(pureSnecko, PileType.Hand);
+        AutoTestAssert.True(pureSnecko.TryManualPlay(null), "Play PureSnecko");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.True(pcs.Hand.Cards.Contains(d1) && pcs.Hand.Cards.Contains(d2) && pcs.Hand.Cards.Contains(d3), "PureSnecko drew 3 cards");
+        AutoTestAssert.True(d1.EnergyCost.GetWithModifiers(CostModifiers.All) != 1, "PureSnecko muddled d1");
+        AutoTestAssert.Equal(16m, d3.DynamicVars.Damage.BaseValue, "RiskySword increased damage 8 -> 16 when muddled");
+
+        var rain = combatState.CreateCard<RainOfDice>(player);
+        CardCmd.Upgrade(rain);
+        await CardPileCmd.Add(rain, PileType.Hand);
+        e1Hp = enemy1.CurrentHp;
+        using (DownfallAutoTestRunner.PreferCards(c => ReferenceEquals(c, d3)))
+        {
+            AutoTestAssert.True(rain.TryManualPlay(enemy1), "Play RainOfDice+ muddling RiskySword again");
+            await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        }
+        AutoTestAssert.Equal(e1Hp - 8, enemy1.CurrentHp, "RainOfDice+ dealt 8 damage");
+        AutoTestAssert.True(pcs.ExhaustPile.Cards.Contains(rain), "RainOfDice+ exhausted");
+        AutoTestAssert.Equal(24m, d3.DynamicVars.Damage.BaseValue, "RiskySword increased damage 16 -> 24 on 2nd muddle");
+        var rainCopy = AutoTestAssert.NotNull(pcs.Hand.Cards.OfType<RainOfDice>().FirstOrDefault(), "RainOfDice+ added copy to Hand");
+        AutoTestAssert.True(rainCopy.IsUpgraded, "RainOfDice+ copy is Upgraded");
+
+        // 3. Tsunami (4 Block per Overflow) + Serpentscale (no Overflow -> 1 Plating; with Overflow -> 3 Plating + 4 Block from Tsunami)!
+        await ClearHandAndRefillEnergy(player, pcs);
+        var tsunami = combatState.CreateCard<Tsunami>(player);
+        var scale1 = combatState.CreateCard<Serpentscale>(player);
+        await CardPileCmd.Add(tsunami, PileType.Hand);
+        await CardPileCmd.Add(scale1, PileType.Hand);
+        AutoTestAssert.True(tsunami.TryManualPlay(null), "Play Tsunami");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        int blockBefore = player.Creature.Block;
+        AutoTestAssert.True(scale1.TryManualPlay(enemy1), "Play Serpentscale without Overflow");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<PlatingPower>(), "Serpentscale without Overflow granted 1 Plating");
+        AutoTestAssert.Equal(blockBefore, player.Creature.Block, "Tsunami did NOT trigger without Overflow");
+
+        await ClearHandAndRefillEnergy(player, pcs);
+        var scale2 = combatState.CreateCard<Serpentscale>(player);
+        await CardPileCmd.Add(scale2, PileType.Hand);
+        for (int i = 0; i < 5; i++)
+            await CardPileCmd.Add(combatState.CreateCard<SneckoDefend>(player), PileType.Hand);
+        blockBefore = player.Creature.Block;
+        AutoTestAssert.True(scale2.TryManualPlay(enemy1), "Play Serpentscale with Overflow");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(4, player.Creature.GetPowerAmount<PlatingPower>(), "Serpentscale Overflow granted 3 Plating (1+3=4)");
+        AutoTestAssert.Equal(blockBefore + 4, player.Creature.Block, "Tsunami granted +4 Block on Overflow");
+        await PowerCmd.Remove<TsunamiPower>(player.Creature);
+        await PowerCmd.Remove<PlatingPower>(player.Creature);
+
+        // 4. SlitherThrough (14 dmg, reduce cost of Offclass cards in Hand by 1 this turn) + SerpentIdol (choose 1 of 3 offclass, costs 0 this turn) + SoulDraw (add 2 random offclass with Retain)!
+        await ClearHandAndRefillEnergy(player, pcs);
+        var slither = combatState.CreateCard<SlitherThrough>(player);
+        var off2Cost = combatState.CreateCard<Bash>(player);
+        var own2Cost = combatState.CreateCard<TailWhip>(player);
+        await CardPileCmd.Add(slither, PileType.Hand);
+        await CardPileCmd.Add(off2Cost, PileType.Hand);
+        await CardPileCmd.Add(own2Cost, PileType.Hand);
+        e1Hp = enemy1.CurrentHp;
+        AutoTestAssert.True(slither.TryManualPlay(enemy1), "Play SlitherThrough");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(e1Hp - 14, enemy1.CurrentHp, "SlitherThrough dealt 14 damage");
+        AutoTestAssert.Equal(1, off2Cost.EnergyCost.GetWithModifiers(CostModifiers.All), "SlitherThrough reduced Offclass Bash cost 2 -> 1");
+        AutoTestAssert.Equal(2, own2Cost.EnergyCost.GetWithModifiers(CostModifiers.All), "SlitherThrough did NOT reduce Snecko TailWhip cost");
+
+        await ClearHandAndRefillEnergy(player, pcs);
+        var idol = combatState.CreateCard<SerpentIdol>(player);
+        await CardPileCmd.Add(idol, PileType.Hand);
+        AutoTestAssert.True(idol.TryManualPlay(null), "Play SerpentIdol");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(1, pcs.Hand.Cards.Count, "SerpentIdol added 1 chosen Offclass card to Hand");
+        AutoTestAssert.True(SneckoOffclass.IsOffclass(pcs.Hand.Cards[0], player), "SerpentIdol card is Offclass");
+        if (!pcs.Hand.Cards[0].EnergyCost.CostsX)
+            AutoTestAssert.Equal(0, pcs.Hand.Cards[0].EnergyCost.GetWithModifiers(CostModifiers.All), "SerpentIdol card costs 0 this turn");
+
+        await ClearHandAndRefillEnergy(player, pcs);
+        var soulDraw = combatState.CreateCard<SoulDraw>(player);
+        await CardPileCmd.Add(soulDraw, PileType.Hand);
+        AutoTestAssert.True(soulDraw.TryManualPlay(null), "Play SoulDraw");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(2, pcs.Hand.Cards.Count, "SoulDraw added 2 Offclass cards");
+        AutoTestAssert.True(pcs.Hand.Cards.All(c => SneckoOffclass.IsOffclass(c, player) && c.Keywords.Contains(CardKeyword.Retain)), "SoulDraw cards are Offclass with Retain");
+
+        // 5. ThrowingCards+ (X=2 -> 2 FTL+ in Hand + 1 Energy) + ToothAndClaw+ (6 dmg + Upgraded Shiv per unique Suit in Hand) + Whack+ (12 dmg + Dash+ + Exhaust) + WideAngle (18 dmg ALL, Retain)!
+        await ClearHandAndRefillEnergy(player, pcs);
+        if (pcs.Energy > 2)
+            await PlayerCmd.LoseEnergy(pcs.Energy - 2, player);
+        var throwing = combatState.CreateCard<ThrowingCards>(player);
+        CardCmd.Upgrade(throwing);
+        await CardPileCmd.Add(throwing, PileType.Hand);
+        AutoTestAssert.True(throwing.TryManualPlay(null), "Play ThrowingCards+ at X=2");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(1, pcs.Energy, "ThrowingCards+ refunded 1 Energy after spending X=2");
+        var ftls = pcs.Hand.Cards.OfType<Ftl>().ToList();
+        AutoTestAssert.Equal(2, ftls.Count, "ThrowingCards+ added 2 FTLs");
+        AutoTestAssert.True(ftls.All(c => c.IsUpgraded), "ThrowingCards+ added Upgraded FTL+");
+
+        await ClearHandAndRefillEnergy(player, pcs);
+        var tooth = combatState.CreateCard<ToothAndClaw>(player);
+        CardCmd.Upgrade(tooth);
+        await CardPileCmd.Add(tooth, PileType.Hand);
+        await CardPileCmd.Add(combatState.CreateCard<Bash>(player), PileType.Hand); // Ironclad
+        await CardPileCmd.Add(combatState.CreateCard<Neutralize>(player), PileType.Hand); // Silent
+        e1Hp = enemy1.CurrentHp;
+        AutoTestAssert.True(tooth.TryManualPlay(enemy1), "Play ToothAndClaw+ with 3 Suits (Snecko, Ironclad, Silent)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(e1Hp - 6, enemy1.CurrentHp, "ToothAndClaw+ dealt 6 damage");
+        var shivs = pcs.Hand.Cards.OfType<Shiv>().ToList();
+        AutoTestAssert.Equal(3, shivs.Count, "ToothAndClaw+ added 3 Shivs for 3 unique Suits");
+        AutoTestAssert.True(shivs.All(s => s.IsUpgraded), "ToothAndClaw+ added Upgraded Shivs");
+
+        await ClearHandAndRefillEnergy(player, pcs);
+        var whack = combatState.CreateCard<Whack>(player);
+        CardCmd.Upgrade(whack);
+        await CardPileCmd.Add(whack, PileType.Hand);
+        e1Hp = enemy1.CurrentHp;
+        AutoTestAssert.True(whack.TryManualPlay(enemy1), "Play Whack+");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(e1Hp - 12, enemy1.CurrentHp, "Whack+ dealt 12 damage");
+        AutoTestAssert.True(pcs.ExhaustPile.Cards.Contains(whack), "Whack+ exhausted");
+        var dash = AutoTestAssert.NotNull(pcs.Hand.Cards.OfType<Dash>().FirstOrDefault(), "Whack+ added Dash");
+        AutoTestAssert.True(dash.IsUpgraded, "Whack+ added Upgraded Dash+");
+
+        var wideAngle = combatState.CreateCard<WideAngle>(player);
+        await CardPileCmd.Add(wideAngle, PileType.Hand);
+        e1Hp = enemy1.CurrentHp;
+        e2Hp = enemy2.CurrentHp;
+        AutoTestAssert.True(wideAngle.TryManualPlay(null), "Play WideAngle");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(e1Hp - 18, enemy1.CurrentHp, "WideAngle dealt 18 to enemy 1");
+        AutoTestAssert.Equal(e2Hp - 18, enemy2.CurrentHp, "WideAngle dealt 18 to enemy 2");
+
+        // 6. RoundaboutSwing (8 dmg, put card on top of Draw, +2 draw next turn) + TrashCan (end of turn exhaust up to 1) + UnendingSupply (start of turn Offclass Echo)!
+        await ClearHandAndRefillEnergy(player, pcs);
+        var trashCan = combatState.CreateCard<TrashCan>(player);
+        var unending = combatState.CreateCard<UnendingSupply>(player);
+        var roundabout = combatState.CreateCard<RoundaboutSwing>(player);
+        var topTarget = combatState.CreateCard<LaserEyes>(player);
+        var trashTarget = combatState.CreateCard<SneckoStrike>(player);
+        await CardPileCmd.Add(trashCan, PileType.Hand);
+        await CardPileCmd.Add(unending, PileType.Hand);
+        await CardPileCmd.Add(roundabout, PileType.Hand);
+        await CardPileCmd.Add(topTarget, PileType.Hand);
+        await CardPileCmd.Add(trashTarget, PileType.Hand);
+        AutoTestAssert.True(trashCan.TryManualPlay(null), "Play TrashCan");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.True(unending.TryManualPlay(null), "Play UnendingSupply");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        using (DownfallAutoTestRunner.PreferCards(c => ReferenceEquals(c, topTarget)))
+        {
+            AutoTestAssert.True(roundabout.TryManualPlay(enemy1), "Play RoundaboutSwing putting LaserEyes on top of Draw");
+            await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        }
+        AutoTestAssert.Equal(topTarget, pcs.DrawPile.Cards.FirstOrDefault(), "RoundaboutSwing placed LaserEyes on top of Draw");
+        AutoTestAssert.Equal(2, player.Creature.GetPowerAmount<DrawCardsNextTurnPower>(), "RoundaboutSwing applied DrawCardsNextTurnPower(2)");
+
+        // End Turn 1 -> TrashCan exhausts trashTarget; Round 2 -> UnendingSupply adds 1 Offclass Echo to Hand!
+        await CreatureCmd.GainBlock(player.Creature, 80m, ValueProp.Unpowered, null);
+        using (DownfallAutoTestRunner.PreferCards(c => ReferenceEquals(c, trashTarget)))
+        {
+            await DownfallAutoTestRunner.EndTurnAndWaitForRoundAsync(player, 2);
+        }
+        AutoTestAssert.True(pcs.ExhaustPile.Cards.Contains(trashTarget), "TrashCan exhausted selected card at end of Turn 1");
+        AutoTestAssert.True(pcs.Hand.Cards.Any(c => DownfallEcho.IsEcho(c) && SneckoOffclass.IsOffclass(c, player)), "UnendingSupply added Offclass Echo at start of Round 2");
     }
 
     internal static async Task ClearHandAndRefillEnergy(MegaCrit.Sts2.Core.Entities.Players.Player player, MegaCrit.Sts2.Core.Entities.Players.PlayerCombatState pcs)
