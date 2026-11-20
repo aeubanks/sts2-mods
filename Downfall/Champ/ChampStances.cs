@@ -176,10 +176,14 @@ internal static class ChampStances
     }
 
     public static decimal GetBerserkerVigorAmount(Creature creature) =>
-        BaseBerserkerVigor + creature.GetPowerAmount<DoubleStyleThisTurnPower>();
+        BaseBerserkerVigor
+        + creature.GetPowerAmount<DoubleStylePower>()
+        + creature.GetPowerAmount<DoubleStyleThisTurnPower>();
 
     public static decimal GetDefensiveCounterAmount(Creature creature) =>
-        BaseDefensiveCounter + creature.GetPowerAmount<DoubleStyleThisTurnPower>();
+        BaseDefensiveCounter
+        + creature.GetPowerAmount<DoubleStylePower>()
+        + creature.GetPowerAmount<DoubleStyleThisTurnPower>();
 
     public static async Task TriggerSkillBonusAsync(
         Player player,

@@ -153,6 +153,7 @@ internal static class DownfallAutoTestRunner
                 ("ChampVisualsRuntime", ChampTests.TestVisualsRuntime),
                 ("ChampStarterCombat", ChampTests.TestStarterCombat),
                 ("ChampCommonCardsInCombat", ChampTests.TestCommonCardsInCombat),
+                ("ChampUncommonBatch1InCombat", ChampTests.TestUncommonBatch1InCombat),
             ];
 
             foreach (var (name, run) in tests)

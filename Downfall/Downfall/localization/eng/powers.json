@@ -238,5 +238,17 @@
   "DOWNFALL-EN_GARDE_POWER.smartDescription": "If your [gold]Block[/gold] is broken this turn, gain [blue]{Amount}[/blue] [gold]Block[/gold] next turn.",
   "DOWNFALL-DOUBLE_STYLE_THIS_TURN_POWER.title": "Chain Lash",
   "DOWNFALL-DOUBLE_STYLE_THIS_TURN_POWER.description": "This turn, [gold]Skill Bonuses[/gold] grant additional effect.",
-  "DOWNFALL-DOUBLE_STYLE_THIS_TURN_POWER.smartDescription": "This turn, [gold]Skill Bonuses[/gold] grant [blue]{Amount}[/blue] additional effect."
+  "DOWNFALL-DOUBLE_STYLE_THIS_TURN_POWER.smartDescription": "This turn, [gold]Skill Bonuses[/gold] grant [blue]{Amount}[/blue] additional effect.",
+  "DOWNFALL-HONE_POWER.title": "Honed Blade",
+  "DOWNFALL-HONE_POWER.description": "Your \"Strike\" cards deal additional damage.",
+  "DOWNFALL-HONE_POWER.smartDescription": "Your \"Strike\" cards deal [blue]{Amount}[/blue] more damage.",
+  "DOWNFALL-DUAL_PLAY_STRIKE_POWER.title": "Flurry of Strikes",
+  "DOWNFALL-DUAL_PLAY_STRIKE_POWER.description": "Your next \"Strike\" card this turn is played twice.",
+  "DOWNFALL-DUAL_PLAY_STRIKE_POWER.smartDescription": "Your next {Amount:plural:\"Strike\" card|[blue]{}[/blue] \"Strike\" cards} this turn {Amount:plural:is|are} played twice.",
+  "DOWNFALL-DOUBLE_STYLE_POWER.title": "Double Style",
+  "DOWNFALL-DOUBLE_STYLE_POWER.description": "[gold]Skill Bonuses[/gold] grant additional [gold]Vigor[/gold] and [gold]Counter[/gold].",
+  "DOWNFALL-DOUBLE_STYLE_POWER.smartDescription": "[gold]Skill Bonuses[/gold] grant [blue]{Amount}[/blue] more [gold]Vigor[/gold] and [gold]Counter[/gold].",
+  "DOWNFALL-FOCUSED_BER_POWER.title": "Fancy Footwork",
+  "DOWNFALL-FOCUSED_BER_POWER.description": "The next time you play a [gold]Finisher[/gold] this turn, deal damage to ALL enemies.",
+  "DOWNFALL-FOCUSED_BER_POWER.smartDescription": "The next time you play a [gold]Finisher[/gold] this turn, deal [blue]{Amount}[/blue] damage to ALL enemies."
 }

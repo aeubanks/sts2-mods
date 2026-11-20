@@ -559,4 +559,311 @@ internal static class ChampTests
         AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<EnGardePower>(), "Unbroken EnGardePower expired at end of round");
         AutoTestAssert.Equal(0, player.Creature.Block, "Unbroken EnGarde did not grant next-turn Block");
     }
+
+    public static async Task TestUncommonBatch1InCombat()
+    {
+        var (player, _, combatState) = await DownfallAutoTestRunner.StartCombatAsync<TheChamp>("DFCHP03");
+        var pcs = AutoTestAssert.NotNull(player.PlayerCombatState, "PlayerCombatState");
+        var enemy = AutoTestAssert.NotNull(combatState.HittableEnemies.FirstOrDefault(), "First enemy");
+        var ctx = new ThrowingPlayerChoiceContext();
+
+        foreach (var e in combatState.HittableEnemies.ToList())
+            await CreatureCmd.GainMaxHp(e, 2500m);
+
+        async Task ResetCombatState(int energy = 10)
+        {
+            foreach (var c in pcs.Hand.Cards.ToList())
+                await CardPileCmd.Add(c, PileType.Discard);
+            if (pcs.Energy > energy)
+                await PlayerCmd.LoseEnergy(pcs.Energy - energy, player);
+            else if (pcs.Energy < energy)
+                await PlayerCmd.GainEnergy(energy - pcs.Energy, player);
+            if (player.Creature.Block > 0)
+                await CreatureCmd.LoseBlock(ctx, player.Creature, player.Creature.Block, null);
+            foreach (var p in player.Creature.Powers.ToList())
+                await PowerCmd.Remove(p);
+            foreach (var e in combatState.HittableEnemies.ToList())
+            {
+                foreach (var ep in e.Powers.ToList())
+                    await PowerCmd.Remove(ep);
+            }
+        }
+
+        // 1. ArenaPreparation: Exhausts, adds 2 random Skills with Retain to Hand.
+        await ResetCombatState();
+        var arena = combatState.CreateCard<ArenaPreparation>(player);
+        await CardPileCmd.Add(arena, PileType.Hand);
+        AutoTestAssert.True(arena.TryManualPlay(null), "Play ArenaPreparation");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(PileType.Exhaust, arena.Pile?.Type, "ArenaPreparation exhausted");
+        AutoTestAssert.Equal(2, pcs.Hand.Cards.Count, "ArenaPreparation added 2 Skills to Hand");
+        foreach (var added in pcs.Hand.Cards)
+        {
+            AutoTestAssert.Equal(CardType.Skill, added.Type, "ArenaPreparation generated Skill");
+            AutoTestAssert.True(added.Keywords.Contains(CardKeyword.Retain), "ArenaPreparation granted Retain");
+        }
+
+        // 2. Backstep: 6 Block + Vigor(5) = 11 Block; does NOT consume Vigor!
+        await ResetCombatState();
+        await PowerCmd.Apply<VigorPower>(ctx, player.Creature, 5m, player.Creature, null);
+        var backstep = combatState.CreateCard<Backstep>(player);
+        await CardPileCmd.Add(backstep, PileType.Hand);
+        AutoTestAssert.True(backstep.TryManualPlay(null), "Play Backstep");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(11, player.Creature.Block, "Backstep gained 6 + 5 Vigor = 11 Block");
+        AutoTestAssert.Equal(5, player.Creature.GetPowerAmount<VigorPower>(), "Backstep did not consume Vigor");
+
+        // 3. BerserkerStyle (Hone Blade) -> HonePower(3): boosts Strike (+3), not non-Strike!
+        await ResetCombatState();
+        var honeCard = combatState.CreateCard<BerserkerStyle>(player);
+        await CardPileCmd.Add(honeCard, PileType.Hand);
+        AutoTestAssert.True(honeCard.TryManualPlay(null), "Play BerserkerStyle");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(3, player.Creature.GetPowerAmount<HonePower>(), "HonePower(3) applied");
+
+        int hp = enemy.CurrentHp;
+        var strikeHone = combatState.CreateCard<ChampStrike>(player);
+        await CardPileCmd.Add(strikeHone, PileType.Hand);
+        AutoTestAssert.True(strikeHone.TryManualPlay(enemy), "Play Strike with HonePower(3)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(hp - 9, enemy.CurrentHp, "HonePower boosted Strike damage (6 + 3 = 9)");
+
+        hp = enemy.CurrentHp;
+        var nonStrike = combatState.CreateCard<CrownThrow>(player);
+        await CardPileCmd.Add(nonStrike, PileType.Hand);
+        AutoTestAssert.True(nonStrike.TryManualPlay(enemy), "Play non-Strike CrownThrow with HonePower(3)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(hp - 8, enemy.CurrentHp, "HonePower did not boost non-Strike CrownThrow (8)");
+
+        // 4. BladeFlurry (Flurry of Strikes) + DualPlayStrikePower: replays next Strike twice!
+        await ResetCombatState();
+        hp = enemy.CurrentHp;
+        var flurry = combatState.CreateCard<BladeFlurry>(player);
+        await CardPileCmd.Add(flurry, PileType.Hand);
+        AutoTestAssert.True(flurry.TryManualPlay(enemy), "Play BladeFlurry");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(hp - 6, enemy.CurrentHp, "BladeFlurry dealt 6 damage");
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<DualPlayStrikePower>(), "BladeFlurry applied DualPlayStrikePower(1)");
+
+        hp = enemy.CurrentHp;
+        var dualStrike = combatState.CreateCard<ChampStrike>(player);
+        await CardPileCmd.Add(dualStrike, PileType.Hand);
+        AutoTestAssert.True(dualStrike.TryManualPlay(enemy), "Play Strike with DualPlayStrikePower(1)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(hp - 12, enemy.CurrentHp, "DualPlayStrikePower played Strike twice (6x2 = 12)");
+        AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<DualPlayStrikePower>(), "DualPlayStrikePower consumed");
+
+        // 5. ChampCalledShot (Refreshment): Defensive draws 3 & Discards; Berserker gains 2 Energy & Exhausts; Ultimate does BOTH & Exhausts!
+        await ResetCombatState(energy: 5);
+        await ChampStances.EnterStanceAsync(player, ChampStanceKind.Defensive, ctx);
+        for (int i = 0; i < 6; i++)
+            await CardPileCmd.Add(combatState.CreateCard<ChampStrike>(player), PileType.Draw);
+        var csDef = combatState.CreateCard<ChampCalledShot>(player);
+        await CardPileCmd.Add(csDef, PileType.Hand);
+        AutoTestAssert.True(csDef.TryManualPlay(null), "Play ChampCalledShot in Defensive");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(3, pcs.Hand.Cards.Count, "ChampCalledShot Defensive Combo drew 3");
+        AutoTestAssert.Equal(4, pcs.Energy, "ChampCalledShot Defensive did not gain Energy (5 - 1 = 4)");
+        AutoTestAssert.Equal(PileType.Discard, csDef.Pile?.Type, "ChampCalledShot went to Discard in Defensive");
+
+        await ResetCombatState(energy: 5);
+        await ChampStances.EnterStanceAsync(player, ChampStanceKind.Berserker, ctx);
+        var csBer = combatState.CreateCard<ChampCalledShot>(player);
+        await CardPileCmd.Add(csBer, PileType.Hand);
+        AutoTestAssert.True(csBer.TryManualPlay(null), "Play ChampCalledShot in Berserker");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(6, pcs.Energy, "ChampCalledShot Berserker Combo gained 2 Energy (5 - 1 + 2 = 6)");
+        AutoTestAssert.Equal(PileType.Exhaust, csBer.Pile?.Type, "ChampCalledShot exhausted in Berserker");
+
+        await ResetCombatState(energy: 5);
+        await ChampStances.EnterStanceAsync(player, ChampStanceKind.Ultimate, ctx);
+        for (int i = 0; i < 6; i++)
+            await CardPileCmd.Add(combatState.CreateCard<ChampStrike>(player), PileType.Draw);
+        var csUlt = combatState.CreateCard<ChampCalledShot>(player);
+        await CardPileCmd.Add(csUlt, PileType.Hand);
+        AutoTestAssert.True(csUlt.TryManualPlay(null), "Play ChampCalledShot in Ultimate");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(6, pcs.Energy, "ChampCalledShot Ultimate gained 2 Energy");
+        AutoTestAssert.Equal(3, pcs.Hand.Cards.Count, "ChampCalledShot Ultimate drew 3 cards");
+        AutoTestAssert.Equal(PileType.Exhaust, csUlt.Pile?.Type, "ChampCalledShot exhausted in Ultimate");
+
+        // 6. CrookedStrike (Finisher + Strike): uses Vigor WITHOUT consuming it! Then normal Strike consumes Vigor!
+        await ResetCombatState();
+        await ChampStances.EnterStanceAsync(player, ChampStanceKind.Berserker, ctx);
+        await PowerCmd.Apply<VigorPower>(ctx, player.Creature, 7m, player.Creature, null);
+        hp = enemy.CurrentHp;
+        var crooked = combatState.CreateCard<CrookedStrike>(player);
+        await CardPileCmd.Add(crooked, PileType.Hand);
+        AutoTestAssert.True(crooked.TryManualPlay(enemy), "Play CrookedStrike in Berserker with 7 Vigor");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(hp - 13, enemy.CurrentHp, "CrookedStrike dealt 6 + 7 Vigor = 13 damage");
+        AutoTestAssert.Equal(7, player.Creature.GetPowerAmount<VigorPower>(), "CrookedStrike did NOT consume Vigor!");
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<StrengthPower>(), "CrookedStrike triggered Berserker Finisher (+1 Strength)");
+        AutoTestAssert.Equal(ChampStanceKind.None, ChampStances.GetCurrentStance(player.Creature), "CrookedStrike exited Stance");
+
+        hp = enemy.CurrentHp;
+        var normalStrike = combatState.CreateCard<ChampStrike>(player);
+        await CardPileCmd.Add(normalStrike, PileType.Hand);
+        AutoTestAssert.True(normalStrike.TryManualPlay(enemy), "Play normal Strike to consume preserved Vigor");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(hp - 14, enemy.CurrentHp, "Normal Strike used preserved 7 Vigor + 1 Strength (6 + 7 + 1 = 14)");
+        AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<VigorPower>(), "Normal Strike consumed Vigor");
+
+        // 7. DeathBlow: 12 AOE dmg + 8 Vigor + Exhausts.
+        await ResetCombatState();
+        hp = enemy.CurrentHp;
+        var deathBlow = combatState.CreateCard<DeathBlow>(player);
+        await CardPileCmd.Add(deathBlow, PileType.Hand);
+        AutoTestAssert.True(deathBlow.TryManualPlay(null), "Play DeathBlow");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(hp - 12, enemy.CurrentHp, "DeathBlow dealt 12 AOE damage");
+        AutoTestAssert.Equal(8, player.Creature.GetPowerAmount<VigorPower>(), "DeathBlow granted 8 Vigor");
+        AutoTestAssert.Equal(PileType.Exhaust, deathBlow.Pile?.Type, "DeathBlow exhausted");
+
+        // 8. DefensiveStyle (Double Style) -> DoubleStylePower(1): Skill Bonuses grant +1 Vigor & +1 Counter!
+        await ResetCombatState();
+        var doubleStyle = combatState.CreateCard<DefensiveStyle>(player);
+        await CardPileCmd.Add(doubleStyle, PileType.Hand);
+        AutoTestAssert.True(doubleStyle.TryManualPlay(null), "Play DefensiveStyle (Double Style)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<DoubleStylePower>(), "DoubleStylePower(1) applied");
+
+        await ChampStances.EnterStanceAsync(player, ChampStanceKind.Ultimate, ctx);
+        var defSkill = combatState.CreateCard<ChampDefend>(player);
+        await CardPileCmd.Add(defSkill, PileType.Hand);
+        AutoTestAssert.True(defSkill.TryManualPlay(null), "Play Defend in Ultimate with DoubleStylePower(1)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(3, player.Creature.GetPowerAmount<VigorPower>(), "DoubleStylePower boosted Berserker Skill Bonus (2+1 = 3 Vigor)");
+        AutoTestAssert.Equal(4, player.Creature.GetPowerAmount<CounterPower>(), "DoubleStylePower boosted Defensive Skill Bonus (3+1 = 4 Counter)");
+
+        // 9. Duel (Challenge): 8 Block + 8 dmg once vs 0-Str enemy; twice (16 Block + 16 dmg) vs >0-Str enemy!
+        await ResetCombatState();
+        hp = enemy.CurrentHp;
+        var duel1 = combatState.CreateCard<Duel>(player);
+        await CardPileCmd.Add(duel1, PileType.Hand);
+        AutoTestAssert.True(duel1.TryManualPlay(enemy), "Play Duel vs 0-Strength enemy");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(8, player.Creature.Block, "Duel gained 8 Block once");
+        AutoTestAssert.Equal(hp - 8, enemy.CurrentHp, "Duel dealt 8 damage once");
+
+        await ResetCombatState();
+        await PowerCmd.Apply<StrengthPower>(ctx, enemy, 2m, enemy, null);
+        hp = enemy.CurrentHp;
+        var duel2 = combatState.CreateCard<Duel>(player);
+        await CardPileCmd.Add(duel2, PileType.Hand);
+        AutoTestAssert.True(duel2.TryManualPlay(enemy), "Play Duel vs 2-Strength enemy");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(16, player.Creature.Block, "Duel repeated Block vs Strength enemy (8x2 = 16)");
+        AutoTestAssert.Equal(hp - 16, enemy.CurrentHp, "Duel repeated damage vs Strength enemy (8x2 = 16)");
+
+        // 10. EnragedBash: Berserker Combo permanently increments hit count this combat!
+        await ResetCombatState();
+        await ChampStances.EnterStanceAsync(player, ChampStanceKind.Berserker, ctx);
+        var enraged = combatState.CreateCard<EnragedBash>(player);
+        await CardPileCmd.Add(enraged, PileType.Hand);
+        hp = enemy.CurrentHp;
+        AutoTestAssert.True(enraged.TryManualPlay(enemy), "Play EnragedBash #1 in Berserker");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(hp - 7, enemy.CurrentHp, "EnragedBash #1 dealt 7 (1 hit)");
+        AutoTestAssert.Equal(2, enraged.DynamicVars.Repeat.IntValue, "EnragedBash hit count incremented to 2");
+
+        await CardPileCmd.Add(enraged, PileType.Hand);
+        string enragedDesc2 = enraged.GetDescriptionForPile(PileType.Hand);
+        AutoTestAssert.True(enragedDesc2.Contains("2 times", StringComparison.Ordinal) && !enragedDesc2.Contains('{') && !enragedDesc2.Contains('}'), $"EnragedBash Repeat=2 loc rendered cleanly: {enragedDesc2}");
+        hp = enemy.CurrentHp;
+        AutoTestAssert.True(enraged.TryManualPlay(enemy), "Play EnragedBash #2 in Berserker");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(hp - 14, enemy.CurrentHp, "EnragedBash #2 dealt 7x2 = 14 damage");
+        AutoTestAssert.Equal(3, enraged.DynamicVars.Repeat.IntValue, "EnragedBash hit count incremented to 3");
+
+        // 11. FaceSlap: Neutral 8 dmg + 0 Vuln; Berserker 8 dmg + 2 Vuln.
+        await ResetCombatState();
+        hp = enemy.CurrentHp;
+        var slapNeutral = combatState.CreateCard<FaceSlap>(player);
+        await CardPileCmd.Add(slapNeutral, PileType.Hand);
+        AutoTestAssert.True(slapNeutral.TryManualPlay(enemy), "Play FaceSlap outside Berserker");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(hp - 8, enemy.CurrentHp, "FaceSlap dealt 8 damage");
+        AutoTestAssert.Equal(0, enemy.GetPowerAmount<VulnerablePower>(), "FaceSlap applied 0 Vuln outside Berserker");
+
+        await ChampStances.EnterStanceAsync(player, ChampStanceKind.Berserker, ctx);
+        var slapBer = combatState.CreateCard<FaceSlap>(player);
+        await CardPileCmd.Add(slapBer, PileType.Hand);
+        AutoTestAssert.True(slapBer.TryManualPlay(enemy), "Play FaceSlap inside Berserker");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(2, enemy.GetPowerAmount<VulnerablePower>(), "FaceSlap Berserker Combo applied 2 Vulnerable");
+
+        // 12. FanOfKnives: Neutral 4 AOE dmg; Berserker 4x2 = 8 AOE dmg!
+        await ResetCombatState();
+        hp = enemy.CurrentHp;
+        var knives1 = combatState.CreateCard<FanOfKnives>(player);
+        await CardPileCmd.Add(knives1, PileType.Hand);
+        AutoTestAssert.True(knives1.TryManualPlay(null), "Play FanOfKnives outside Berserker");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(hp - 4, enemy.CurrentHp, "FanOfKnives dealt 4 damage outside Berserker");
+
+        await ChampStances.EnterStanceAsync(player, ChampStanceKind.Berserker, ctx);
+        hp = enemy.CurrentHp;
+        var knives2 = combatState.CreateCard<FanOfKnives>(player);
+        await CardPileCmd.Add(knives2, PileType.Hand);
+        AutoTestAssert.True(knives2.TryManualPlay(null), "Play FanOfKnives inside Berserker");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(hp - 8, enemy.CurrentHp, "FanOfKnives Berserker Combo dealt 4x2 = 8 damage");
+
+        // 13. FancyFootwork + FocusedBerPower + FocusedBerserking (All Out) + GladiatorStyle (Good Clean Fight)!
+        await ResetCombatState();
+        await ChampStances.EnterStanceAsync(player, ChampStanceKind.Defensive, ctx);
+        var fancy = combatState.CreateCard<FancyFootwork>(player);
+        await CardPileCmd.Add(fancy, PileType.Hand);
+        AutoTestAssert.True(fancy.TryManualPlay(null), "Play FancyFootwork from Defensive");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(ChampStanceKind.Berserker, ChampStances.GetCurrentStance(player.Creature), "FancyFootwork switched Defensive -> Berserker");
+        AutoTestAssert.Equal(10, player.Creature.GetPowerAmount<FocusedBerPower>(), "FancyFootwork applied FocusedBerPower(10)");
+
+        // Play FocusedBerserking (All Out, Finisher): triggers Berserker Finisher TWICE (+2 Str) WITHOUT exiting Stance, AND triggers FocusedBerPower (10 AOE damage)!
+        hp = enemy.CurrentHp;
+        var allOut = combatState.CreateCard<FocusedBerserking>(player);
+        await CardPileCmd.Add(allOut, PileType.Hand);
+        AutoTestAssert.True(allOut.TryManualPlay(null), "Play FocusedBerserking in Berserker with FocusedBerPower(10)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(2, player.Creature.GetPowerAmount<StrengthPower>(), "FocusedBerserking triggered Berserker Finisher twice (+2 Strength)");
+        AutoTestAssert.Equal(ChampStanceKind.Berserker, ChampStances.GetCurrentStance(player.Creature), "FocusedBerserking did NOT exit Berserker Stance");
+        AutoTestAssert.Equal(PileType.Exhaust, allOut.Pile?.Type, "FocusedBerserking exhausted");
+        AutoTestAssert.Equal(hp - 10, enemy.CurrentHp, "FocusedBerPower dealt 10 AOE damage on Finisher");
+        AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<FocusedBerPower>(), "FocusedBerPower consumed after Finisher");
+
+        // GladiatorStyle in Ultimate -> +2 Strength AND +2 Dexterity!
+        await ResetCombatState();
+        await ChampStances.EnterStanceAsync(player, ChampStanceKind.Ultimate, ctx);
+        var glad = combatState.CreateCard<GladiatorStyle>(player);
+        await CardPileCmd.Add(glad, PileType.Hand);
+        AutoTestAssert.True(glad.TryManualPlay(null), "Play GladiatorStyle in Ultimate");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(2, player.Creature.GetPowerAmount<StrengthPower>(), "GladiatorStyle Berserker Combo granted +2 Strength");
+        AutoTestAssert.Equal(2, player.Creature.GetPowerAmount<DexterityPower>(), "GladiatorStyle Defensive Combo granted +2 Dexterity");
+
+        // 14. FalseCounter (Rope-a-dope): Finisher -> 8 Block + 6 Finisher Block + DrawNextTurn(2) + EnergyNextTurn(1) + exits Stance -> verified on Turn 2!
+        await ResetCombatState();
+        await ChampStances.EnterStanceAsync(player, ChampStanceKind.Defensive, ctx);
+        var rope = combatState.CreateCard<FalseCounter>(player);
+        await CardPileCmd.Add(rope, PileType.Hand);
+        AutoTestAssert.True(rope.TryManualPlay(null), "Play FalseCounter in Defensive");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(14, player.Creature.Block, "FalseCounter gained 8 + 6 Defensive Finisher = 14 Block");
+        AutoTestAssert.Equal(ChampStanceKind.None, ChampStances.GetCurrentStance(player.Creature), "FalseCounter exited Stance");
+        AutoTestAssert.Equal(2, player.Creature.GetPowerAmount<DrawCardsNextTurnPower>(), "FalseCounter applied DrawCardsNextTurnPower(2)");
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<EnergyNextTurnPower>(), "FalseCounter applied EnergyNextTurnPower(1)");
+
+        // Also verify unused FocusedBerPower & DualPlayStrikePower expire at end of Turn 1!
+        await PowerCmd.Apply<FocusedBerPower>(ctx, player.Creature, 5m, player.Creature, null);
+        await PowerCmd.Apply<DualPlayStrikePower>(ctx, player.Creature, 1m, player.Creature, null);
+        if (player.Creature.GetPower<CounterPower>() is { } fcCounter)
+            await PowerCmd.Remove(fcCounter);
+        await CreatureCmd.GainBlock(player.Creature, 80m, ValueProp.Unpowered, null);
+        await DownfallAutoTestRunner.EndTurnAndWaitForRoundAsync(player, 2);
+        AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<FocusedBerPower>(), "Unused FocusedBerPower expired at end of Turn 1");
+        AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<DualPlayStrikePower>(), "Unused DualPlayStrikePower expired at end of Turn 1");
+        AutoTestAssert.Equal(4, pcs.Energy, "Turn 2 started with 3 + 1 = 4 Energy from FalseCounter");
+        AutoTestAssert.Equal(7, pcs.Hand.Cards.Count, "Turn 2 started with 5 + 2 = 7 cards drawn from FalseCounter");
+    }
 }
