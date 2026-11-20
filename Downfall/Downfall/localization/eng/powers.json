@@ -439,5 +439,14 @@
   "DOWNFALL-EVASIVE_PROTOCOL_POWER.smartDescription": "Whenever you enter [gold]Defensive Mode[/gold], reduce each of your debuffs by [blue]{Amount}[/blue].",
   "DOWNFALL-FLOATING_ORBS_POWER.title": "Floating Orbs",
   "DOWNFALL-FLOATING_ORBS_POWER.description": "Whenever you play a 0-Cost card, deal damage to a random enemy.",
-  "DOWNFALL-FLOATING_ORBS_POWER.smartDescription": "Whenever you play a 0-Cost card, deal [blue]{Amount}[/blue] damage to a random enemy."
+  "DOWNFALL-FLOATING_ORBS_POWER.smartDescription": "Whenever you play a 0-Cost card, deal [blue]{Amount}[/blue] damage to a random enemy.",
+  "DOWNFALL-EXHAUST_STATUSES_POWER.title": "Repulsor",
+  "DOWNFALL-EXHAUST_STATUSES_POWER.description": "When you draw a Status or Curse card each turn, Exhaust it and draw a card.",
+  "DOWNFALL-EXHAUST_STATUSES_POWER.smartDescription": "The first {Amount:plural:time|[blue]{}[/blue] times} you draw a [gold]Status[/gold] or [gold]Curse[/gold] card each turn, [gold]Exhaust[/gold] it and draw a card.",
+  "DOWNFALL-SPIKER_PROTOCOL_POWER.title": "Spiker Protocol",
+  "DOWNFALL-SPIKER_PROTOCOL_POWER.description": "Whenever you enter [gold]Defensive Mode[/gold], gain [gold]Thorns[/gold].",
+  "DOWNFALL-SPIKER_PROTOCOL_POWER.smartDescription": "Whenever you enter [gold]Defensive Mode[/gold], gain [blue]{Amount}[/blue] [gold]Thorns[/gold].",
+  "DOWNFALL-AUTOMAYHEM_POWER.title": "Time Sifter",
+  "DOWNFALL-AUTOMAYHEM_POWER.description": "At the start of your turn, [gold]Accelerate[/gold].",
+  "DOWNFALL-AUTOMAYHEM_POWER.smartDescription": "At the start of your turn, [gold]Accelerate[/gold] {Amount:plural:once|[blue]{}[/blue] times}."
 }

@@ -213,6 +213,7 @@ internal static class DownfallAutoTestRunner
                 ("GuardianStarterGemsStasisAndRestSite", GuardianTests.TestStarterGemsStasisAndRestSite),
                 ("GuardianCommonCardsInCombat", GuardianTests.TestCommonCardsInCombat),
                 ("GuardianUncommonBatch1InCombat", GuardianTests.TestUncommonBatch1InCombat),
+                ("GuardianUncommonBatch2InCombat", GuardianTests.TestUncommonBatch2InCombat),
             ];
 
             int matchedIndex = 0;
@@ -729,6 +730,7 @@ internal static class DownfallAutoTestRunner
         AutoTestAssert.True(new LocString("cards", "DOWNFALL-SUSPENSION.selectionScreenPrompt").Exists(), "Missing Suspension prompt loc");
         AutoTestAssert.True(new LocString("cards", "DOWNFALL-CLONE.selectionScreenPrompt").Exists(), "Missing Clone prompt loc");
         AutoTestAssert.True(new LocString("cards", "DOWNFALL-PREPROGRAM.selectionScreenPrompt").Exists(), "Missing Preprogram prompt loc");
+        AutoTestAssert.True(new LocString("cards", "DOWNFALL-RECOVER.selectionScreenPrompt").Exists(), "Missing Recover prompt loc");
         AutoTestAssert.True(new LocString("rest_site_ui", "OPTION_DOWNFALL_SOCKET_GEM.name").Exists(), "Missing SocketGem rest site name loc");
         AutoTestAssert.True(new LocString("rest_site_ui", "OPTION_DOWNFALL_SOCKET_GEM.description").Exists(), "Missing SocketGem rest site desc loc");
         AutoTestAssert.True(new LocString("rest_site_ui", "OPTION_DOWNFALL_SOCKET_GEM.descriptionDisabled").Exists(), "Missing SocketGem rest site disabled desc loc");
