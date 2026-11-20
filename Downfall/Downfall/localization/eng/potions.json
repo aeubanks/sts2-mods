@@ -53,5 +53,13 @@
   "DOWNFALL-BLOCK_ON_CARD_USE_POTION.title": "Armorer's Tincture",
   "DOWNFALL-BLOCK_ON_CARD_USE_POTION.description": "Gain [blue]{BlockOnCardUsePower}[/blue] [gold]Block[/gold] each time you play a card this turn.",
   "DOWNFALL-STASIS_DISCOVERY_POTION.title": "Quantum Elixir",
-  "DOWNFALL-STASIS_DISCOVERY_POTION.description": "Gain [gold]Stasis[/gold] slots until you have [blue]{Count}[/blue].\nRepeat [blue]{Count}[/blue] times: choose [blue]1[/blue] of [blue]3[/blue] cards to place into [gold]Stasis[/gold]."
+  "DOWNFALL-STASIS_DISCOVERY_POTION.description": "Gain [gold]Stasis[/gold] slots until you have [blue]{Count}[/blue].\nRepeat [blue]{Count}[/blue] times: choose [blue]1[/blue] of [blue]3[/blue] cards to place into [gold]Stasis[/gold].",
+  "DOWNFALL-ECTO_COOLER_POTION.title": "Ecto-Cooler",
+  "DOWNFALL-ECTO_COOLER_POTION.description": "Choose [blue]1[/blue] of [blue]3[/blue] random [gold]Ethereal[/gold] cards and add {Cards:plural:it|[blue]{}[/blue] copies} to your [gold]Hand[/gold]. {Cards:plural:It costs|They cost} [blue]0[/blue] this turn.",
+  "DOWNFALL-SOULBURN_POTION.title": "Molotov",
+  "DOWNFALL-SOULBURN_POTION.description": "Apply [blue]{SoulburnPower}[/blue] [gold]Soulburn[/gold].",
+  "DOWNFALL-DOUBLE_CHARGE_POTION.title": "Combustive Fluid",
+  "DOWNFALL-DOUBLE_CHARGE_POTION.description": "[gold]Ignite[/gold] the current Ghostflame [blue]{IgniteCount}[/blue] times.",
+  "DOWNFALL-INFERNO_CHARGE_POTION.title": "Inferno Potion",
+  "DOWNFALL-INFERNO_CHARGE_POTION.description": "Your Ghostflame effects affect ALL enemies{FlameAffectAllEnemiesPower:plural:| [blue]{}[/blue] times} this combat."
 }

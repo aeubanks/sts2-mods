@@ -2,6 +2,7 @@ using Downfall.Core;
 using Downfall.Hexaghost;
 using Downfall.Hexaghost.Cards;
 using Downfall.Hexaghost.Orbs;
+using Downfall.Hexaghost.Potions;
 using Downfall.Hexaghost.Powers;
 using Downfall.Hexaghost.Relics;
 using Godot;
@@ -1463,5 +1464,284 @@ internal static class HexaghostTests
         await CardPileCmd.Add(unleash, PileType.Hand);
         await PlayCardAsync(unleash);
         AutoTestAssert.Equal(hpBeforeUnleash - 10 * expectedHits, enemy.CurrentHp, $"UnleashSpirits dealt 10 * {expectedHits} = {10 * expectedHits} damage");
+    }
+
+    internal static async Task TestRelicsAndPotionsInCombat()
+    {
+        var (player, _, combatState) = await DownfallAutoTestRunner.StartCombatAsync<TheHexaghost>("HEXA_RELPOT");
+        var pcs = AutoTestAssert.NotNull(player.PlayerCombatState, "PlayerCombatState");
+        var enemy = AutoTestAssert.NotNull(combatState.HittableEnemies.FirstOrDefault(e => e.IsAlive), "Alive enemy");
+        var ctx = new ThrowingPlayerChoiceContext();
+
+        await CreatureCmd.SetMaxAndCurrentHp(enemy, 1500);
+        if (enemy.Block > 0)
+            await CreatureCmd.LoseBlock(ctx, enemy, enemy.Block, null);
+
+        // 1. Verify Relic Pool & Potion Pool composition (no non-upgrade Boss relics!)
+        var relicPool = ModelDb.RelicPool<HexaRelicPool>().AllRelics.ToList();
+        AutoTestAssert.Equal(11, relicPool.Count, "HexaRelicPool has 11 total relics (2 Starter + 9 pool)");
+        AutoTestAssert.Equal(2, relicPool.Count(r => r.Rarity == RelicRarity.Starter), "2 Starter relics (SpiritBrand + UnbrokenSoul)");
+        AutoTestAssert.Equal(0, relicPool.Count(r => r.Rarity == RelicRarity.Ancient), "0 Ancient/Boss relics in HexaRelicPool");
+        var potionPool = ModelDb.PotionPool<HexaPotionPool>().AllPotions.ToList();
+        AutoTestAssert.Equal(4, potionPool.Count, "HexaPotionPool has 4 potions");
+
+        async Task ClearHandAndRefillAsync()
+        {
+            foreach (var c in pcs.Hand.Cards.ToList())
+                await CardPileCmd.Add(c, PileType.Discard);
+            pcs.Energy = 20;
+        }
+
+        // 2. BolsterEngine (Tricky's Bolster-Rod) + JarOfFuel (Olexa's Shield):
+        //    1st Power played -> +4 Block, +1 Strength, AND advances Searing Ghostflame (0 -> 1)!
+        //    2nd Power played -> NO second BolsterEngine trigger, AND ignites Searing Ghostflame (1 -> 2)!
+        await ClearHandAndRefillAsync();
+        await RelicCmd.Obtain<BolsterEngine>(player);
+        await RelicCmd.Obtain<JarOfFuel>(player);
+        HexaCombatState.Get(combatState).ActiveSlotIndex = 0; // Searing
+        await PowerCmd.Remove<StrengthPower>(player.Creature);
+        await PowerCmd.Remove<SoulburnPower>(enemy);
+        if (player.Creature.Block > 0)
+            await CreatureCmd.LoseBlock(ctx, player.Creature, player.Creature.Block, null);
+
+        var power1 = combatState.CreateCard<HexaLevel>(player); // Power
+        await CardPileCmd.Add(power1, PileType.Hand);
+        await PlayCardAsync(power1);
+        AutoTestAssert.Equal(4, player.Creature.Block, "BolsterEngine granted 4 Block on 1st Power");
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<StrengthPower>(), "BolsterEngine granted 1 Strength on 1st Power");
+        AutoTestAssert.Equal(1, HexaMechanics.GetGhostflames(player)[0].TriggerProgress, "JarOfFuel let 1st Power advance Searing Ghostflame");
+
+        var power2 = combatState.CreateCard<HexaLevel>(player);
+        await CardPileCmd.Add(power2, PileType.Hand);
+        await PlayCardAsync(power2);
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<StrengthPower>(), "BolsterEngine did not trigger a 2nd time in combat");
+        AutoTestAssert.True(HexaMechanics.GetGhostflames(player)[0].IsIgnited, "JarOfFuel let 2nd Power ignite Searing Ghostflame");
+        AutoTestAssert.Equal(6, enemy.GetPowerAmount<SoulburnPower>(), "Searing ignited via JarOfFuel applied 6 Soulburn");
+        await PowerCmd.Remove<HexalevelPower>(player.Creature);
+
+        // Verify JarOfFuel also advances Crushing Ghostflame (Slot 1)!
+        HexaCombatState.Get(combatState).ActiveSlotIndex = 1; // Crushing
+        var power3 = combatState.CreateCard<HexaLevel>(player);
+        await CardPileCmd.Add(power3, PileType.Hand);
+        await PlayCardAsync(power3);
+        AutoTestAssert.Equal(1, HexaMechanics.GetGhostflames(player)[1].TriggerProgress, "JarOfFuel let Power advance Crushing Ghostflame");
+        await PowerCmd.Remove<HexalevelPower>(player.Creature);
+
+        // 3. RecyclingMachine (Recycler): Status Ethereal (Dazed) ignored; 1st non-Status/non-Curse Ethereal exhausted -> 0-cost upgraded copy in Hand; 2nd ignored!
+        await ClearHandAndRefillAsync();
+        await RelicCmd.Obtain<RecyclingMachine>(player);
+        var dazed = combatState.CreateCard<Dazed>(player);
+        await CardPileCmd.Add(dazed, PileType.Hand);
+        await CardCmd.Exhaust(ctx, dazed, causedByEthereal: false);
+        AutoTestAssert.Equal(0, pcs.Hand.Cards.Count, "RecyclingMachine ignored Status Ethereal card (Dazed)");
+
+        var searUpgraded = combatState.CreateCard<Sear>(player);
+        CardCmd.Upgrade(searUpgraded);
+        await CardPileCmd.Add(searUpgraded, PileType.Hand);
+        await CardCmd.Exhaust(ctx, searUpgraded, causedByEthereal: false);
+        var recycled = AutoTestAssert.NotNull(pcs.Hand.Cards.OfType<Sear>().FirstOrDefault(), "RecyclingMachine added copy of Sear+ to Hand");
+        AutoTestAssert.True(recycled.IsUpgraded, "Recycled Sear copy preserved upgrade");
+        AutoTestAssert.Equal(0, recycled.EnergyCost.GetWithModifiers(CostModifiers.All), "Recycled Sear copy costs 0 until played");
+
+        var sear2 = combatState.CreateCard<Sear>(player);
+        await CardPileCmd.Add(sear2, PileType.Hand);
+        await CardCmd.Exhaust(ctx, sear2, causedByEthereal: false);
+        AutoTestAssert.Equal(1, pcs.Hand.Cards.Count, "RecyclingMachine only triggers once per combat");
+
+        // 4. CandleOfCauterizing (Red Candle) + SoulburnPotion (Molotov): +2 bonus on cards, SearingGhostflameOrb & SoulburnPotion!
+        await ClearHandAndRefillAsync();
+        await RelicCmd.Obtain<CandleOfCauterizing>(player);
+        await PowerCmd.Remove<SoulburnPower>(enemy);
+        var searOrb0 = (SearingGhostflameOrb)HexaMechanics.GetGhostflames(player)[0];
+        AutoTestAssert.Equal(5m, searOrb0.PassiveVal, "CandleOfCauterizing boosted SearingGhostflameOrb.PassiveVal (3 -> 5)");
+        await HexaMechanics.IgniteAsync(ctx, player, searOrb0, extinguishFirstIfIgnited: true);
+        AutoTestAssert.Equal(10, enemy.GetPowerAmount<SoulburnPower>(), "CandleOfCauterizing boosted Searing ignition Soulburn (5 x 2 = 10)");
+
+        await PowerCmd.Remove<SoulburnPower>(enemy);
+        var searCandle = combatState.CreateCard<Sear>(player); // base 5 Soulburn
+        await CardPileCmd.Add(searCandle, PileType.Hand);
+        await PlayCardAsync(searCandle, enemy);
+        AutoTestAssert.Equal(7, enemy.GetPowerAmount<SoulburnPower>(), "CandleOfCauterizing added +2 Soulburn to Sear (5 -> 7)");
+
+        foreach (var pot in player.Potions.ToList())
+            await PotionCmd.Discard(pot);
+        await PowerCmd.Remove<SoulburnPower>(enemy);
+        var sbPot = (SoulburnPotion)ModelDb.Potion<SoulburnPotion>().ToMutable();
+        await PotionCmd.TryToProcure(sbPot, player);
+        sbPot.EnqueueManualUse(enemy);
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(42, enemy.GetPowerAmount<SoulburnPower>(), "SoulburnPotion applied 40 + 2 (CandleOfCauterizing) = 42 Soulburn");
+
+        // 5. EctoCoolerPotion + DoubleChargePotion + InfernoChargePotion (including Sacred Bark / DynamicVar=2 formatting)!
+        await ClearHandAndRefillAsync();
+        var ectoPot = (EctoCoolerPotion)ModelDb.Potion<EctoCoolerPotion>().ToMutable();
+        await PotionCmd.TryToProcure(ectoPot, player);
+        ectoPot.DynamicVars.Cards.BaseValue = 2m; // verify Sacred Bark plural formatting & 2-copy behavior
+        string ectoDesc = ectoPot.DynamicDescription.GetFormattedText();
+        AutoTestAssert.True(!ectoDesc.Contains('{') && !ectoDesc.Contains('}') && ectoDesc.Contains("[blue]2[/blue] copies"),
+            $"EctoCoolerPotion formatted cleanly at potency 2: {ectoDesc}");
+        ectoPot.EnqueueManualUse(null);
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(2, pcs.Hand.Cards.Count, "EctoCoolerPotion at potency 2 added 2 copies to Hand");
+        foreach (var ectoCard in pcs.Hand.Cards)
+        {
+            AutoTestAssert.True(ectoCard.Keywords.Contains(CardKeyword.Ethereal), "EctoCoolerPotion card is Ethereal");
+            if (!ectoCard.EnergyCost.CostsX)
+                AutoTestAssert.Equal(0, ectoCard.EnergyCost.GetWithModifiers(CostModifiers.All), "EctoCoolerPotion card costs 0 this turn");
+        }
+
+        await ClearHandAndRefillAsync();
+        await PowerCmd.Remove<StrengthPower>(player.Creature);
+        HexaCombatState.Get(combatState).ActiveSlotIndex = 2; // Bolstering (+1 Str, +4 Block per ignite)
+        var dblPot = (DoubleChargePotion)ModelDb.Potion<DoubleChargePotion>().ToMutable();
+        await PotionCmd.TryToProcure(dblPot, player);
+        dblPot.EnqueueManualUse(null);
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(3, player.Creature.GetPowerAmount<StrengthPower>(), "DoubleChargePotion ignited Bolstering 3 times (+3 Strength)");
+
+        var infPot = (InfernoChargePotion)ModelDb.Potion<InfernoChargePotion>().ToMutable();
+        await PotionCmd.TryToProcure(infPot, player);
+        infPot.DynamicVars[nameof(FlameAffectAllEnemiesPower)].BaseValue = 2m; // verify Sacred Bark plural formatting & 2 stacks
+        string infDesc = infPot.DynamicDescription.GetFormattedText();
+        AutoTestAssert.True(!infDesc.Contains('{') && !infDesc.Contains('}') && infDesc.Contains("[blue]2[/blue] times"),
+            $"InfernoChargePotion formatted cleanly at potency 2: {infDesc}");
+        infPot.EnqueueManualUse(null);
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(2, player.Creature.GetPowerAmount<FlameAffectAllEnemiesPower>(), "InfernoChargePotion applied FlameAffectAllEnemiesPower(2)");
+        await PowerCmd.Remove<FlameAffectAllEnemiesPower>(player.Creature);
+
+        // 6. MatchstickCase (Sneaky Teakwood Match): 1st Ignite via playing a card (HauntingEcho as 2nd Attack on Searing)
+        //    must let HauntingEcho finish resolving (re-igniting Searing!) BEFORE MatchstickCase advances Slot 3 -> Slot 4!
+        await ClearHandAndRefillAsync();
+        await PowerCmd.Remove<SoulburnPower>(enemy);
+        await RelicCmd.Obtain<MatchstickCase>(player);
+        HexaCombatState.Get(combatState).ActiveSlotIndex = 3; // Searing
+        await HexaMechanics.ExtinguishAsync(ctx, player, HexaMechanics.GetGhostflames(player)[3]);
+
+        // 1st Attack brings Slot 3 Searing to 1/2
+        var firstAtk = combatState.CreateCard<HexaStrike>(player);
+        await CardPileCmd.Add(firstAtk, PileType.Hand);
+        await PlayCardAsync(firstAtk, enemy);
+        AutoTestAssert.Equal(1, HexaMechanics.GetGhostflames(player)[3].TriggerProgress, "1st Attack advanced Searing to 1/2");
+
+        // 2nd Attack (HauntingEcho) ignites Searing in BeforeCardPlayed (+10 Soulburn), then HauntingEcho.OnPlay sees Searing ignited and re-ignites it (+10 more = 20!),
+        // and ONLY AFTER HauntingEcho completes does MatchstickCase open its choice screen and Advance Slot 3 -> Slot 4!
+        var echoAtk = combatState.CreateCard<HauntingEcho>(player);
+        await CardPileCmd.Add(echoAtk, PileType.Hand);
+        using (DownfallAutoTestRunner.PreferCards(c => c is HexaAdvanceChoice))
+        {
+            await PlayCardAsync(echoAtk, enemy);
+        }
+        AutoTestAssert.Equal(20, enemy.GetPowerAmount<SoulburnPower>(), "HauntingEcho resolved and re-ignited Searing BEFORE MatchstickCase moved active slot");
+        AutoTestAssert.Equal(4, HexaMechanics.GetActiveSlotIndex(player), "MatchstickCase deferred until AfterCardPlayed and Advanced Slot 3 -> Slot 4");
+
+        // 2nd Ignite this turn must NOT trigger MatchstickCase again!
+        using (DownfallAutoTestRunner.PreferCards(c => c is HexaAdvanceChoice))
+        {
+            await HexaMechanics.IgniteActiveAsync(ctx, player, extinguishFirstIfIgnited: true);
+        }
+        AutoTestAssert.Equal(4, HexaMechanics.GetActiveSlotIndex(player), "MatchstickCase did not trigger a 2nd time in the same turn");
+
+        // 7. Sixitude (Six-Point Brand): 0-cost card ignored; 6 non-0-cost cards -> 0-cost Echo of HexaStrike!
+        await ClearHandAndRefillAsync();
+        var sixitude = (Sixitude)await RelicCmd.Obtain<Sixitude>(player);
+        AutoTestAssert.Equal(0, sixitude.DisplayAmount, "Sixitude starts at 0");
+        var zeroCard = combatState.CreateCard<TimeWarp>(player); // 0-cost
+        await CardPileCmd.Add(zeroCard, PileType.Hand);
+        await PlayCardAsync(zeroCard, enemy);
+        AutoTestAssert.Equal(0, sixitude.DisplayAmount, "Sixitude ignored 0-cost card");
+
+        for (int i = 0; i < 6; i++)
+        {
+            var s = combatState.CreateCard<HexaDefend>(player); // 1-cost
+            await CardPileCmd.Add(s, PileType.Hand);
+            await PlayCardAsync(s);
+        }
+        AutoTestAssert.Equal(0, sixitude.DisplayAmount, "Sixitude counter reset to 0 after 6 non-0-cost cards");
+        var strikeEcho = AutoTestAssert.NotNull(
+            pcs.Hand.Cards.FirstOrDefault(c => c is HexaStrike && DownfallEcho.IsEcho(c)),
+            "Sixitude generated an Echo of HexaStrike");
+        AutoTestAssert.Equal(0, strikeEcho.EnergyCost.GetWithModifiers(CostModifiers.All), "Sixitude Strike Echo costs 0");
+
+        // 8. SoulConsumer (Soul Stone):
+        //    (a) 4th exhaust while active Ghostflame is ALREADY Ignited re-ignites it (extinguishFirstIfIgnited: true)!
+        await ClearHandAndRefillAsync();
+        var soulStone = (SoulConsumer)await RelicCmd.Obtain<SoulConsumer>(player);
+        HexaCombatState.Get(combatState).ActiveSlotIndex = 2; // Bolstering (+1 Strength per ignite)
+        var slot2 = HexaMechanics.GetGhostflames(player)[2];
+        await HexaMechanics.IgniteAsync(ctx, player, slot2, extinguishFirstIfIgnited: true);
+        int strBeforeReignite = player.Creature.GetPowerAmount<StrengthPower>();
+        for (int i = 0; i < 4; i++)
+        {
+            var f = combatState.CreateCard<HexaStrike>(player);
+            await CardPileCmd.Add(f, PileType.Hand);
+            await CardCmd.Exhaust(ctx, f, causedByEthereal: false);
+        }
+        AutoTestAssert.Equal(strBeforeReignite + 1, player.Creature.GetPowerAmount<StrengthPower>(),
+            "SoulConsumer 4th exhaust re-ignited already-Ignited Bolstering (+1 Strength)");
+        AutoTestAssert.Equal(0, soulStone.DisplayAmount, "SoulConsumer counter reset to 0 after re-ignition");
+
+        //    (b) 4th Ethereal exhaust during DoTurnEnd ignites unignited Slot 0 -> AfterSideTurnEnd auto-Advances to Slot 1!
+        await ClearHandAndRefillAsync();
+        HexaCombatState.Get(combatState).ActiveSlotIndex = 0;
+        var slot0 = HexaMechanics.GetGhostflames(player)[0];
+        await HexaMechanics.ExtinguishAsync(ctx, player, slot0);
+
+        for (int i = 0; i < 3; i++)
+        {
+            var f = combatState.CreateCard<HexaStrike>(player);
+            await CardPileCmd.Add(f, PileType.Hand);
+            await CardCmd.Exhaust(ctx, f, causedByEthereal: false);
+        }
+        AutoTestAssert.Equal(3, soulStone.DisplayAmount, "SoulConsumer counted 3 exhausts");
+        AutoTestAssert.True(!slot0.IsIgnited, "Slot 0 still unignited before 4th exhaust");
+
+        // Leave 1 Ethereal card in Hand so DoTurnEnd exhausts it (4th exhaust -> SoulConsumer ignites Slot 0 -> AfterSideTurnEnd Advances to Slot 1)!
+        var eth4 = combatState.CreateCard<Sear>(player);
+        await CardPileCmd.Add(eth4, PileType.Hand);
+        await DownfallAutoTestRunner.EndTurnAndWaitForRoundAsync(player, combatState.RoundNumber + 1);
+
+        AutoTestAssert.True(slot0.IsIgnited, "SoulConsumer 4th Ethereal exhaust ignited Slot 0 during DoTurnEnd");
+        AutoTestAssert.Equal(0, soulStone.DisplayAmount, "SoulConsumer counter reset to 0 after 4th Ethereal exhaust");
+        AutoTestAssert.Equal(1, HexaMechanics.GetActiveSlotIndex(player), "GhostflameOrb.AfterSideTurnEnd auto-Advanced Slot 0 -> Slot 1 after SoulConsumer ignition");
+
+        // 9. SoulOfChaos: End of turn auto-plays top Draw card; start of next turn moves to another Ghostflame AND randomizes it to a different type!
+        await ClearHandAndRefillAsync();
+        await PowerCmd.Remove<HexalevelPower>(player.Creature);
+        await RelicCmd.Obtain<SoulOfChaos>(player);
+        var topPower = combatState.CreateCard<HexaLevel>(player);
+        await CardPileCmd.Add(topPower, PileType.Draw, CardPilePosition.Top);
+        int slotBeforeChaos = HexaMechanics.GetActiveSlotIndex(player);
+        var typesBeforeChaos = HexaMechanics.GetGhostflames(player).Select(g => g.GetType()).ToList();
+
+        await DownfallAutoTestRunner.EndTurnAndWaitForRoundAsync(player, combatState.RoundNumber + 1);
+
+        int slotAfterChaos = HexaMechanics.GetActiveSlotIndex(player);
+        AutoTestAssert.True(player.Creature.GetPowerAmount<HexalevelPower>() >= 1, "SoulOfChaos auto-played top card (HexaLevel) of Draw Pile at end of turn");
+        AutoTestAssert.True(slotAfterChaos != slotBeforeChaos, $"SoulOfChaos moved active Ghostflame away from slot {slotBeforeChaos} (now {slotAfterChaos})");
+        AutoTestAssert.True(
+            HexaMechanics.GetGhostflames(player)[slotAfterChaos].GetType() != typesBeforeChaos[slotAfterChaos],
+            $"SoulOfChaos randomized slot {slotAfterChaos} into a different Ghostflame type");
+
+        // 10. Clean 2nd combat: InflammatoryLetter (+1 Intensity at Round 1) + RecyclingMachine natural end-of-turn Ethereal exhaust -> 0-cost copy in Hand on Turn 2!
+        DownfallAutoTestRunner.CleanupRun();
+        var (p2, _, cs2) = await DownfallAutoTestRunner.StartCombatAsync<TheHexaghost>("HEXA_TOBSCO");
+        var pcs2 = AutoTestAssert.NotNull(p2.PlayerCombatState, "PlayerCombatState 2");
+        var letter = (InflammatoryLetter)await RelicCmd.Obtain<InflammatoryLetter>(p2);
+        await letter.BeforeSideTurnStart(new ThrowingPlayerChoiceContext(), CombatSide.Player, [p2.Creature], cs2);
+        AutoTestAssert.Equal(1, HexaMechanics.GetIntensity(p2), "InflammatoryLetter granted +1 Intensity at Round 1 start");
+
+        await RelicCmd.Obtain<RecyclingMachine>(p2);
+        foreach (var c in pcs2.Hand.Cards.ToList())
+            await CardPileCmd.Add(c, PileType.Discard);
+        var endTurnEth = cs2.CreateCard<Sear>(p2);
+        CardCmd.Upgrade(endTurnEth);
+        await CardPileCmd.Add(endTurnEth, PileType.Hand);
+        await DownfallAutoTestRunner.EndTurnAndWaitForRoundAsync(p2, cs2.RoundNumber + 1);
+
+        var nextTurnRecycled = AutoTestAssert.NotNull(
+            pcs2.Hand.Cards.OfType<Sear>().FirstOrDefault(c => c.IsUpgraded && c.EnergyCost.GetWithModifiers(CostModifiers.All) == 0),
+            "RecyclingMachine kept 0-cost recycled Sear+ in Hand on next turn after natural end-of-turn Ethereal exhaust");
+        AutoTestAssert.True(nextTurnRecycled.Pile?.Type == PileType.Hand, "Recycled Sear+ is in Hand on Turn 2");
     }
 }

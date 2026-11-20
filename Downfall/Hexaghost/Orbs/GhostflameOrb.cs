@@ -139,7 +139,7 @@ public abstract class GhostflameOrb : DownfallOrb
         return Task.CompletedTask;
     }
 
-    public override async Task BeforeSideTurnEnd(
+    public override async Task AfterSideTurnEnd(
         PlayerChoiceContext choiceContext,
         CombatSide side,
         IEnumerable<Creature> participants)
@@ -197,7 +197,12 @@ public sealed class SearingGhostflameOrb : GhostflameOrb
 
     public override async Task OnCardPlayedTriggerAsync(PlayerChoiceContext choiceContext, CardPlay cardPlay)
     {
-        if (IsIgnited || cardPlay.Card.Type != CardType.Attack)
+        if (IsIgnited)
+            return;
+
+        bool matches = cardPlay.Card.Type == CardType.Attack
+            || (cardPlay.Card.Type == CardType.Power && HexaMechanics.AllowsPowerForFlameProgression(Owner, flashProviders: true));
+        if (!matches)
             return;
 
         SetTriggerProgress(TriggerProgress + 1);
@@ -259,7 +264,12 @@ public sealed class CrushingGhostflameOrb : GhostflameOrb
 
     public override async Task OnCardPlayedTriggerAsync(PlayerChoiceContext choiceContext, CardPlay cardPlay)
     {
-        if (IsIgnited || cardPlay.Card.Type != CardType.Skill)
+        if (IsIgnited)
+            return;
+
+        bool matches = cardPlay.Card.Type == CardType.Skill
+            || (cardPlay.Card.Type == CardType.Power && HexaMechanics.AllowsPowerForFlameProgression(Owner, flashProviders: true));
+        if (!matches)
             return;
 
         SetTriggerProgress(TriggerProgress + 1);

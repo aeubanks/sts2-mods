@@ -66,6 +66,15 @@ public interface IStopAdvanceProvider
     bool PreventsEndTurnAdvance(Player player);
 }
 
+/// <summary>
+/// Implemented by relics (e.g. JarOfFuel / Olexa's Shield) that let Powers count toward Searing/Crushing Ghostflames.
+/// </summary>
+public interface IGhostflamePowerTriggerProvider
+{
+    bool AllowsPowerTrigger(Player player);
+    void NotifyPowerTrigger(Player player);
+}
+
 public static class HexaMechanics
 {
     public const int WheelSlotCount = 6;
@@ -177,7 +186,7 @@ public static class HexaMechanics
             return 0;
 
         int bonus = 0;
-        foreach (var relic in player.Relics.OfType<ISoulburnBonusProvider>())
+        foreach (var relic in player.Relics.Where(r => !r.IsMelted).OfType<ISoulburnBonusProvider>())
         {
             int b = relic.GetSoulburnBonus(player);
             if (b != 0)
@@ -432,6 +441,55 @@ public static class HexaMechanics
         state.ActiveSlotIndex = nextIdx;
         await ExtinguishAsync(choiceContext, player, flames[nextIdx]);
         RefreshGhostflameVisuals(player);
+    }
+
+    public static void RandomizeActiveGhostflame(Player player)
+    {
+        if (player.Creature.CombatState is null
+            || !player.Creature.IsAlive
+            || CombatManager.Instance.IsOverOrEnding)
+        {
+            return;
+        }
+
+        var flames = GetGhostflames(player);
+        if (flames.Count == 0)
+            return;
+
+        int slotIndex = GetActiveSlotIndex(player);
+        var current = flames[slotIndex];
+
+        var candidates = new List<Func<GhostflameOrb>>(3);
+        if (current is not SearingGhostflameOrb)
+            candidates.Add(() => (GhostflameOrb)ModelDb.Orb<SearingGhostflameOrb>().ToMutable());
+        if (current is not CrushingGhostflameOrb)
+            candidates.Add(() => (GhostflameOrb)ModelDb.Orb<CrushingGhostflameOrb>().ToMutable());
+        if (current is not BolsteringGhostflameOrb)
+            candidates.Add(() => (GhostflameOrb)ModelDb.Orb<BolsteringGhostflameOrb>().ToMutable());
+
+        if (candidates.Count == 0)
+            return;
+
+        var factory = player.RunState.Rng.CombatCardSelection.NextItem(candidates)!;
+        ReplaceGhostflame(player, slotIndex, factory());
+    }
+
+    public static bool AllowsPowerForFlameProgression(Player? player, bool flashProviders = false)
+    {
+        if (player is null)
+            return false;
+
+        bool allowed = false;
+        foreach (var relic in player.Relics)
+        {
+            if (!relic.IsMelted && relic is IGhostflamePowerTriggerProvider provider && provider.AllowsPowerTrigger(player))
+            {
+                allowed = true;
+                if (flashProviders)
+                    provider.NotifyPowerTrigger(player);
+            }
+        }
+        return allowed;
     }
 
     public static void ReplaceGhostflame(Player player, int slotIndex, GhostflameOrb newOrb)
