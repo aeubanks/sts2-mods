@@ -296,4 +296,296 @@ internal static class HexaghostTests
         AutoTestAssert.True(!flames[5].IsIgnited, "Inferno on slot 5 auto-extinguished at end of turn");
         AutoTestAssert.Equal(0, HexaMechanics.GetActiveSlotIndex(player), "Ignited slot 5 auto-advanced to slot 0 at end of turn");
     }
+
+    internal static async Task TestCommonCardsInCombat()
+    {
+        var (player, _, combatState) = await DownfallAutoTestRunner.StartCombatAsync<TheHexaghost>("HEXA_COMMON");
+        var pcs = AutoTestAssert.NotNull(player.PlayerCombatState, "PlayerCombatState");
+        var enemy = AutoTestAssert.NotNull(combatState.HittableEnemies.FirstOrDefault(e => e.IsAlive), "Alive enemy");
+        var ctx = new ThrowingPlayerChoiceContext();
+
+        await CreatureCmd.SetMaxAndCurrentHp(enemy, 500);
+        if (enemy.Block > 0)
+            await CreatureCmd.LoseBlock(ctx, enemy, enemy.Block, null);
+
+        async Task ClearHandAndRefillAsync()
+        {
+            foreach (var c in pcs.Hand.Cards.ToList())
+                await CardPileCmd.Add(c, PileType.Discard);
+            pcs.Energy = 20;
+        }
+
+        // 1. AdvancingGuard: 8 Block + Advance (Slot 0 -> Slot 1)
+        await ClearHandAndRefillAsync();
+        int blockBefore = player.Creature.Block;
+        var advGuard = combatState.CreateCard<AdvancingGuard>(player);
+        await CardPileCmd.Add(advGuard, PileType.Hand);
+        await PlayCardAsync(advGuard);
+        AutoTestAssert.Equal(blockBefore + 8, player.Creature.Block, "AdvancingGuard granted 8 Block");
+        AutoTestAssert.Equal(1, HexaMechanics.GetActiveSlotIndex(player), "AdvancingGuard advanced to Slot 1");
+
+        // 2. Again (Fleeting Flash): Ignite active (Crushing -> 6 dmg), then Extinguish it!
+        await ClearHandAndRefillAsync();
+        int hpBeforeAgain = enemy.CurrentHp;
+        var again = combatState.CreateCard<Again>(player);
+        CardCmd.Upgrade(again); // 0 cost
+        AutoTestAssert.Equal(0, again.EnergyCost.GetWithModifiers(CostModifiers.All), "Again+ costs 0");
+        await CardPileCmd.Add(again, PileType.Hand);
+        await PlayCardAsync(again);
+        AutoTestAssert.Equal(hpBeforeAgain - 6, enemy.CurrentHp, "Again ignited Crushing for 6 damage");
+        AutoTestAssert.True(!HexaMechanics.GetActiveGhostflame(player)!.IsIgnited, "Again extinguished Crushing afterward");
+
+        // 3. BacktrackSmack: 6x2 = 12 damage + Retract (Slot 1 -> Slot 0)
+        await ClearHandAndRefillAsync();
+        int hpBeforeBacktrack = enemy.CurrentHp;
+        var backtrack = combatState.CreateCard<BacktrackSmack>(player);
+        await CardPileCmd.Add(backtrack, PileType.Hand);
+        await PlayCardAsync(backtrack, enemy);
+        AutoTestAssert.Equal(hpBeforeBacktrack - 12, enemy.CurrentHp, "BacktrackSmack dealt 6x2 = 12 damage");
+        AutoTestAssert.Equal(0, HexaMechanics.GetActiveSlotIndex(player), "BacktrackSmack retracted to Slot 0 (Searing)");
+
+        // 4. BurningTouch: 8 Soulburn (once without Soulburn), then 16 Soulburn (twice when enemy already has Soulburn!)
+        await PowerCmd.Remove<SoulburnPower>(enemy);
+        await ClearHandAndRefillAsync();
+        var bt1 = combatState.CreateCard<BurningTouch>(player);
+        await CardPileCmd.Add(bt1, PileType.Hand);
+        await PlayCardAsync(bt1, enemy);
+        AutoTestAssert.Equal(8, enemy.GetPowerAmount<SoulburnPower>(), "BurningTouch applied 8 Soulburn to unburned target");
+
+        var bt2 = combatState.CreateCard<BurningTouch>(player);
+        await CardPileCmd.Add(bt2, PileType.Hand);
+        await PlayCardAsync(bt2, enemy);
+        AutoTestAssert.Equal(24, enemy.GetPowerAmount<SoulburnPower>(), "BurningTouch applied 8x2 = 16 Soulburn to already-burned target (8 -> 24)");
+
+        // 5. PhantomFireball+ (detonate all but 1) and unupgraded PhantomFireball (detonate remaining 1)
+        await ClearHandAndRefillAsync();
+        int hpBeforePf = enemy.CurrentHp;
+        var pfPlus = combatState.CreateCard<PhantomFireball>(player);
+        CardCmd.Upgrade(pfPlus); // 6 dmg + detonate 23
+        await CardPileCmd.Add(pfPlus, PileType.Hand);
+        await PlayCardAsync(pfPlus, enemy);
+        AutoTestAssert.Equal(hpBeforePf - 6 - 23, enemy.CurrentHp, "PhantomFireball+ dealt 6 dmg + 23 Soulburn detonation");
+        AutoTestAssert.Equal(1, enemy.GetPowerAmount<SoulburnPower>(), "PhantomFireball+ left 1 Soulburn");
+
+        int hpBeforePf2 = enemy.CurrentHp;
+        var pf = combatState.CreateCard<PhantomFireball>(player); // Attack #2 on Searing -> Searing ignites (+6 Soulburn -> 7 total) in BeforeCardPlayed, then PhantomFireball deals 4 dmg + detonates all 7!
+        await CardPileCmd.Add(pf, PileType.Hand);
+        await PlayCardAsync(pf, enemy);
+        AutoTestAssert.True(HexaMechanics.GetGhostflames(player)[0].IsIgnited, "2nd Attack ignited Slot 0 Searing before PhantomFireball.OnPlay");
+        AutoTestAssert.Equal(hpBeforePf2 - 4 - 7, enemy.CurrentHp, "Unupgraded PhantomFireball dealt 4 dmg + detonated 1 + 6 (from Searing) = 7 Soulburn");
+        AutoTestAssert.Equal(0, enemy.GetPowerAmount<SoulburnPower>(), "Unupgraded PhantomFireball cleared Soulburn after detonation");
+
+        // 6. HauntingEcho: Active Slot 0 (Searing) is Ignited -> deals 7 dmg and re-ignites Searing (+6 Soulburn)!
+        await ClearHandAndRefillAsync();
+        int burnBeforeEcho = enemy.GetPowerAmount<SoulburnPower>();
+        int hpBeforeEcho = enemy.CurrentHp;
+        var echo = combatState.CreateCard<HauntingEcho>(player);
+        await CardPileCmd.Add(echo, PileType.Hand);
+        await PlayCardAsync(echo, enemy);
+        AutoTestAssert.Equal(hpBeforeEcho - 7, enemy.CurrentHp, "HauntingEcho dealt 7 damage");
+        AutoTestAssert.Equal(burnBeforeEcho + 6, enemy.GetPowerAmount<SoulburnPower>(), "HauntingEcho re-ignited Searing for +6 Soulburn");
+
+        // HauntingEcho when active Ghostflame is UNIGNITED deals 7 damage and does NOT ignite it!
+        await HexaMechanics.AdvanceAsync(ctx, player); // Slot 1 Crushing (unignited, needs Skills)
+        int hpBeforeEchoMiss = enemy.CurrentHp;
+        var echoMiss = combatState.CreateCard<HauntingEcho>(player);
+        await CardPileCmd.Add(echoMiss, PileType.Hand);
+        await PlayCardAsync(echoMiss, enemy);
+        AutoTestAssert.Equal(hpBeforeEchoMiss - 7, enemy.CurrentHp, "HauntingEcho dealt 7 damage on unignited flame");
+        AutoTestAssert.True(!HexaMechanics.GetGhostflames(player)[1].IsIgnited, "HauntingEcho did not ignite unignited Crushing");
+
+        // 7. FlameDevourer (Devour Flame): Already on Slot 1 with previous Slot 0 Ignited -> 9 Block + Retract to Slot 0 (extinguishing Slot 0)!
+        AutoTestAssert.Equal(1, HexaMechanics.GetActiveSlotIndex(player), "Now on Slot 1 with previous Slot 0 Ignited");
+        await ClearHandAndRefillAsync();
+        int blockBeforeDevour = player.Creature.Block;
+        var devour = combatState.CreateCard<FlameDevourer>(player);
+        await CardPileCmd.Add(devour, PileType.Hand);
+        await PlayCardAsync(devour);
+        AutoTestAssert.Equal(blockBeforeDevour + 9, player.Creature.Block, "FlameDevourer granted 9 Block when previous Ghostflame was Ignited");
+        AutoTestAssert.Equal(0, HexaMechanics.GetActiveSlotIndex(player), "FlameDevourer retracted to Slot 0");
+        AutoTestAssert.True(!HexaMechanics.GetGhostflames(player)[0].IsIgnited, "Retracting onto Slot 0 extinguished it");
+
+        // Playing FlameDevourer when previous (Slot 5) is NOT ignited grants 0 Block and does not retract
+        int blockBeforeDevourMiss = player.Creature.Block;
+        var devourMiss = combatState.CreateCard<FlameDevourer>(player);
+        await CardPileCmd.Add(devourMiss, PileType.Hand);
+        await PlayCardAsync(devourMiss);
+        AutoTestAssert.Equal(blockBeforeDevourMiss, player.Creature.Block, "FlameDevourer does nothing when previous Ghostflame is unignited");
+        AutoTestAssert.Equal(0, HexaMechanics.GetActiveSlotIndex(player), "FlameDevourer did not retract when previous was unignited");
+
+        // 8. Firestarter (5 dmg + 5 Soulburn AoE) + HeatMetal (4 dmg + 4 Soulburn + 1 Vulnerable) + ThermalTransfer (7 dmg + 6 Block if Soulburn)
+        await PowerCmd.Remove<SoulburnPower>(enemy);
+        await ClearHandAndRefillAsync();
+        int hpBeforeFire = enemy.CurrentHp;
+        var firestarter = combatState.CreateCard<Firestarter>(player);
+        await CardPileCmd.Add(firestarter, PileType.Hand);
+        await PlayCardAsync(firestarter);
+        AutoTestAssert.Equal(hpBeforeFire - 5, enemy.CurrentHp, "Firestarter dealt 5 damage");
+        AutoTestAssert.Equal(5, enemy.GetPowerAmount<SoulburnPower>(), "Firestarter applied 5 Soulburn");
+
+        int hpBeforeHeat = enemy.CurrentHp;
+        var heatMetal = combatState.CreateCard<HeatMetal>(player);
+        await CardPileCmd.Add(heatMetal, PileType.Hand);
+        await PlayCardAsync(heatMetal, enemy);
+        AutoTestAssert.Equal(hpBeforeHeat - 4, enemy.CurrentHp, "HeatMetal dealt 4 damage");
+        AutoTestAssert.Equal(1, enemy.GetPowerAmount<VulnerablePower>(), "HeatMetal applied 1 Vulnerable");
+        // Note: Firestarter + HeatMetal ignited Searing (+6 Soulburn) + HeatMetal (+4) -> 5 + 6 + 4 = 15 Soulburn!
+        AutoTestAssert.Equal(15, enemy.GetPowerAmount<SoulburnPower>(), "HeatMetal + Searing ignition totaled 15 Soulburn");
+
+        await PowerCmd.Remove<VulnerablePower>(enemy);
+        int blockBeforeThermal = player.Creature.Block;
+        int hpBeforeThermal = enemy.CurrentHp;
+        var thermal = combatState.CreateCard<ThermalTransfer>(player);
+        await CardPileCmd.Add(thermal, PileType.Hand);
+        await PlayCardAsync(thermal, enemy);
+        AutoTestAssert.Equal(hpBeforeThermal - 7, enemy.CurrentHp, "ThermalTransfer dealt 7 damage");
+        AutoTestAssert.Equal(blockBeforeThermal + 6, player.Creature.Block, "ThermalTransfer granted 6 Block against Soulburned target");
+
+        // ThermalTransfer without Soulburn: deals 7 damage and grants 0 Block!
+        await PowerCmd.Remove<SoulburnPower>(enemy);
+        int blockBeforeThermalMiss = player.Creature.Block;
+        int hpBeforeThermalMiss = enemy.CurrentHp;
+        var thermalMiss = combatState.CreateCard<ThermalTransfer>(player);
+        await CardPileCmd.Add(thermalMiss, PileType.Hand);
+        await PlayCardAsync(thermalMiss, enemy);
+        AutoTestAssert.Equal(hpBeforeThermalMiss - 7, enemy.CurrentHp, "ThermalTransfer without Soulburn dealt 7 damage");
+        AutoTestAssert.Equal(blockBeforeThermalMiss, player.Creature.Block, "ThermalTransfer without Soulburn granted 0 Block");
+
+        // 9. InspiringFlames (Stoke the Fire): 7 Block + upgrades 1 card in Hand per Ignited Ghostflame!
+        await ClearHandAndRefillAsync();
+        var dummyStrike = combatState.CreateCard<HexaStrike>(player);
+        var inspire = combatState.CreateCard<InspiringFlames>(player);
+        await CardPileCmd.Add(dummyStrike, PileType.Hand);
+        await CardPileCmd.Add(inspire, PileType.Hand);
+        AutoTestAssert.True(!dummyStrike.IsUpgraded, "Dummy HexaStrike starts unupgraded");
+        AutoTestAssert.True(HexaMechanics.GetIgnitedCount(player) >= 1, "At least 1 Ghostflame is Ignited");
+        int blockBeforeInspire = player.Creature.Block;
+        await PlayCardAsync(inspire);
+        AutoTestAssert.Equal(blockBeforeInspire + 7, player.Creature.Block, "InspiringFlames granted 7 Block");
+        AutoTestAssert.True(dummyStrike.IsUpgraded, "InspiringFlames upgraded HexaStrike in Hand");
+
+        // 10. GhostLash: 8 base + 3 per other Ethereal card in Hand on play; Afterlife deals base 8 only (no Hand bonus)!
+        await ClearHandAndRefillAsync();
+        var eth1 = combatState.CreateCard<Sear>(player);
+        var eth2 = combatState.CreateCard<Sear>(player);
+        var ghostLash = combatState.CreateCard<GhostLash>(player);
+        await CardPileCmd.Add(eth1, PileType.Hand);
+        await CardPileCmd.Add(eth2, PileType.Hand);
+        await CardPileCmd.Add(ghostLash, PileType.Hand);
+        int hpBeforeLash = enemy.CurrentHp;
+        await PlayCardAsync(ghostLash, enemy);
+        AutoTestAssert.Equal(hpBeforeLash - 14, enemy.CurrentHp, "GhostLash dealt 8 + 2*3 = 14 damage with 2 other Ethereals in Hand");
+
+        var ghostLash2 = combatState.CreateCard<GhostLash>(player);
+        await CardPileCmd.Add(ghostLash2, PileType.Hand);
+        int hpBeforeLashAfterlife = enemy.CurrentHp;
+        await CardCmd.Exhaust(ctx, ghostLash2, causedByEthereal: true);
+        AutoTestAssert.Equal(hpBeforeLashAfterlife - 8, enemy.CurrentHp, "GhostLash Afterlife dealt base 8 damage (without Hand bonus)");
+
+        // 11. NightmareGuise + ShadowGuise & NightmareStrike + ShadowStrike (both Play and Afterlife!)
+        await ClearHandAndRefillAsync();
+        var ngPlay = combatState.CreateCard<NightmareGuise>(player);
+        await CardPileCmd.Add(ngPlay, PileType.Hand);
+        int blockBeforeNgPlay = player.Creature.Block;
+        await PlayCardAsync(ngPlay);
+        AutoTestAssert.Equal(blockBeforeNgPlay + 4, player.Creature.Block, "NightmareGuise OnPlay granted 4 Block");
+        var sgUnupg = AutoTestAssert.NotNull(pcs.Hand.Cards.OfType<ShadowGuise>().FirstOrDefault(), "NightmareGuise OnPlay added ShadowGuise");
+        AutoTestAssert.True(!sgUnupg.IsUpgraded, "Unupgraded NightmareGuise added unupgraded ShadowGuise");
+        await CardPileCmd.Add(sgUnupg, PileType.Discard);
+
+        var ngPlus = combatState.CreateCard<NightmareGuise>(player);
+        CardCmd.Upgrade(ngPlus);
+        await CardPileCmd.Add(ngPlus, PileType.Hand);
+        await CardCmd.Exhaust(ctx, ngPlus, causedByEthereal: true);
+        var shadowGuise = AutoTestAssert.NotNull(pcs.Hand.Cards.OfType<ShadowGuise>().FirstOrDefault(), "NightmareGuise+ Afterlife added ShadowGuise+");
+        AutoTestAssert.True(shadowGuise.IsUpgraded, "ShadowGuise is upgraded");
+        int blockBeforeSg = player.Creature.Block;
+        await PlayCardAsync(shadowGuise);
+        AutoTestAssert.Equal(blockBeforeSg + 6, player.Creature.Block, "ShadowGuise+ granted 6 Block");
+        AutoTestAssert.True(pcs.ExhaustPile.Cards.Contains(shadowGuise), "ShadowGuise exhausted on play");
+
+        var ns = combatState.CreateCard<NightmareStrike>(player);
+        AutoTestAssert.True(ns.Tags.Contains(CardTag.Strike), "NightmareStrike has CardTag.Strike");
+        await CardPileCmd.Add(ns, PileType.Hand);
+        int hpBeforeNs = enemy.CurrentHp;
+        await PlayCardAsync(ns, enemy);
+        AutoTestAssert.Equal(hpBeforeNs - 4, enemy.CurrentHp, "NightmareStrike dealt 4 damage");
+        var shadowStrike = AutoTestAssert.NotNull(pcs.Hand.Cards.OfType<ShadowStrike>().FirstOrDefault(), "NightmareStrike added ShadowStrike to Hand");
+        AutoTestAssert.True(shadowStrike.Tags.Contains(CardTag.Strike), "ShadowStrike has CardTag.Strike");
+        int hpBeforeSs = enemy.CurrentHp;
+        await PlayCardAsync(shadowStrike, enemy);
+        AutoTestAssert.Equal(hpBeforeSs - 4, enemy.CurrentHp, "ShadowStrike dealt 4 damage");
+        AutoTestAssert.True(pcs.ExhaustPile.Cards.Contains(shadowStrike), "ShadowStrike exhausted on play");
+
+        var nsPlus = combatState.CreateCard<NightmareStrike>(player);
+        CardCmd.Upgrade(nsPlus);
+        await CardPileCmd.Add(nsPlus, PileType.Hand);
+        await CardCmd.Exhaust(ctx, nsPlus, causedByEthereal: true);
+        var shadowStrikePlus = AutoTestAssert.NotNull(pcs.Hand.Cards.OfType<ShadowStrike>().FirstOrDefault(), "NightmareStrike+ Afterlife added ShadowStrike+");
+        AutoTestAssert.True(shadowStrikePlus.IsUpgraded, "ShadowStrike+ is upgraded");
+        int hpBeforeSsPlus = enemy.CurrentHp;
+        await PlayCardAsync(shadowStrikePlus, enemy);
+        AutoTestAssert.Equal(hpBeforeSsPlus - 6, enemy.CurrentHp, "ShadowStrike+ dealt 6 damage");
+
+        // 12. SpectersWail: 4x2 = 8 on Play, 4x1 = 4 on Afterlife!
+        await ClearHandAndRefillAsync();
+        var wail1 = combatState.CreateCard<SpectersWail>(player);
+        await CardPileCmd.Add(wail1, PileType.Hand);
+        int hpBeforeWail = enemy.CurrentHp;
+        await PlayCardAsync(wail1);
+        AutoTestAssert.Equal(hpBeforeWail - 8, enemy.CurrentHp, "SpectersWail dealt 4x2 = 8 AoE damage on play");
+
+        var wail2 = combatState.CreateCard<SpectersWail>(player);
+        await CardPileCmd.Add(wail2, PileType.Hand);
+        int hpBeforeWailAfterlife = enemy.CurrentHp;
+        await CardCmd.Exhaust(ctx, wail2, causedByEthereal: false);
+        AutoTestAssert.Equal(hpBeforeWailAfterlife - 4, enemy.CurrentHp, "SpectersWail Afterlife dealt 4x1 = 4 AoE damage");
+
+        // 13. StrikeFromBeyond: 3 damage + searches past non-Ethereal top card to draw an Ethereal card from Draw Pile
+        await ClearHandAndRefillAsync();
+        var drawEthereal = combatState.CreateCard<Sear>(player);
+        var nonEtherealTop = combatState.CreateCard<HexaDefend>(player);
+        await CardPileCmd.Add(drawEthereal, PileType.Draw, CardPilePosition.Top);
+        await CardPileCmd.Add(nonEtherealTop, PileType.Draw, CardPilePosition.Top);
+        var sfb = combatState.CreateCard<StrikeFromBeyond>(player);
+        AutoTestAssert.True(sfb.Tags.Contains(CardTag.Strike), "StrikeFromBeyond has CardTag.Strike");
+        await CardPileCmd.Add(sfb, PileType.Hand);
+        int hpBeforeSfb = enemy.CurrentHp;
+        await PlayCardAsync(sfb, enemy);
+        AutoTestAssert.Equal(hpBeforeSfb - 3, enemy.CurrentHp, "StrikeFromBeyond dealt 3 damage");
+        AutoTestAssert.True(pcs.Hand.Cards.Any(c => c.Keywords.Contains(CardKeyword.Ethereal)), "StrikeFromBeyond drew an Ethereal card past non-Ethereal top card");
+        AutoTestAssert.True(!pcs.Hand.Cards.Contains(nonEtherealTop), "StrikeFromBeyond did not draw the non-Ethereal top card");
+
+        // 14. ShieldOfDarkness & SwordOfDarkness: Scry top 3 -> discarding an Ethereal card Exhausts it and triggers Afterlife!
+        await ClearHandAndRefillAsync();
+        var topWail = combatState.CreateCard<SpectersWail>(player);
+        var topStrike = combatState.CreateCard<HexaStrike>(player);
+        await CardPileCmd.Add(topStrike, PileType.Draw, CardPilePosition.Top);
+        await CardPileCmd.Add(topWail, PileType.Draw, CardPilePosition.Top);
+
+        int hpBeforeShieldScry = enemy.CurrentHp;
+        int blockBeforeShield = player.Creature.Block;
+        var shieldDark = combatState.CreateCard<ShieldOfDarkness>(player);
+        await CardPileCmd.Add(shieldDark, PileType.Hand);
+        using (DownfallAutoTestRunner.PreferCards(c => ReferenceEquals(c, topWail) || ReferenceEquals(c, topStrike)))
+        {
+            await PlayCardAsync(shieldDark);
+        }
+        AutoTestAssert.Equal(blockBeforeShield + 12, player.Creature.Block, "ShieldOfDarkness granted 12 Block");
+        AutoTestAssert.True(pcs.ExhaustPile.Cards.Contains(topWail), "ShieldOfDarkness Exhausted scry-discarded Ethereal card");
+        AutoTestAssert.True(pcs.DiscardPile.Cards.Contains(topStrike), "ShieldOfDarkness discarded non-Ethereal scry card");
+        AutoTestAssert.Equal(hpBeforeShieldScry - 4, enemy.CurrentHp, "Scry-exhausted SpectersWail triggered Afterlife for 4 damage");
+
+        var topSear = combatState.CreateCard<Sear>(player);
+        await CardPileCmd.Add(topSear, PileType.Draw, CardPilePosition.Top);
+        int hpBeforeSword = enemy.CurrentHp;
+        var swordDark = combatState.CreateCard<SwordOfDarkness>(player);
+        await CardPileCmd.Add(swordDark, PileType.Hand);
+        using (DownfallAutoTestRunner.PreferCards(c => ReferenceEquals(c, topSear)))
+        {
+            await PlayCardAsync(swordDark, enemy);
+        }
+        AutoTestAssert.Equal(hpBeforeSword - 14, enemy.CurrentHp, "SwordOfDarkness dealt 14 damage");
+        AutoTestAssert.True(pcs.ExhaustPile.Cards.Contains(topSear), "SwordOfDarkness Exhausted scry-discarded Ethereal Sear");
+    }
 }

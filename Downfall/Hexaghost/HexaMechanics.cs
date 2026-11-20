@@ -2,6 +2,7 @@ using Downfall.Core;
 using Downfall.Hexaghost.Cards;
 using Downfall.Hexaghost.Orbs;
 using Downfall.Hexaghost.Powers;
+using MegaCrit.Sts2.Core.CardSelection;
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Commands;
 using MegaCrit.Sts2.Core.Entities.Cards;
@@ -9,6 +10,7 @@ using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.Entities.Orbs;
 using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.GameActions.Multiplayer;
+using MegaCrit.Sts2.Core.Localization;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Nodes.Orbs;
 using MegaCrit.Sts2.Core.Nodes.Rooms;
@@ -104,6 +106,49 @@ public static class HexaMechanics
             return null;
 
         return flames[GetActiveSlotIndex(player)];
+    }
+
+    public static GhostflameOrb? GetPreviousGhostflame(Player? player)
+    {
+        var flames = GetGhostflames(player);
+        if (flames.Count == 0)
+            return null;
+
+        int prevIdx = (GetActiveSlotIndex(player) - 1 + flames.Count) % flames.Count;
+        return flames[prevIdx];
+    }
+
+    public static async Task ScryExhaustEtherealAsync(
+        PlayerChoiceContext choiceContext,
+        Player player,
+        int count,
+        LocString prompt)
+    {
+        if (count <= 0 || !player.Creature.IsAlive || CombatManager.Instance.IsOverOrEnding)
+            return;
+
+        var drawPile = PileType.Draw.GetPile(player);
+        if (drawPile.Cards.Count == 0)
+            return;
+
+        var topCards = drawPile.Cards.Take(Math.Min(count, drawPile.Cards.Count)).ToList();
+        var prefs = new CardSelectorPrefs(prompt, 0, topCards.Count);
+        var chosen = (await CardSelectCmd.FromSimpleGrid(choiceContext, topCards, player, prefs)).ToList();
+
+        foreach (var card in chosen)
+        {
+            if (!player.Creature.IsAlive || CombatManager.Instance.IsOverOrEnding)
+                break;
+
+            await CardPileCmd.Add(card, PileType.Discard);
+            if (card.Keywords.Contains(CardKeyword.Ethereal)
+                && card.Pile?.Type != PileType.Exhaust
+                && player.Creature.IsAlive
+                && !CombatManager.Instance.IsOverOrEnding)
+            {
+                await CardCmd.Exhaust(choiceContext, card, causedByEthereal: false);
+            }
+        }
     }
 
     public static int GetIgnitedCount(Player? player)

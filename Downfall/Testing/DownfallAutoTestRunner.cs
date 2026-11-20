@@ -218,6 +218,7 @@ internal static class DownfallAutoTestRunner
                 ("GuardianRelicsAndPotionsInCombat", GuardianTests.TestRelicsAndPotionsInCombat),
                 ("HexaVisualsRuntime", HexaghostTests.TestVisualsRuntime),
                 ("HexaStarterGhostflamesAndAfterlife", HexaghostTests.TestStarterGhostflamesAndAfterlife),
+                ("HexaCommonCardsInCombat", HexaghostTests.TestCommonCardsInCombat),
             ];
 
             int matchedIndex = 0;
@@ -772,6 +773,8 @@ internal static class DownfallAutoTestRunner
             AutoTestAssert.True(new LocString("gameplay_ui", $"{hexaTipKey}.title").Exists(), $"Missing {hexaTipKey}.title");
             AutoTestAssert.True(new LocString("gameplay_ui", $"{hexaTipKey}.description").Exists(), $"Missing {hexaTipKey}.description");
         }
+        AutoTestAssert.True(new LocString("cards", "DOWNFALL-SHIELD_OF_DARKNESS.selectionScreenPrompt").Exists(), "Missing ShieldOfDarkness prompt");
+        AutoTestAssert.True(new LocString("cards", "DOWNFALL-SWORD_OF_DARKNESS.selectionScreenPrompt").Exists(), "Missing SwordOfDarkness prompt");
 
         return Task.CompletedTask;
     }
