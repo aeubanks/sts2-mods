@@ -1,0 +1,14 @@
+{
+  "DOWNFALL-ATTACK_SLIME.title": "Bruiser Slime",
+  "DOWNFALL-ATTACK_SLIME.description": "Deals [blue]3[/blue] damage twice to a random enemy at the start of your turn.\n[gold]Absorb[/gold]: Gain [blue]1[/blue] [gold]Strength[/gold].",
+  "DOWNFALL-ATTACK_SLIME.smartDescription": "Deals [blue]{Passive}[/blue] damage twice to a random enemy at the start of your turn.\n[gold]Absorb[/gold]: Gain [blue]1[/blue] [gold]Strength[/gold].",
+  "DOWNFALL-POISON_SLIME.title": "Guerilla Slime",
+  "DOWNFALL-POISON_SLIME.description": "Deals [blue]3[/blue] damage to ALL enemies at the start of your turn.\n[gold]Absorb[/gold]: Gain [blue]1[/blue] [gold]Strength[/gold].",
+  "DOWNFALL-POISON_SLIME.smartDescription": "Deals [blue]{Passive}[/blue] damage to ALL enemies at the start of your turn.\n[gold]Absorb[/gold]: Gain [blue]1[/blue] [gold]Strength[/gold].",
+  "DOWNFALL-SHIELD_SLIME.title": "Leeching Slime",
+  "DOWNFALL-SHIELD_SLIME.description": "Deals [blue]1[/blue] damage and grants [blue]3[/blue] [gold]Block[/gold] at the start of your turn.\n[gold]Absorb[/gold]: Gain [blue]1[/blue] [gold]Strength[/gold].",
+  "DOWNFALL-SHIELD_SLIME.smartDescription": "Deals [blue]{Passive}[/blue] damage and grants [blue]{Evoke}[/blue] [gold]Block[/gold] at the start of your turn.\n[gold]Absorb[/gold]: Gain [blue]1[/blue] [gold]Strength[/gold].",
+  "DOWNFALL-SLIMING_SLIME.title": "Mire Slime",
+  "DOWNFALL-SLIMING_SLIME.description": "Deals [blue]2[/blue] damage and applies [blue]2[/blue] [gold]Goop[/gold] at the start of your turn.\n[gold]Absorb[/gold]: Gain [blue]1[/blue] [gold]Strength[/gold].",
+  "DOWNFALL-SLIMING_SLIME.smartDescription": "Deals [blue]{Passive}[/blue] damage and applies [blue]{Evoke}[/blue] [gold]Goop[/gold] at the start of your turn.\n[gold]Absorb[/gold]: Gain [blue]1[/blue] [gold]Strength[/gold]."
+}

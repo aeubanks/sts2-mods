@@ -826,5 +826,17 @@
   "DOWNFALL-TRASH_TO_TREASURE.description": "Gain {Block:diff()} [gold]Block[/gold].\n[gold]Exhaust[/gold] a card.\nGain Energy equal to its cost.",
   "DOWNFALL-TRASH_TO_TREASURE.selectionScreenPrompt": "Choose a card to Exhaust.",
   "DOWNFALL-TYPHOON_FANG.title": "Typhoon Fang",
-  "DOWNFALL-TYPHOON_FANG.description": "Deal {Damage:diff()} damage.\n[gold]Overflow[/gold]: This turn, whenever you [gold]Overflow[/gold], play a copy of this card."
+  "DOWNFALL-TYPHOON_FANG.description": "Deal {Damage:diff()} damage.\n[gold]Overflow[/gold]: This turn, whenever you [gold]Overflow[/gold], play a copy of this card.",
+  "DOWNFALL-SLIMEBOUND_STRIKE.title": "Strike",
+  "DOWNFALL-SLIMEBOUND_STRIKE.description": "Deal {Damage:diff()} damage.",
+  "DOWNFALL-SLIMEBOUND_DEFEND.title": "Defend",
+  "DOWNFALL-SLIMEBOUND_DEFEND.description": "Gain {Block:diff()} [gold]Block[/gold].",
+  "DOWNFALL-TACKLE.title": "Tackle",
+  "DOWNFALL-TACKLE.description": "Deal {Damage:diff()} damage.\nTake {SelfDamage} damage.",
+  "DOWNFALL-SPLIT.title": "Split",
+  "DOWNFALL-SPLIT.description": "[gold]Split[/gold] a [gold]Guerilla Slime[/gold], then [gold]Command[/gold].",
+  "DOWNFALL-CORROSIVE_SPIT.title": "Corrosive Spit",
+  "DOWNFALL-CORROSIVE_SPIT.description": "Apply {SlimedPower:diff()} [gold]Goop[/gold].",
+  "DOWNFALL-LICK.title": "Lick",
+  "DOWNFALL-LICK.description": "Apply {SlimedPower:diff()} [gold]Goop[/gold]."
 }

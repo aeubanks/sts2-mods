@@ -34,5 +34,15 @@
   "DOWNFALL-LUCKY_KEYWORD.title": "Lucky",
   "DOWNFALL-LUCKY_KEYWORD.description": "[gold]Overflow[/gold] effects always activate regardless of [gold]Hand[/gold] size.",
   "DOWNFALL-SNECKO_MUDDLE.selectionScreenPrompt": "Choose card(s) to Muddle.",
-  "DOWNFALL-TRASH_CAN.selectionScreenPrompt": "Choose card(s) to Exhaust."
+  "DOWNFALL-TRASH_CAN.selectionScreenPrompt": "Choose card(s) to Exhaust.",
+  "DOWNFALL-SPLIT_KEYWORD.title": "Split",
+  "DOWNFALL-SPLIT_KEYWORD.description": "Spawn a Slime minion into an open Slime slot. If all slots are full, [gold]Absorb[/gold] your oldest Slime first.",
+  "DOWNFALL-COMMAND_KEYWORD.title": "Command",
+  "DOWNFALL-COMMAND_KEYWORD.description": "Your newest Slime minion immediately attacks.",
+  "DOWNFALL-ABSORB_KEYWORD.title": "Absorb",
+  "DOWNFALL-ABSORB_KEYWORD.description": "Remove a Slime minion to gain [blue]1[/blue] [gold]Strength[/gold].",
+  "DOWNFALL-TACKLE_KEYWORD.title": "Tackle",
+  "DOWNFALL-TACKLE_KEYWORD.description": "High-damage Attacks that also deal self-damage to you.",
+  "DOWNFALL-CONSUME_KEYWORD.title": "Consume",
+  "DOWNFALL-CONSUME_KEYWORD.description": "Triggers a bonus effect when attacking an enemy that has [gold]Goop[/gold]."
 }

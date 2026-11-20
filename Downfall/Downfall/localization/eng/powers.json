@@ -349,5 +349,14 @@
   "DOWNFALL-TYPHOON_PLUS_POWER.smartDescription": "This turn, whenever you [gold]Overflow[/gold], play {Amount:plural:a copy|[blue]{}[/blue] copies} of [gold]Typhoon Fang+[/gold].",
   "DOWNFALL-CHEAT_POWER.title": "Cheating",
   "DOWNFALL-CHEAT_POWER.description": "[gold]Overflow[/gold] effects always activate regardless of hand size.",
-  "DOWNFALL-CHEAT_POWER.smartDescription": "{Amount:plural:This turn|For the next [blue]{}[/blue] turns}, [gold]Overflow[/gold] effects always activate regardless of hand size."
+  "DOWNFALL-CHEAT_POWER.smartDescription": "{Amount:plural:This turn|For the next [blue]{}[/blue] turns}, [gold]Overflow[/gold] effects always activate regardless of hand size.",
+  "DOWNFALL-SLIMED_POWER.title": "Goop",
+  "DOWNFALL-SLIMED_POWER.description": "The next Attack against this enemy deals additional damage, removing all [gold]Goop[/gold].",
+  "DOWNFALL-SLIMED_POWER.smartDescription": "The next Attack against this enemy deals [blue]{Amount}[/blue] more damage, removing all [gold]Goop[/gold].",
+  "DOWNFALL-POTENCY_POWER.title": "Potency",
+  "DOWNFALL-POTENCY_POWER.description": "Increases the damage and secondary effects of your Slime minions.",
+  "DOWNFALL-POTENCY_POWER.smartDescription": "Your Slime minions deal [blue]{Amount}[/blue] additional damage and gain [blue]{SecondaryBonus}[/blue] to their secondary effects.",
+  "DOWNFALL-SOULBURN_POWER.title": "Soulburn",
+  "DOWNFALL-SOULBURN_POWER.description": "After 3 turns, detonates to cause HP loss equal to its stacks.",
+  "DOWNFALL-SOULBURN_POWER.smartDescription": "In [blue]{Turns}[/blue] {Turns:plural:turn|turns}, loses [blue]{Amount}[/blue] HP."
 }

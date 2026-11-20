@@ -197,9 +197,16 @@
   "DOWNFALL-RARE_BOOSTER_PACK.title": "Rare Booster Box",
   "DOWNFALL-RARE_BOOSTER_PACK.description": "Upon pickup, choose [blue]1[/blue] of [blue]{Cards}[/blue] Rare [gold]Offclass[/gold] cards to add to your deck.",
   "DOWNFALL-RARE_BOOSTER_PACK.flavor": "Mint condition.",
+  "DOWNFALL-ABSORB_END_COMBAT.title": "Heart of Goo",
+  "DOWNFALL-ABSORB_END_COMBAT.description": "Whenever you [gold]Consume[/gold] [gold]Goop[/gold], heal [blue]{Heal}[/blue] HP (up to [blue]{Cap}[/blue] HP per combat).",
+  "DOWNFALL-ABSORB_END_COMBAT.flavor": "Squishy and full of nutrients.",
+  "DOWNFALL-ABSORB_END_COMBAT_UPGRADED.title": "Black Heart of Goo",
+  "DOWNFALL-ABSORB_END_COMBAT_UPGRADED.description": "Replaces [gold]Heart of Goo[/gold].\nWhenever you [gold]Consume[/gold] [gold]Goop[/gold], heal [blue]{Heal}[/blue] HP (up to [blue]{Cap}[/blue] HP per combat).",
+  "DOWNFALL-ABSORB_END_COMBAT_UPGRADED.flavor": "Even richer in dark gelatinous nutrients.",
   "SEA_GLASS.DOWNFALL-THE_HERMIT.title": "Sea Glass (Hermit)",
   "SEA_GLASS.DOWNFALL-THE_AWAKENED_ONE.title": "Sea Glass (Awakened)",
   "SEA_GLASS.DOWNFALL-THE_GREMLINS.title": "Sea Glass (Gremlins)",
   "SEA_GLASS.DOWNFALL-THE_CHAMP.title": "Sea Glass (Champ)",
-  "SEA_GLASS.DOWNFALL-THE_SNECKO.title": "Sea Glass (Snecko)"
+  "SEA_GLASS.DOWNFALL-THE_SNECKO.title": "Sea Glass (Snecko)",
+  "SEA_GLASS.DOWNFALL-THE_SLIME_BOSS.title": "Sea Glass (Slime Boss)"
 }

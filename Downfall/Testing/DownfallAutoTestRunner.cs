@@ -188,6 +188,8 @@ internal static class DownfallAutoTestRunner
                 ("SneckoUncommonBatch2InCombat", SneckoTests.TestUncommonBatch2InCombat),
                 ("SneckoRareCardsInCombat", SneckoTests.TestRareCardsInCombat),
                 ("SneckoRelicsAndPotionsInCombat", SneckoTests.TestRelicsAndPotionsInCombat),
+                ("SlimeboundVisualsRuntime", SlimeboundTests.TestVisualsRuntime),
+                ("SlimeboundStarterCombat", SlimeboundTests.TestStarterCombat),
             ];
 
             int matchedIndex = 0;
@@ -557,6 +559,31 @@ internal static class DownfallAutoTestRunner
             _ = power.HoverTips.ToList();
         }
 
+        // Validate all Downfall custom orbs.
+        var customOrbs = modelTypes
+            .Where(t => typeof(DownfallOrb).IsAssignableFrom(t))
+            .Select(t => ModelDb.DebugOrb(t))
+            .OfType<DownfallOrb>()
+            .ToList();
+        AutoTestAssert.True(customOrbs.Count >= 4, $"Expected at least 4 Downfall orbs, got {customOrbs.Count}");
+        foreach (var orb in customOrbs)
+        {
+            AutoTestAssert.True(ResourceLoader.Exists(orb.CustomIconPath), $"Missing orb icon for {orb.Id}: {orb.CustomIconPath}");
+            AutoTestAssert.True(orb.Title.Exists(), $"Missing orb title loc for {orb.Id}");
+            AutoTestAssert.True(orb.Description.Exists(), $"Missing orb desc loc for {orb.Id}");
+            AutoTestAssert.True(orb.SmartDescription.Exists(), $"Missing orb smartDescription loc for {orb.Id}");
+            var desc = orb.Description.GetFormattedText();
+            AutoTestAssert.True(!string.IsNullOrWhiteSpace(desc) && !desc.Contains('{') && !desc.Contains('}'),
+                $"Invalid orb description for {orb.Id}: {desc}");
+            var smartLoc = orb.SmartDescription;
+            smartLoc.Add("Passive", orb.PassiveVal);
+            smartLoc.Add("Evoke", orb.EvokeVal);
+            var smartText = smartLoc.GetFormattedText();
+            AutoTestAssert.True(!string.IsNullOrWhiteSpace(smartText) && !smartText.Contains('{') && !smartText.Contains('}'),
+                $"Invalid orb smartDescription for {orb.Id}: {smartText}");
+            _ = orb.HoverTips.ToList();
+        }
+
         // Validate character-specific gameplay UI and prompt loc keys.
         AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-DEAD_ON_KEYWORD.title").Exists(), "Missing Dead On title loc");
         AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-DEAD_ON_KEYWORD.description").Exists(), "Missing Dead On desc loc");
@@ -640,6 +667,16 @@ internal static class DownfallAutoTestRunner
         AutoTestAssert.True(new LocString("cards", "DOWNFALL-TRASH_TO_TREASURE.selectionScreenPrompt").Exists(), "Missing TrashToTreasure prompt loc");
         AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-TRASH_CAN.selectionScreenPrompt").Exists(), "Missing TrashCan prompt loc");
         AutoTestAssert.True(new LocString("relics", "DOWNFALL-SEAL_OF_APPROVAL.selectionScreenPrompt").Exists(), "Missing SealOfApproval prompt loc");
+        AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-SPLIT_KEYWORD.title").Exists(), "Missing Split title loc");
+        AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-SPLIT_KEYWORD.description").Exists(), "Missing Split desc loc");
+        AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-COMMAND_KEYWORD.title").Exists(), "Missing Command title loc");
+        AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-COMMAND_KEYWORD.description").Exists(), "Missing Command desc loc");
+        AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-ABSORB_KEYWORD.title").Exists(), "Missing Absorb title loc");
+        AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-ABSORB_KEYWORD.description").Exists(), "Missing Absorb desc loc");
+        AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-TACKLE_KEYWORD.title").Exists(), "Missing Tackle title loc");
+        AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-TACKLE_KEYWORD.description").Exists(), "Missing Tackle desc loc");
+        AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-CONSUME_KEYWORD.title").Exists(), "Missing Consume title loc");
+        AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-CONSUME_KEYWORD.description").Exists(), "Missing Consume desc loc");
 
         return Task.CompletedTask;
     }

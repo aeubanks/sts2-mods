@@ -73,5 +73,20 @@
   "DOWNFALL-THE_SNECKO.goldMonologue": "Shiny scales and gold!",
   "DOWNFALL-THE_SNECKO.banter": "Sssssssss....",
   "DOWNFALL-THE_SNECKO.bestiaryQuote": "A serpentine creature with a bewildering stare.",
-  "DOWNFALL-THE_SNECKO.aromaPrinciple": "Damp scales and chaotic magic."
+  "DOWNFALL-THE_SNECKO.aromaPrinciple": "Damp scales and chaotic magic.",
+  "DOWNFALL-THE_SLIME_BOSS.title": "The Slime Boss",
+  "DOWNFALL-THE_SLIME_BOSS.titleObject": "the Slime Boss",
+  "DOWNFALL-THE_SLIME_BOSS.shortTitle": "Slime Boss",
+  "DOWNFALL-THE_SLIME_BOSS.description": "A gigantic gelatinous menace from the bottom of the Spire.\nSplits into Slime minions and coats foes in corrosive Goop.",
+  "DOWNFALL-THE_SLIME_BOSS.pronounObject": "it",
+  "DOWNFALL-THE_SLIME_BOSS.possessiveAdjective": "its",
+  "DOWNFALL-THE_SLIME_BOSS.pronounPossessive": "its",
+  "DOWNFALL-THE_SLIME_BOSS.pronounSubject": "it",
+  "DOWNFALL-THE_SLIME_BOSS.cardsModifierTitle": "Slime Boss's Cards",
+  "DOWNFALL-THE_SLIME_BOSS.cardsModifierDescription": "Slime Boss cards can now appear in rewards and shops.",
+  "DOWNFALL-THE_SLIME_BOSS.eventDeathPrevention": "SPLIT... AGAIN...",
+  "DOWNFALL-THE_SLIME_BOSS.goldMonologue": "Ooooh... shiny...",
+  "DOWNFALL-THE_SLIME_BOSS.banter": "SLIME... CRUSH!",
+  "DOWNFALL-THE_SLIME_BOSS.bestiaryQuote": "The towering gelatinous ruler of the Exordium.",
+  "DOWNFALL-THE_SLIME_BOSS.aromaPrinciple": "Acidic jelly and damp stone."
 }
