@@ -66,5 +66,15 @@
   "DOWNFALL-HEXA_RETRACT.title": "Retract",
   "DOWNFALL-HEXA_RETRACT.description": "Move to the previous Ghostflame and [gold]Extinguish[/gold] it.",
   "DOWNFALL-HEXA_EXTINGUISH.title": "Extinguish",
-  "DOWNFALL-HEXA_EXTINGUISH.description": "Resets a Ghostflame so it can be [gold]Ignited[/gold] again."
+  "DOWNFALL-HEXA_EXTINGUISH.description": "Resets a Ghostflame so it can be [gold]Ignited[/gold] again.",
+  "DOWNFALL-BRONZE_ENCODE.title": "Encode",
+  "DOWNFALL-BRONZE_ENCODE.description": "Add this card to your [gold]Function[/gold] sequence. When [blue]3[/blue] cards are [gold]Encoded[/gold], their effects merge into a [blue]1[/blue]-cost [gold]Function[/gold] card.",
+  "DOWNFALL-BRONZE_COMPILE.title": "Compile",
+  "DOWNFALL-BRONZE_COMPILE.description": "An effect that triggers when this card is merged into a [gold]Function[/gold]. Negative effects are referred to as Compile [red]Errors[/red].",
+  "DOWNFALL-BRONZE_INSERT.title": "Insert",
+  "DOWNFALL-BRONZE_INSERT.description": "Shuffle a card into your [gold]Draw Pile[/gold].",
+  "DOWNFALL-BRONZE_CYCLE.title": "Cycle",
+  "DOWNFALL-BRONZE_CYCLE.description": "Discard a card, drawing a new card to replace it.",
+  "DOWNFALL-BRONZE_BLUR.title": "Blur",
+  "DOWNFALL-BRONZE_BLUR.description": "Do not lose [gold]Block[/gold] at the start of your next turn."
 }

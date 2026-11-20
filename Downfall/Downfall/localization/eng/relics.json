@@ -303,5 +303,12 @@
   "DOWNFALL-SOUL_CONSUMER.flavor": "A soul would liven this thing up!",
   "DOWNFALL-SOUL_OF_CHAOS.title": "Soul of Chaos",
   "DOWNFALL-SOUL_OF_CHAOS.description": "At the start of your turn, move to a random Ghostflame and randomize it. At the end of your turn, play the top card of your [gold]Draw Pile[/gold].",
-  "DOWNFALL-SOUL_OF_CHAOS.flavor": "Mayhem, made manifest."
+  "DOWNFALL-SOUL_OF_CHAOS.flavor": "Mayhem, made manifest.",
+  "SEA_GLASS.DOWNFALL-THE_AUTOMATON.title": "Sea Glass (Automaton)",
+  "DOWNFALL-BRONZE_CORE.title": "Bronze Core",
+  "DOWNFALL-BRONZE_CORE.description": "The first time you create a [gold]Function[/gold] each combat, gain [blue]1[/blue] Energy.",
+  "DOWNFALL-BRONZE_CORE.flavor": "Replace once every 50,000 years.",
+  "DOWNFALL-PLATINUM_CORE.title": "Platinum Core",
+  "DOWNFALL-PLATINUM_CORE.description": "Replaces [gold]Bronze Core[/gold].\nThe first [blue]3[/blue] [gold]Functions[/gold] you create each combat cost [blue]0[/blue] until played.",
+  "DOWNFALL-PLATINUM_CORE.flavor": "Changelog: Improved user experience."
 }

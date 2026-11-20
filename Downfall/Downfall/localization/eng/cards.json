@@ -1361,5 +1361,15 @@
   "DOWNFALL-UNLIMITED_POWER.title": "Unlimited Power",
   "DOWNFALL-UNLIMITED_POWER.description": "[gold]Ignite[/gold] all Ghostflames in order.",
   "DOWNFALL-VOLCANO_VISAGE.title": "Volcano Visage",
-  "DOWNFALL-VOLCANO_VISAGE.description": "Whenever you [gold]Ignite[/gold] a Ghostflame, apply {VolcanoVisagePower:diff()} [gold]Soulburn[/gold] to ALL enemies."
+  "DOWNFALL-VOLCANO_VISAGE.description": "Whenever you [gold]Ignite[/gold] a Ghostflame, apply {VolcanoVisagePower:diff()} [gold]Soulburn[/gold] to ALL enemies.",
+  "DOWNFALL-FUNCTION_CARD.title": "function()",
+  "DOWNFALL-FUNCTION_CARD.description": "{Body}",
+  "DOWNFALL-BRONZE_STRIKE.title": "Strike",
+  "DOWNFALL-BRONZE_STRIKE.description": "Deal {Damage:diff()} damage.",
+  "DOWNFALL-BRONZE_DEFEND.title": "Defend",
+  "DOWNFALL-BRONZE_DEFEND.description": "Gain {Block:diff()} [gold]Block[/gold].",
+  "DOWNFALL-GOTO.title": "Goto",
+  "DOWNFALL-GOTO.description": "Draw {Cards:diff()} {Cards:plural:card|cards}. [gold]Encode[/gold].\n[gold]Compile[/gold] - Next turn, draw {Cards:diff()} {Cards:plural:card|cards}.",
+  "DOWNFALL-REPLICATE.title": "Replicate",
+  "DOWNFALL-REPLICATE.description": "Deal {Damage:diff()} damage. [gold]Encode[/gold].\nWhen [gold]Encoded[/gold], add a copy to your [gold]Discard Pile[/gold]."
 }

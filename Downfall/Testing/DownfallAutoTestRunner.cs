@@ -223,6 +223,8 @@ internal static class DownfallAutoTestRunner
                 ("HexaUncommonBatch2InCombat", HexaghostTests.TestUncommonBatch2InCombat),
                 ("HexaRareCardsInCombat", HexaghostTests.TestRareCardsInCombat),
                 ("HexaRelicsAndPotionsInCombat", HexaghostTests.TestRelicsAndPotionsInCombat),
+                ("AutomatonVisualsRuntime", AutomatonTests.TestVisualsRuntime),
+                ("AutomatonStarterEncodeAndFunctionCompile", AutomatonTests.TestStarterEncodeAndFunctionCompile),
             ];
 
             int matchedIndex = 0;
@@ -785,6 +787,18 @@ internal static class DownfallAutoTestRunner
         AutoTestAssert.True(new LocString("cards", "DOWNFALL-SEVENTH_EYE.selectionScreenPrompt").Exists(), "Missing SeventhEye prompt");
         AutoTestAssert.True(new LocString("cards", "DOWNFALL-SPECTRAL_GRACE.selectionScreenPrompt").Exists(), "Missing SpectralGrace prompt");
         AutoTestAssert.True(new LocString("cards", "DOWNFALL-ETHER_STEP.selectionScreenPrompt").Exists(), "Missing EtherStep prompt");
+        foreach (var bronzeTipKey in new[]
+        {
+            "DOWNFALL-BRONZE_ENCODE",
+            "DOWNFALL-BRONZE_COMPILE",
+            "DOWNFALL-BRONZE_INSERT",
+            "DOWNFALL-BRONZE_CYCLE",
+            "DOWNFALL-BRONZE_BLUR"
+        })
+        {
+            AutoTestAssert.True(new LocString("gameplay_ui", $"{bronzeTipKey}.title").Exists(), $"Missing {bronzeTipKey}.title");
+            AutoTestAssert.True(new LocString("gameplay_ui", $"{bronzeTipKey}.description").Exists(), $"Missing {bronzeTipKey}.description");
+        }
 
         return Task.CompletedTask;
     }

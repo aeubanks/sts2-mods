@@ -118,5 +118,20 @@
   "DOWNFALL-THE_HEXAGHOST.goldMonologue": "Cold gold... warms no spirit.",
   "DOWNFALL-THE_HEXAGHOST.banter": "THE SIX FLAMES AWAKEN.",
   "DOWNFALL-THE_HEXAGHOST.bestiaryQuote": "A spectral sentinel wreathed in six eternal Ghostflames.",
-  "DOWNFALL-THE_HEXAGHOST.aromaPrinciple": "Brimstone, cold ash, and spectral embers."
+  "DOWNFALL-THE_HEXAGHOST.aromaPrinciple": "Brimstone, cold ash, and spectral embers.",
+  "DOWNFALL-THE_AUTOMATON.title": "The Automaton",
+  "DOWNFALL-THE_AUTOMATON.titleObject": "the Automaton",
+  "DOWNFALL-THE_AUTOMATON.shortTitle": "Automaton",
+  "DOWNFALL-THE_AUTOMATON.description": "The City's mechanical guardian.\nAdapts to any combat situation by Encoding cards into powerful Functions.",
+  "DOWNFALL-THE_AUTOMATON.pronounObject": "it",
+  "DOWNFALL-THE_AUTOMATON.possessiveAdjective": "its",
+  "DOWNFALL-THE_AUTOMATON.pronounPossessive": "its",
+  "DOWNFALL-THE_AUTOMATON.pronounSubject": "it",
+  "DOWNFALL-THE_AUTOMATON.cardsModifierTitle": "Automaton's Cards",
+  "DOWNFALL-THE_AUTOMATON.cardsModifierDescription": "Automaton cards can now appear in rewards and shops.",
+  "DOWNFALL-THE_AUTOMATON.eventDeathPrevention": "SYSTEM INTEGRITY... RESTORED.",
+  "DOWNFALL-THE_AUTOMATON.goldMonologue": "ALL RESOURCES -> ACQUIRED.",
+  "DOWNFALL-THE_AUTOMATON.banter": "ALL WEAPONS -> 100%.",
+  "DOWNFALL-THE_AUTOMATON.bestiaryQuote": "The ancient bronze construct guarding the upper City.",
+  "DOWNFALL-THE_AUTOMATON.aromaPrinciple": "Warm oil, ozone, and forged bronze."
 }
