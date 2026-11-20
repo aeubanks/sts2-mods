@@ -1,3 +1,4 @@
+using MegaCrit.Sts2.Core.CardSelection;
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Commands;
 using MegaCrit.Sts2.Core.Entities.Cards;
@@ -6,6 +7,7 @@ using MegaCrit.Sts2.Core.Entities.Powers;
 using MegaCrit.Sts2.Core.GameActions.Multiplayer;
 using MegaCrit.Sts2.Core.Hooks;
 using MegaCrit.Sts2.Core.HoverTips;
+using MegaCrit.Sts2.Core.Localization;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Random;
 using MegaCrit.Sts2.Core.Runs;
@@ -110,17 +112,32 @@ internal static class SneckoOffclass
         int choiceCount,
         Func<CardModel, bool>? predicate = null,
         bool upgradeAll = false,
-        Rng? rng = null)
+        Rng? rng = null,
+        LocString? selectionPrompt = null)
     {
         var choices = GenerateDistinctOffclassDeckCards(owner, choiceCount, predicate, upgradeAll, rng);
         if (choices.Count == 0)
             return null;
 
-        var chosen = await CardSelectCmd.FromChooseACardScreen(
-            new BlockingPlayerChoiceContext(),
-            choices,
-            owner,
-            canSkip: true);
+        CardModel? chosen;
+        if (choices.Count <= 3)
+        {
+            chosen = await CardSelectCmd.FromChooseACardScreen(
+                new BlockingPlayerChoiceContext(),
+                choices,
+                owner,
+                canSkip: true);
+        }
+        else
+        {
+            var prompt = selectionPrompt ?? new LocString("gameplay_ui", "COMBAT_REWARD_ADD_CARD");
+            var prefs = new CardSelectorPrefs(prompt, 0, 1);
+            chosen = (await CardSelectCmd.FromSimpleGrid(
+                new BlockingPlayerChoiceContext(),
+                choices,
+                owner,
+                prefs)).FirstOrDefault();
+        }
 
         if (chosen is null)
             return null;

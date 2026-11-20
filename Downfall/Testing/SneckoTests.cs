@@ -3,6 +3,7 @@ using Downfall.Hermit.Cards;
 using Downfall.Hermit.Powers;
 using Downfall.Snecko;
 using Downfall.Snecko.Cards;
+using Downfall.Snecko.Potions;
 using Downfall.Snecko.Powers;
 using Downfall.Snecko.Relics;
 using MegaCrit.Sts2.Core.Combat;
@@ -13,6 +14,8 @@ using MegaCrit.Sts2.Core.GameActions.Multiplayer;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Models.Cards;
 using MegaCrit.Sts2.Core.Models.Powers;
+using MegaCrit.Sts2.Core.Rewards;
+using MegaCrit.Sts2.Core.Rooms;
 using MegaCrit.Sts2.Core.Runs;
 using MegaCrit.Sts2.Core.ValueProps;
 
@@ -1146,6 +1149,168 @@ internal static class SneckoTests
         AutoTestAssert.Equal(uniqueSuits, player.Creature.GetPowerAmount<StrengthPower>(), "SerpentMind granted Strength equal to unique colors played");
         AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<TyphoonPlusPower>(), "TyphoonPlusPower expired at end of turn");
         AutoTestAssert.True(enemy1.CurrentHp <= e1HpBeforeEnd - 10, $"CobraCoil ConstrictPower(10) damaged enemy1 at end of enemy turn (was {e1HpBeforeEnd}, now {enemy1.CurrentHp})");
+    }
+
+    internal static async Task TestRelicsAndPotionsInCombat()
+    {
+        var (player, _, combatState) = await DownfallAutoTestRunner.StartCombatAsync<TheSnecko>("SNECKO_RELPOT");
+        var pcs = AutoTestAssert.NotNull(player.PlayerCombatState, "Snecko PlayerCombatState");
+        var enemy = AutoTestAssert.NotNull(combatState.HittableEnemies.FirstOrDefault(), "First enemy");
+        var ctx = new ThrowingPlayerChoiceContext();
+        await CreatureCmd.GainMaxHp(enemy, 1000m);
+
+        // 1. SealOfApproval (choose 1 of 5 Uncommon Offclass Powers to Deck) + RareBoosterPack (choose 1 of 3 Rare Offclass cards to Deck)!
+        int deckBefore = player.Deck.Cards.Count;
+        var seal = await RelicCmd.Obtain<SealOfApproval>(player);
+        AutoTestAssert.Equal(deckBefore + 1, player.Deck.Cards.Count, "SealOfApproval added 1 card to Deck");
+        var sealCard = player.Deck.Cards.Last();
+        AutoTestAssert.True(SneckoOffclass.IsOffclass(sealCard, player) && sealCard.Type == CardType.Power && sealCard.Rarity == CardRarity.Uncommon,
+            $"SealOfApproval added Uncommon Offclass Power (got {sealCard.Id})");
+        await RelicCmd.Remove(seal);
+
+        deckBefore = player.Deck.Cards.Count;
+        var booster = await RelicCmd.Obtain<RareBoosterPack>(player);
+        AutoTestAssert.Equal(deckBefore + 1, player.Deck.Cards.Count, "RareBoosterPack added 1 card to Deck");
+        var boosterCard = player.Deck.Cards.Last();
+        AutoTestAssert.True(SneckoOffclass.IsOffclass(boosterCard, player) && boosterCard.Rarity == CardRarity.Rare,
+            $"RareBoosterPack added Rare Offclass card (got {boosterCard.Id})");
+        await RelicCmd.Remove(booster);
+
+        // 2. UnknownEgg: upon pickup upgrades 2 random Offclass deck cards (not Snecko cards), and auto-upgrades newly added Offclass cards!
+        foreach (var existing in player.Deck.Cards.Where(c => SneckoOffclass.IsOffclass(c, player) && c.IsUpgradable).ToList())
+            CardCmd.Upgrade(existing);
+        var off1 = player.RunState.CreateCard<Bash>(player);
+        var off2 = player.RunState.CreateCard<Neutralize>(player);
+        var own1 = player.RunState.CreateCard<TailWhip>(player);
+        await CardPileCmd.Add(off1, PileType.Deck);
+        await CardPileCmd.Add(off2, PileType.Deck);
+        await CardPileCmd.Add(own1, PileType.Deck);
+        var egg = await RelicCmd.Obtain<UnknownEgg>(player);
+        AutoTestAssert.True(off1.IsUpgraded && off2.IsUpgraded, "UnknownEgg upgraded 2 unupgraded Offclass cards in Deck on pickup");
+        AutoTestAssert.True(!own1.IsUpgraded, "UnknownEgg did NOT upgrade Snecko card on pickup");
+
+        var offAdded = player.RunState.CreateCard<Inflame>(player);
+        await CardPileCmd.Add(offAdded, PileType.Deck);
+        var addedInDeck = player.Deck.Cards.Last();
+        AutoTestAssert.True(addedInDeck is Inflame && addedInDeck.IsUpgraded, "UnknownEgg auto-upgraded newly added Offclass Inflame");
+
+        // Verify UnknownEgg reward & merchant hooks + NoHookUpgrades guard + SneckoOffclass preview!
+        var rewardPreview = SneckoOffclass.GenerateDistinctOffclassDeckCards(player, 3);
+        AutoTestAssert.True(rewardPreview.All(c => !c.IsUpgradable || c.IsUpgraded), "UnknownEgg upgrades Offclass reward options via Hook.TryModifyCardRewardOptions");
+        var noHookList = new List<CardCreationResult> { new(player.RunState.CreateCard<Bash>(player)) };
+        var noHookOpts = new CardCreationOptions(Array.Empty<CardPoolModel>(), CardCreationSource.Other, CardRarityOddsType.Uniform)
+            .WithFlags(CardCreationFlags.NoHookUpgrades);
+        AutoTestAssert.True(!egg.TryModifyCardRewardOptionsLate(player, noHookList, noHookOpts) && !noHookList[0].Card.IsUpgraded,
+            "UnknownEgg respects CardCreationFlags.NoHookUpgrades");
+        var merchList = new List<CardCreationResult>
+        {
+            new(player.RunState.CreateCard<Bash>(player)),
+            new(player.RunState.CreateCard<TailWhip>(player))
+        };
+        egg.ModifyMerchantCardCreationResults(player, merchList);
+        AutoTestAssert.True(merchList[0].Card.IsUpgraded && !merchList[1].Card.IsUpgraded,
+            "UnknownEgg upgrades Offclass merchant cards but not Snecko merchant cards");
+        await RelicCmd.Remove(egg);
+
+        // 3. BlankCard (0-cost Echo of random non-Curse/non-Status deck card on Round 1 — never combat tokens like SoulRoll!) + SleevedAce (MarkedCard+ on Round 1)!
+        await ClearHandAndRefillEnergy(player, pcs);
+        await CardPileCmd.AddGeneratedCardToCombat(combatState.CreateCard<SoulRoll>(player), PileType.Hand, player);
+        var blankCard = await RelicCmd.Obtain<BlankCard>(player);
+        var sleevedAce = await RelicCmd.Obtain<SleevedAce>(player);
+        await blankCard.AfterPlayerTurnStart(ctx, player);
+        await sleevedAce.AfterPlayerTurnStart(ctx, player);
+        var blankEcho = AutoTestAssert.NotNull(pcs.Hand.Cards.FirstOrDefault(DownfallEcho.IsEcho), "BlankCard added a deck Echo to Hand on Round 1");
+        AutoTestAssert.Equal(0, blankEcho.EnergyCost.GetWithModifiers(CostModifiers.Local), "BlankCard Echo costs 0 until played");
+        AutoTestAssert.True(player.Deck.Cards.Any(d => d.Id == blankEcho.Id), $"BlankCard Echo ({blankEcho.Id}) comes from player Deck, not combat token");
+        var sleevedMarked = AutoTestAssert.NotNull(pcs.Hand.Cards.OfType<MarkedCard>().FirstOrDefault(), "SleevedAce added MarkedCard to Hand on Round 1");
+        AutoTestAssert.True(sleevedMarked.IsUpgraded, "SleevedAce MarkedCard is Upgraded");
+        await RelicCmd.Remove(blankCard);
+        await RelicCmd.Remove(sleevedAce);
+
+        // 4. LoadedDie (+1 Block whenever a card is Muddled) + MuddlingPotion (muddle 2 highest-cost cards, cannot cost 3)!
+        await ClearHandAndRefillEnergy(player, pcs);
+        var loadedDie = await RelicCmd.Obtain<LoadedDie>(player);
+        var hi1 = combatState.CreateCard<LaserEyes>(player); // cost 3
+        var hi2 = combatState.CreateCard<CobraCoil>(player); // cost 4
+        var lo1 = combatState.CreateCard<SneckoDefend>(player); // cost 1
+        await CardPileCmd.Add(hi1, PileType.Hand);
+        await CardPileCmd.Add(hi2, PileType.Hand);
+        await CardPileCmd.Add(lo1, PileType.Hand);
+        int blockBefore = player.Creature.Block;
+        var muddlePot = ModelDb.Potion<MuddlingPotion>().ToMutable();
+        await PotionCmd.TryToProcure(muddlePot, player);
+        await muddlePot.OnUseWrapper(ctx, player.Creature);
+        AutoTestAssert.Equal(blockBefore + 2, player.Creature.Block, "LoadedDie gained +1 Block x2 for MuddlingPotion");
+        int hi1Cost = hi1.EnergyCost.GetWithModifiers(CostModifiers.All);
+        int hi2Cost = hi2.EnergyCost.GetWithModifiers(CostModifiers.All);
+        AutoTestAssert.True(hi1Cost is >= 0 and <= 2, $"MuddlingPotion muddled 3-cost LaserEyes to 0..2 (got {hi1Cost})");
+        AutoTestAssert.True(hi2Cost is >= 0 and <= 2, $"MuddlingPotion muddled 4-cost CobraCoil to 0..2 (got {hi2Cost})");
+        AutoTestAssert.Equal(1, lo1.EnergyCost.GetWithModifiers(CostModifiers.All), "MuddlingPotion did NOT muddle lower-cost SneckoDefend");
+        await RelicCmd.Remove(loadedDie);
+
+        // 5. OffclassReductionPotion: reduces Offclass cards in Hand by 1 this combat, leaves Snecko cards untouched!
+        await ClearHandAndRefillEnergy(player, pcs);
+        var offHand = combatState.CreateCard<Bash>(player); // cost 2
+        var ownHand = combatState.CreateCard<TailWhip>(player); // cost 2
+        await CardPileCmd.Add(offHand, PileType.Hand);
+        await CardPileCmd.Add(ownHand, PileType.Hand);
+        var redPot = ModelDb.Potion<OffclassReductionPotion>().ToMutable();
+        await PotionCmd.TryToProcure(redPot, player);
+        await redPot.OnUseWrapper(ctx, player.Creature);
+        AutoTestAssert.Equal(1, offHand.EnergyCost.GetWithModifiers(CostModifiers.All), "OffclassReductionPotion reduced Offclass Bash cost 2 -> 1");
+        AutoTestAssert.Equal(2, ownHand.EnergyCost.GetWithModifiers(CostModifiers.All), "OffclassReductionPotion did NOT reduce Snecko TailWhip cost");
+
+        // 6. DiceRollPotion: adds 1 extra CardReward of 3 distinct Upgraded Uncommon Offclass cards to CombatRoom.ExtraRewards!
+        var combatRoom = AutoTestAssert.NotNull(player.RunState.CurrentRoom as CombatRoom, "CurrentRoom is CombatRoom");
+        int extraBefore = combatRoom.ExtraRewards.TryGetValue(player, out var existingExtra) ? existingExtra.Count : 0;
+        var dicePot = ModelDb.Potion<DiceRollPotion>().ToMutable();
+        await PotionCmd.TryToProcure(dicePot, player);
+        await dicePot.OnUseWrapper(ctx, player.Creature);
+        AutoTestAssert.True(combatRoom.ExtraRewards.TryGetValue(player, out var extraRewards) && extraRewards.Count == extraBefore + 1,
+            "DiceRollPotion added 1 extra reward to CombatRoom.ExtraRewards");
+        var addedReward = AutoTestAssert.NotNull(extraRewards!.Last() as CardReward, "Extra reward is a CardReward");
+        addedReward.Populate();
+        var rewardCards = addedReward.Cards.ToList();
+        AutoTestAssert.Equal(3, rewardCards.Count, "DiceRollPotion CardReward contains 3 cards");
+        AutoTestAssert.Equal(3, rewardCards.Select(c => c.Id).Distinct().Count(), "DiceRollPotion CardReward cards are distinct");
+        AutoTestAssert.True(rewardCards.All(c => SneckoOffclass.IsOffclass(c, player) && c.Rarity == CardRarity.Uncommon && c.IsUpgraded),
+            "DiceRollPotion CardReward cards are all Upgraded Uncommon Offclass");
+
+        // 7. CheatPotion (CheatPower 3 -> Overflow triggers with 1 card in hand!) + ConfusingCodex (every 3rd Overflow -> 1 Weak + 1 Vulnerable to enemy, counter wraps 0->1->2->0)!
+        await ClearHandAndRefillEnergy(player, pcs);
+        var codex = await RelicCmd.Obtain<ConfusingCodex>(player);
+        AutoTestAssert.Equal(0, codex.DisplayAmount, "ConfusingCodex starts at 0");
+        var cheatPot = ModelDb.Potion<CheatPotion>().ToMutable();
+        await PotionCmd.TryToProcure(cheatPot, player);
+        await cheatPot.OnUseWrapper(ctx, player.Creature);
+        AutoTestAssert.Equal(3, player.Creature.GetPowerAmount<CheatPower>(), "CheatPotion applied CheatPower(3)");
+
+        // Play 3 Overflow cards with only 1 card in hand (normally no Overflow, but CheatPower forces Overflow!).
+        for (int i = 1; i <= 3; i++)
+        {
+            var db = combatState.CreateCard<DiceBlock>(player);
+            await CardPileCmd.Add(db, PileType.Hand);
+            blockBefore = player.Creature.Block;
+            AutoTestAssert.True(db.TryManualPlay(null), $"Play DiceBlock #{i} with CheatPower and 1-card hand");
+            await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+            AutoTestAssert.Equal(blockBefore + 10, player.Creature.Block, $"CheatPower forced DiceBlock #{i} Overflow (+10 Block)");
+            if (i < 3)
+            {
+                AutoTestAssert.Equal(i, codex.DisplayAmount, $"ConfusingCodex incremented to {i}");
+                AutoTestAssert.Equal(0, enemy.GetPowerAmount<WeakPower>(), "ConfusingCodex did not trigger before 3");
+            }
+            else
+            {
+                AutoTestAssert.Equal(0, codex.DisplayAmount, "ConfusingCodex reset to 0 after 3rd Overflow");
+                AutoTestAssert.Equal(1, enemy.GetPowerAmount<WeakPower>(), "ConfusingCodex applied 1 Weak on 3rd Overflow");
+                AutoTestAssert.Equal(1, enemy.GetPowerAmount<VulnerablePower>(), "ConfusingCodex applied 1 Vulnerable on 3rd Overflow");
+            }
+        }
+
+        // End Turn 1 -> CheatPower decrements 3 -> 2!
+        await CreatureCmd.GainBlock(player.Creature, 80m, ValueProp.Unpowered, null);
+        await DownfallAutoTestRunner.EndTurnAndWaitForRoundAsync(player, 2);
+        AutoTestAssert.Equal(2, player.Creature.GetPowerAmount<CheatPower>(), "CheatPower decremented 3 -> 2 at end of Turn 1");
     }
 
     internal static async Task ClearHandAndRefillEnergy(MegaCrit.Sts2.Core.Entities.Players.Player player, MegaCrit.Sts2.Core.Entities.Players.PlayerCombatState pcs)

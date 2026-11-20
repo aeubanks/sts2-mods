@@ -29,5 +29,13 @@
   "DOWNFALL-TECH_POTION.title": "Bottled Technique",
   "DOWNFALL-TECH_POTION.description": "Trigger your current [gold]Stance's Skill Bonus[/gold] [blue]{Repeat}[/blue] times.",
   "DOWNFALL-ULTIMATE_STANCE_POTION.title": "Stimpack",
-  "DOWNFALL-ULTIMATE_STANCE_POTION.description": "Enter [gold]Ultimate Stance[/gold] for [blue]{UltimateFormPower}[/blue] {UltimateFormPower:plural:turn|turns}."
+  "DOWNFALL-ULTIMATE_STANCE_POTION.description": "Enter [gold]Ultimate Stance[/gold] for [blue]{UltimateFormPower}[/blue] {UltimateFormPower:plural:turn|turns}.",
+  "DOWNFALL-CHEAT_POTION.title": "Liquid Luck",
+  "DOWNFALL-CHEAT_POTION.description": "[gold]Overflow[/gold] effects always activate for [blue]{CheatPower}[/blue] {CheatPower:plural:turn|turns} regardless of hand size.",
+  "DOWNFALL-MUDDLING_POTION.title": "Spiked Energy Drink",
+  "DOWNFALL-MUDDLING_POTION.description": "[gold]Muddle[/gold] the [blue]{Cards}[/blue] highest-cost cards in your [gold]Hand[/gold]. Cards [gold]Muddled[/gold] this way cannot cost [blue]3[/blue].",
+  "DOWNFALL-OFFCLASS_REDUCTION_POTION.title": "Exotic Beverage",
+  "DOWNFALL-OFFCLASS_REDUCTION_POTION.description": "Reduce the cost of [gold]Offclass[/gold] cards in your [gold]Hand[/gold] by [blue]{CostReduction}[/blue] this combat.",
+  "DOWNFALL-DICE_ROLL_POTION.title": "Card in a Bottle",
+  "DOWNFALL-DICE_ROLL_POTION.description": "Add [blue]{RewardCount}[/blue] extra card {RewardCount:plural:reward|rewards} with [blue]3[/blue] [gold]Upgraded[/gold] Uncommon [gold]Offclass[/gold] cards to this combat's rewards."
 }

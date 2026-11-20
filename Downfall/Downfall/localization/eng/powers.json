@@ -346,5 +346,8 @@
   "DOWNFALL-TYPHOON_POWER.smartDescription": "This turn, whenever you [gold]Overflow[/gold], play {Amount:plural:a copy|[blue]{}[/blue] copies} of [gold]Typhoon Fang[/gold].",
   "DOWNFALL-TYPHOON_PLUS_POWER.title": "Typhoon+",
   "DOWNFALL-TYPHOON_PLUS_POWER.description": "This turn, whenever you [gold]Overflow[/gold], play a copy of [gold]Typhoon Fang+[/gold].",
-  "DOWNFALL-TYPHOON_PLUS_POWER.smartDescription": "This turn, whenever you [gold]Overflow[/gold], play {Amount:plural:a copy|[blue]{}[/blue] copies} of [gold]Typhoon Fang+[/gold]."
+  "DOWNFALL-TYPHOON_PLUS_POWER.smartDescription": "This turn, whenever you [gold]Overflow[/gold], play {Amount:plural:a copy|[blue]{}[/blue] copies} of [gold]Typhoon Fang+[/gold].",
+  "DOWNFALL-CHEAT_POWER.title": "Cheating",
+  "DOWNFALL-CHEAT_POWER.description": "[gold]Overflow[/gold] effects always activate regardless of hand size.",
+  "DOWNFALL-CHEAT_POWER.smartDescription": "{Amount:plural:This turn|For the next [blue]{}[/blue] turns}, [gold]Overflow[/gold] effects always activate regardless of hand size."
 }
