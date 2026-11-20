@@ -156,6 +156,7 @@ internal static class DownfallAutoTestRunner
                 ("ChampUncommonBatch1InCombat", ChampTests.TestUncommonBatch1InCombat),
                 ("ChampUncommonBatch2InCombat", ChampTests.TestUncommonBatch2InCombat),
                 ("ChampRareCardsInCombat", ChampTests.TestRareCardsInCombat),
+                ("ChampRelicsAndPotionsInCombat", ChampTests.TestRelicsAndPotionsInCombat),
             ];
 
             foreach (var (name, run) in tests)
@@ -564,6 +565,7 @@ internal static class DownfallAutoTestRunner
         AutoTestAssert.True(new LocString("cards", "DOWNFALL-ENCHANT_CROWN.selectionScreenPrompt").Exists(), "Missing EnchantCrown selectionScreenPrompt loc");
         AutoTestAssert.True(new LocString("cards", "DOWNFALL-ENCHANT_SHIELD.selectionScreenPrompt").Exists(), "Missing EnchantShield selectionScreenPrompt loc");
         AutoTestAssert.True(new LocString("cards", "DOWNFALL-ENCHANT_SWORD.selectionScreenPrompt").Exists(), "Missing EnchantSword selectionScreenPrompt loc");
+        AutoTestAssert.True(new LocString("relics", "DOWNFALL-SIGNATURE_FINISHER.selectionScreenPrompt").Exists(), "Missing SignatureFinisher selectionScreenPrompt loc");
 
         return Task.CompletedTask;
     }

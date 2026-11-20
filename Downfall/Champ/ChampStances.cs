@@ -1,5 +1,6 @@
 using Downfall.Champ.Cards;
 using Downfall.Champ.Powers;
+using Downfall.Champ.Relics;
 using Godot;
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Commands;
@@ -256,7 +257,25 @@ internal static class ChampStances
                 && player.Creature.IsAlive
                 && !CombatManager.Instance.IsOverOrEnding)
             {
-                await CreatureCmd.GainBlock(player.Creature, BaseDefensiveFinisherBlock, ValueProp.Unpowered, null);
+                decimal blockAmount = BaseDefensiveFinisherBlock;
+                foreach (var manual in player.Relics.OfType<DefensiveTrainingManual>())
+                {
+                    manual.FlashRelic();
+                    blockAmount += DefensiveTrainingManual.BonusBlock;
+                }
+                await CreatureCmd.GainBlock(player.Creature, blockAmount, ValueProp.Unpowered, null);
+            }
+        }
+
+        var currentCard = CombatManager.Instance.History.CardPlaysStarted
+            .LastOrDefault(e => e.CardPlay.Card.Owner == player)?.CardPlay.Card;
+        if (!noExit && currentCard is not null)
+        {
+            var sigRelic = player.Relics.OfType<SignatureFinisher>().FirstOrDefault(r => r.IsSignatureCard(currentCard));
+            if (sigRelic is not null)
+            {
+                sigRelic.FlashRelic();
+                noExit = true;
             }
         }
 

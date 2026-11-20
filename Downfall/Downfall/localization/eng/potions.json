@@ -21,5 +21,13 @@
   "DOWNFALL-SWAP_POTION.title": "Bottled Dupe",
   "DOWNFALL-SWAP_POTION.description": "[gold]Swap[/gold] to a random Gremlin.",
   "DOWNFALL-WIZ_POTION.title": "Pizazz Potion",
-  "DOWNFALL-WIZ_POTION.description": "Gain [blue]{VigorPower}[/blue] [gold]Vigor[/gold]."
+  "DOWNFALL-WIZ_POTION.description": "Gain [blue]{VigorPower}[/blue] [gold]Vigor[/gold].",
+  "DOWNFALL-COUNTERSTRIKE_POTION.title": "Brew of Sharpness",
+  "DOWNFALL-COUNTERSTRIKE_POTION.description": "Gain [blue]{CounterPower}[/blue] [gold]Counter[/gold].",
+  "DOWNFALL-OPENER_POTION.title": "Strategy Potion",
+  "DOWNFALL-OPENER_POTION.description": "Choose [blue]1[/blue] of [blue]2[/blue] cards that enter a [gold]Stance[/gold] and add {Cards:plural:it|[blue]{}[/blue] copies} to your [gold]Hand[/gold]. {Cards:plural:It costs|They cost} [blue]0[/blue] this turn.",
+  "DOWNFALL-TECH_POTION.title": "Bottled Technique",
+  "DOWNFALL-TECH_POTION.description": "Trigger your current [gold]Stance's Skill Bonus[/gold] [blue]{Repeat}[/blue] times.",
+  "DOWNFALL-ULTIMATE_STANCE_POTION.title": "Stimpack",
+  "DOWNFALL-ULTIMATE_STANCE_POTION.description": "Enter [gold]Ultimate Stance[/gold] for [blue]{UltimateFormPower}[/blue] {UltimateFormPower:plural:turn|turns}."
 }

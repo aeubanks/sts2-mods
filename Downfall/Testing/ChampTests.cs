@@ -1,14 +1,18 @@
 using Downfall.Champ;
 using Downfall.Champ.Cards;
+using Downfall.Champ.Potions;
 using Downfall.Champ.Powers;
 using Downfall.Champ.Relics;
 using Godot;
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Commands;
 using MegaCrit.Sts2.Core.Entities.Cards;
+using MegaCrit.Sts2.Core.Entities.Relics;
 using MegaCrit.Sts2.Core.GameActions.Multiplayer;
+using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Models.Powers;
 using MegaCrit.Sts2.Core.Nodes.Rooms;
+using MegaCrit.Sts2.Core.Rooms;
 using MegaCrit.Sts2.Core.Runs;
 using MegaCrit.Sts2.Core.ValueProps;
 
@@ -1423,5 +1427,260 @@ internal static class ChampTests
         AutoTestAssert.True(geniusEcho!.IsUpgraded, "StrikeOfGenius+ Strike Echo is Upgraded");
         AutoTestAssert.Equal(0, geniusEcho.EnergyCost.GetWithModifiers(CostModifiers.Local), "StrikeOfGenius+ Strike Echo costs 0");
         AutoTestAssert.True(!geniusEcho.TryManualPlay(enemy), "ChampEntanglePower prevented playing Attacks on Turn 2");
+    }
+
+    public static async Task TestRelicsAndPotionsInCombat()
+    {
+        var (player, _, combatState) = await DownfallAutoTestRunner.StartCombatAsync<TheChamp>("DFCHP06");
+        var pcs = AutoTestAssert.NotNull(player.PlayerCombatState, "PlayerCombatState");
+        var enemy = AutoTestAssert.NotNull(combatState.HittableEnemies.FirstOrDefault(), "First enemy");
+        var ctx = new ThrowingPlayerChoiceContext();
+
+        foreach (var e in combatState.HittableEnemies.ToList())
+            await CreatureCmd.GainMaxHp(e, 3000m);
+
+        async Task ResetCombatState(int energy = 10)
+        {
+            foreach (var c in pcs.Hand.Cards.ToList())
+                await CardPileCmd.Add(c, PileType.Discard);
+            if (pcs.Energy > energy)
+                await PlayerCmd.LoseEnergy(pcs.Energy - energy, player);
+            else if (pcs.Energy < energy)
+                await PlayerCmd.GainEnergy(energy - pcs.Energy, player);
+            if (player.Creature.Block > 0)
+                await CreatureCmd.LoseBlock(ctx, player.Creature, player.Creature.Block, null);
+            foreach (var p in player.Creature.Powers.ToList())
+                await PowerCmd.Remove(p);
+            foreach (var e in combatState.HittableEnemies.ToList())
+            {
+                foreach (var ep in e.Powers.ToList())
+                    await PowerCmd.Remove(ep);
+            }
+        }
+
+        // 1. ChampionCrownUpgraded replaces ChampionCrown; first Finisher draws 2 & enters random Stance (once/turn).
+        await ResetCombatState();
+        AutoTestAssert.True(player.Relics.OfType<ChampionCrown>().Any(), "Starts with ChampionCrown");
+        var crownUp = await RelicCmd.Obtain<ChampionCrownUpgraded>(player);
+        AutoTestAssert.True(!player.Relics.OfType<ChampionCrown>().Any(), "ChampionCrownUpgraded replaced ChampionCrown");
+
+        for (int i = 0; i < 6; i++)
+            await CardPileCmd.Add(combatState.CreateCard<ChampStrike>(player), PileType.Draw);
+        await ChampStances.EnterStanceAsync(player, ChampStanceKind.Defensive, ctx);
+        var fin1 = combatState.CreateCard<BringItOn>(player);
+        await CardPileCmd.Add(fin1, PileType.Hand);
+        AutoTestAssert.True(fin1.TryManualPlay(null), "Play Finisher #1 with ChampionCrownUpgraded");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(2, pcs.Hand.Cards.Count, "ChampionCrownUpgraded drew 2 cards on first Finisher");
+        AutoTestAssert.True(ChampStances.IsInStance(player.Creature), "ChampionCrownUpgraded entered a random Stance after first Finisher");
+        AutoTestAssert.Equal(RelicStatus.Disabled, crownUp.Status, "ChampionCrownUpgraded disabled after triggering");
+
+        // Second Finisher same turn does NOT trigger ChampionCrownUpgraded!
+        var fin2 = combatState.CreateCard<BringItOn>(player);
+        await CardPileCmd.Add(fin2, PileType.Hand);
+        AutoTestAssert.True(fin2.TryManualPlay(null), "Play Finisher #2 same turn");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(2, pcs.Hand.Cards.Count, "ChampionCrownUpgraded did NOT draw on 2nd Finisher");
+        AutoTestAssert.Equal(ChampStanceKind.None, ChampStances.GetCurrentStance(player.Creature), "2nd Finisher stayed Neutral");
+        await RelicCmd.Remove(crownUp);
+
+        // 2. DefensiveTrainingManual: Defensive Finisher grants 6 + 3 = 9 Block!
+        await ResetCombatState();
+        var manual = await RelicCmd.Obtain<DefensiveTrainingManual>(player);
+        await ChampStances.EnterStanceAsync(player, ChampStanceKind.Defensive, ctx);
+        var execManual = combatState.CreateCard<Execute>(player);
+        await CardPileCmd.Add(execManual, PileType.Hand);
+        AutoTestAssert.True(execManual.TryManualPlay(enemy), "Play Execute in Defensive with DefensiveTrainingManual");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(9, player.Creature.Block, "DefensiveTrainingManual boosted Defensive Finisher Block 6 -> 9");
+        await RelicCmd.Remove(manual);
+
+        // 3. SignatureFinisher: bottles Deck Execute -> 0 cost, playable in Neutral, never exits Stance!
+        await ResetCombatState();
+        var deckExec = AutoTestAssert.NotNull(
+            PileType.Deck.GetPile(player).Cards.OfType<Execute>().FirstOrDefault(),
+            "Starter deck has Execute");
+        SignatureFinisher sigRelic;
+        using (DownfallAutoTestRunner.PreferCards(c => ReferenceEquals(c, deckExec)))
+        {
+            sigRelic = await RelicCmd.Obtain<SignatureFinisher>(player);
+        }
+        var combatExec = AutoTestAssert.NotNull(
+            pcs.AllCards.FirstOrDefault(c => ReferenceEquals(c.DeckVersion, deckExec)),
+            "Combat copy of bottled Execute exists");
+        AutoTestAssert.True(sigRelic.IsSignatureCard(combatExec), "SignatureFinisher recognizes combat Execute");
+        AutoTestAssert.Equal(0, combatExec.EnergyCost.GetWithModifiers(CostModifiers.All), "SignatureFinisher reduced Execute cost to 0");
+
+        await CardPileCmd.Add(combatExec, PileType.Hand);
+        AutoTestAssert.True(combatExec.TryManualPlay(enemy), "SignatureFinisher Execute playable in Neutral Stance");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+
+        await ChampStances.EnterStanceAsync(player, ChampStanceKind.Berserker, ctx);
+        await CardPileCmd.Add(combatExec, PileType.Hand);
+        AutoTestAssert.True(combatExec.TryManualPlay(enemy), "SignatureFinisher Execute playable in Berserker Stance");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(ChampStanceKind.Berserker, ChampStances.GetCurrentStance(player.Creature), "SignatureFinisher prevented Stance exit");
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<StrengthPower>(), "SignatureFinisher Execute still triggered Berserker Finisher (+1 Strength)");
+        await RelicCmd.Remove(sigRelic);
+
+        // 4. BlackKnightsHelmet: first Berserker (+2 Str, -1 Dex) & first Defensive (+2 Dex, -1 Str); only once per combat each!
+        await ResetCombatState();
+        var bkh = await RelicCmd.Obtain<BlackKnightsHelmet>(player);
+        await ChampStances.EnterStanceAsync(player, ChampStanceKind.Berserker, ctx);
+        AutoTestAssert.Equal(2, player.Creature.GetPowerAmount<StrengthPower>(), "BlackKnightsHelmet Berserker +2 Str");
+        AutoTestAssert.Equal(-1, player.Creature.GetPowerAmount<DexterityPower>(), "BlackKnightsHelmet Berserker -1 Dex");
+        await ChampStances.EnterStanceAsync(player, ChampStanceKind.Defensive, ctx);
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<StrengthPower>(), "BlackKnightsHelmet Defensive -1 Str (2 -> 1)");
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<DexterityPower>(), "BlackKnightsHelmet Defensive +2 Dex (-1 -> 1)");
+        await ChampStances.EnterStanceAsync(player, ChampStanceKind.Berserker, ctx);
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<StrengthPower>(), "BlackKnightsHelmet did NOT re-trigger on 2nd Berserker");
+        await RelicCmd.Remove(bkh);
+
+        // 5. ChampStancesModRelic + LiftRelic: Round 1 hooks enter a random Stance & grant +1 Strength!
+        await ResetCombatState();
+        var modRelic = await RelicCmd.Obtain<ChampStancesModRelic>(player);
+        var liftRelic = await RelicCmd.Obtain<LiftRelic>(player);
+        await modRelic.BeforeSideTurnStart(ctx, CombatSide.Player, [player.Creature], combatState);
+        await liftRelic.BeforeSideTurnStart(ctx, CombatSide.Player, [player.Creature], combatState);
+        AutoTestAssert.True(ChampStances.IsInStance(player.Creature), "ChampStancesModRelic entered a random Stance on Round 1");
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<StrengthPower>(), "LiftRelic granted +1 Strength on Round 1");
+        await RelicCmd.Remove(modRelic);
+        await RelicCmd.Remove(liftRelic);
+
+        // 6. DuelingGlove: single-target Attack applies 1 Vulnerable if enemy has none; does not stack!
+        await ResetCombatState();
+        var glove = await RelicCmd.Obtain<DuelingGlove>(player);
+        var dgStrike = combatState.CreateCard<ChampStrike>(player);
+        await CardPileCmd.Add(dgStrike, PileType.Hand);
+        AutoTestAssert.True(dgStrike.TryManualPlay(enemy), "Play single-target Attack with DuelingGlove");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(1, enemy.GetPowerAmount<VulnerablePower>(), "DuelingGlove applied 1 Vulnerable");
+
+        var dgStrike2 = combatState.CreateCard<ChampStrike>(player);
+        await CardPileCmd.Add(dgStrike2, PileType.Hand);
+        AutoTestAssert.True(dgStrike2.TryManualPlay(enemy), "Play 2nd Attack vs already-Vulnerable enemy");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(1, enemy.GetPowerAmount<VulnerablePower>(), "DuelingGlove did NOT stack Vulnerable");
+        await RelicCmd.Remove(glove);
+
+        // 7. GladiatorsBookOfMartialProwess + SpectersHand:
+        await ResetCombatState();
+        var book = await RelicCmd.Obtain<GladiatorsBookOfMartialProwess>(player);
+        var specter = await RelicCmd.Obtain<SpectersHand>(player);
+        await ChampStances.EnterStanceAsync(player, ChampStanceKind.Defensive, ctx);
+        var specEcho = pcs.Hand.Cards.FirstOrDefault(c => Downfall.Core.DownfallEcho.IsEcho(c) && (c is ChampStrike || c is ChampDefend));
+        AutoTestAssert.NotNull(specEcho, "SpectersHand added a Strike/Defend Echo on entering Stance");
+        AutoTestAssert.Equal(0, specEcho!.EnergyCost.GetWithModifiers(CostModifiers.Local), "SpectersHand Echo costs 0");
+
+        var comboCard = combatState.CreateCard<FaceSlap>(player);
+        await CardPileCmd.Add(comboCard, PileType.Hand);
+        AutoTestAssert.True(comboCard.TryManualPlay(enemy), "Play Combo card for GladiatorsBook");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<StrengthPower>(), "GladiatorsBook waits for Finisher too");
+
+        var finCard = combatState.CreateCard<BringItOn>(player);
+        await CardPileCmd.Add(finCard, PileType.Hand);
+        AutoTestAssert.True(finCard.TryManualPlay(null), "Play Finisher card for GladiatorsBook");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<StrengthPower>(), "GladiatorsBook granted +1 Strength");
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<DexterityPower>(), "GladiatorsBook granted +1 Dexterity");
+        await RelicCmd.Remove(book);
+        await RelicCmd.Remove(specter);
+
+        // 8. RageAmulet: every 8 Vigor spent -> +1 Strength (CrookedStrike ignored!).
+        await ResetCombatState();
+        var amulet = await RelicCmd.Obtain<RageAmulet>(player);
+        await PowerCmd.Apply<VigorPower>(ctx, player.Creature, 10m, player.Creature, null);
+        await ChampStances.EnterStanceAsync(player, ChampStanceKind.Berserker, ctx);
+        var crookedTest = combatState.CreateCard<CrookedStrike>(player);
+        await CardPileCmd.Add(crookedTest, PileType.Hand);
+        AutoTestAssert.True(crookedTest.TryManualPlay(enemy), "Play CrookedStrike with RageAmulet");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        // Only Berserker Finisher gave +1 Strength; RageAmulet should still have 0 remainder!
+        AutoTestAssert.Equal(0, amulet.DisplayAmount, "RageAmulet ignored CrookedStrike (didn't spend Vigor)");
+
+        int strBeforeAmulet = player.Creature.GetPowerAmount<StrengthPower>();
+        int enemyHpBeforeAmulet = enemy.CurrentHp;
+        var spendStrike = combatState.CreateCard<ChampStrike>(player);
+        await CardPileCmd.Add(spendStrike, PileType.Hand);
+        AutoTestAssert.True(spendStrike.TryManualPlay(enemy), "Spend 10 Vigor with ChampStrike");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(enemyHpBeforeAmulet - (6 + strBeforeAmulet + 10), enemy.CurrentHp, "RageAmulet Strength did NOT buff the triggering hit");
+        AutoTestAssert.Equal(strBeforeAmulet + 1, player.Creature.GetPowerAmount<StrengthPower>(), "RageAmulet granted +1 Strength after hit for 10 Vigor spent");
+        AutoTestAssert.Equal(2, amulet.DisplayAmount, "RageAmulet remainder tracked (10 % 8 = 2)");
+        await RelicCmd.Remove(amulet);
+
+        // 9. Barbells: tracks upgradable deck count (10) & upgrades 1 card at RestSiteRoom!
+        var barbells = await RelicCmd.Obtain<Barbells>(player);
+        int upgradablesBefore = PileType.Deck.GetPile(player).Cards.Count(c => c.IsUpgradable);
+        AutoTestAssert.Equal(upgradablesBefore, barbells.DisplayAmount, "Barbells counter matches upgradable deck cards");
+        AutoTestAssert.True(upgradablesBefore >= Barbells.RequiredUpgradableCount, "Starter deck has >= 10 upgradable cards");
+        await barbells.AfterRoomEntered(new RestSiteRoom());
+        AutoTestAssert.Equal(upgradablesBefore - 1, PileType.Deck.GetPile(player).Cards.Count(c => c.IsUpgradable), "Barbells upgraded 1 random card on entering RestSiteRoom");
+        await RelicCmd.Remove(barbells);
+
+        // 10. All 4 Champ Potions!
+        await ResetCombatState();
+        // (a) CounterstrikePotion: +25 Counter!
+        var counterPot = ModelDb.Potion<CounterstrikePotion>().ToMutable();
+        await PotionCmd.TryToProcure(counterPot, player);
+        await counterPot.OnUseWrapper(ctx, player.Creature);
+        AutoTestAssert.Equal(25, player.Creature.GetPowerAmount<CounterPower>(), "CounterstrikePotion granted 25 Counter");
+
+        // (b) OpenerPotion: offers 1 Berserker + 1 Defensive Opener, adds chosen card at 0 cost!
+        var openerPot = ModelDb.Potion<OpenerPotion>().ToMutable();
+        await PotionCmd.TryToProcure(openerPot, player);
+        int handBeforePot = pcs.Hand.Cards.Count;
+        await openerPot.OnUseWrapper(ctx, player.Creature);
+        AutoTestAssert.Equal(handBeforePot + 1, pcs.Hand.Cards.Count, "OpenerPotion added chosen Opener to Hand");
+        var openerAdded = pcs.Hand.Cards.Last();
+        AutoTestAssert.Equal(0, openerAdded.EnergyCost.GetWithModifiers(CostModifiers.Local), "OpenerPotion card costs 0 this turn");
+
+        // (c) TechPotion: triggers current Stance's Skill Bonus 5 times (+10 Vigor in Berserker)!
+        await ResetCombatState();
+        await ChampStances.EnterStanceAsync(player, ChampStanceKind.Berserker, ctx);
+        var techPot = ModelDb.Potion<TechPotion>().ToMutable();
+        await PotionCmd.TryToProcure(techPot, player);
+        await techPot.OnUseWrapper(ctx, player.Creature);
+        AutoTestAssert.Equal(10, player.Creature.GetPowerAmount<VigorPower>(), "TechPotion triggered Berserker Skill Bonus 5 times (+10 Vigor)");
+
+        // (d) UltimateStancePotion: enters Ultimate Stance + UltimateFormPower(1)!
+        await ResetCombatState();
+        var ultPot = ModelDb.Potion<UltimateStancePotion>().ToMutable();
+        await PotionCmd.TryToProcure(ultPot, player);
+        await ultPot.OnUseWrapper(ctx, player.Creature);
+        AutoTestAssert.Equal(ChampStanceKind.Ultimate, ChampStances.GetCurrentStance(player.Creature), "UltimateStancePotion entered Ultimate Stance");
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<UltimateFormPower>(), "UltimateStancePotion applied UltimateFormPower(1)");
+
+        // 11. PowerArmor (+1 Max Energy + caps Vigor/Counter at 10) + BerserkersGuideToSlaughter (+3 Vigor/turn) + DeflectingBracers (expired Block/2 -> Counter) + FightingForDummies (Neutral end-of-turn -> +1 Draw next turn)!
+        await ResetCombatState();
+        await RelicCmd.Obtain<PowerArmor>(player);
+        await RelicCmd.Obtain<BerserkersGuideToSlaughter>(player);
+        await RelicCmd.Obtain<DeflectingBracers>(player);
+        await RelicCmd.Obtain<FightingForDummies>(player);
+
+        // Verify PowerArmor caps Vigor & Counter at 10 (including when already at 10)!
+        await PowerCmd.Apply<VigorPower>(ctx, player.Creature, 15m, player.Creature, null);
+        await PowerCmd.Apply<VigorPower>(ctx, player.Creature, 5m, player.Creature, null);
+        AutoTestAssert.Equal(10, player.Creature.GetPowerAmount<VigorPower>(), "PowerArmor capped Vigor at 10");
+        await PowerCmd.Apply<CounterPower>(ctx, player.Creature, 15m, player.Creature, null);
+        await PowerCmd.Apply<CounterPower>(ctx, player.Creature, 5m, player.Creature, null);
+        AutoTestAssert.Equal(10, player.Creature.GetPowerAmount<CounterPower>(), "PowerArmor capped Counter at 10");
+
+        // Clear Vigor/Counter, Stun enemies so all 10 Block expires cleanly into Turn 2!
+        if (player.Creature.GetPower<VigorPower>() is { } vc) await PowerCmd.Remove(vc);
+        if (player.Creature.GetPower<CounterPower>() is { } cc) await PowerCmd.Remove(cc);
+        foreach (var e in combatState.HittableEnemies.ToList())
+            await CreatureCmd.Stun(e);
+        for (int i = 0; i < 8; i++)
+            await CardPileCmd.Add(combatState.CreateCard<ChampStrike>(player), PileType.Draw);
+
+        await CreatureCmd.GainBlock(player.Creature, 10m, ValueProp.Unpowered, null);
+        await DownfallAutoTestRunner.EndTurnAndWaitForRoundAsync(player, 2);
+
+        AutoTestAssert.Equal(4, pcs.Energy, "PowerArmor granted +1 Max Energy (3 -> 4)");
+        AutoTestAssert.Equal(3, player.Creature.GetPowerAmount<VigorPower>(), "BerserkersGuideToSlaughter granted 3 Vigor at Turn 2 start");
+        AutoTestAssert.Equal(5, player.Creature.GetPowerAmount<CounterPower>(), "DeflectingBracers granted 10 / 2 = 5 Counter from expired Block");
+        AutoTestAssert.Equal(6, pcs.Hand.Cards.Count, "FightingForDummies drew +1 card on Turn 2 (5 -> 6) after ending Turn 1 in Neutral");
     }
 }

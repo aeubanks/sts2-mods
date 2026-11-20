@@ -1,4 +1,5 @@
 using BaseLib.Utils;
+using Downfall.Champ.Relics;
 using Downfall.Core;
 using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.HoverTips;
@@ -24,7 +25,8 @@ public abstract class ChampCard(
         !IsFinisher
         || !IsMutable
         || Owner is null
-        || ChampStances.IsInStance(Owner.Creature);
+        || ChampStances.IsInStance(Owner.Creature)
+        || Owner.Relics.OfType<SignatureFinisher>().Any(r => r.IsSignatureCard(this));
 
     protected override bool ShouldGlowGoldInternal =>
         IsFinisher && CombatState is not null && IsPlayable;
