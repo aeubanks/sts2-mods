@@ -607,5 +607,14 @@
   "DOWNFALL-FEEL_MY_PAIN_POWER.smartDescription": "Whenever you [gold]Exhaust[/gold] a card, a random enemy loses [blue]{Amount}[/blue] HP.",
   "DOWNFALL-HEAL_IF_DIE_THIS_TURN_POWER.title": "Finalized",
   "DOWNFALL-HEAL_IF_DIE_THIS_TURN_POWER.description": "When this enemy dies, heal HP.",
-  "DOWNFALL-HEAL_IF_DIE_THIS_TURN_POWER.smartDescription": "When this enemy dies, heal [blue]{Amount}[/blue] HP."
+  "DOWNFALL-HEAL_IF_DIE_THIS_TURN_POWER.smartDescription": "When this enemy dies, heal [blue]{Amount}[/blue] HP.",
+  "DOWNFALL-KARMA_POWER.title": "Karma",
+  "DOWNFALL-KARMA_POWER.description": "At the end of your turn, gain [gold]Block[/gold], plus more for each [gold]Afflicted[/gold] enemy.",
+  "DOWNFALL-KARMA_POWER.smartDescription": "At the end of your turn, gain [blue]{Amount}[/blue] [gold]Block[/gold], plus [blue]{Amount}[/blue] more for each [gold]Afflicted[/gold] enemy.",
+  "DOWNFALL-LANTERN_FLARE_POWER.title": "Scorched",
+  "DOWNFALL-LANTERN_FLARE_POWER.description": "At the end of its turn, gains [gold]Doom[/gold].",
+  "DOWNFALL-LANTERN_FLARE_POWER.smartDescription": "At the end of its turn, gains [blue]{Amount}[/blue] [gold]Doom[/gold].",
+  "DOWNFALL-SUFFERING_POWER.title": "Suffering",
+  "DOWNFALL-SUFFERING_POWER.description": "Whenever you apply [gold]Weak[/gold] or [gold]Vulnerable[/gold] to an enemy, also apply [gold]Doom[/gold] to them.",
+  "DOWNFALL-SUFFERING_POWER.smartDescription": "Whenever you apply [gold]Weak[/gold] or [gold]Vulnerable[/gold] to an enemy, also apply [blue]{Amount}[/blue] [gold]Doom[/gold] to them."
 }

@@ -717,4 +717,218 @@ internal static class CollectorTests
         await CreatureCmd.Damage(ctx, enemy, enemy.CurrentHp + 50, ValueProp.Unblockable | ValueProp.Unpowered, player.Creature);
         AutoTestAssert.Equal(playerHpBeforeFinalizeKill + 6, player.Creature.CurrentHp, "HealIfDieThisTurnPower healed Collector by 6 HP on enemy death");
     }
+
+    public static async Task TestUncommonBatch2InCombat()
+    {
+        var (player, _, combatState) = await DownfallAutoTestRunner.StartCombatAsync<TheCollector>("COLLECTOR_10C2");
+        var pcs = AutoTestAssert.NotNull(player.PlayerCombatState, "PlayerCombatState");
+        var enemy = AutoTestAssert.NotNull(combatState.HittableEnemies.FirstOrDefault(), "Enemy");
+        var ctx = new BlockingPlayerChoiceContext();
+
+        await CreatureCmd.SetMaxAndCurrentHp(enemy, 1000m);
+
+        static async Task ClearHandAsync(PlayerCombatState p)
+        {
+            foreach (var c in p.Hand.Cards.ToList())
+                await CardPileCmd.Add(c, PileType.Discard);
+        }
+
+        // 1. Heatwave (5 AoE + Ember) & Hurting+ -> Exhaust -> GreaterHurting+ -> Exhaust -> GreatestHurting+ -> Exhaust -> Ember!
+        await ClearHandAsync(pcs);
+        pcs.Energy = 10;
+        var heatwave = combatState.CreateCard<Heatwave>(player);
+        await CardPileCmd.Add(heatwave, PileType.Hand);
+        int hpBeforeHeat = enemy.CurrentHp;
+        await CardCmd.AutoPlay(ctx, heatwave, null, AutoPlayType.Default);
+        AutoTestAssert.Equal(hpBeforeHeat - 5, enemy.CurrentHp, "Heatwave dealt 5 AoE damage");
+        AutoTestAssert.True(pcs.Hand.Cards.Any(c => c is Ember), "Heatwave added Ember to Hand");
+
+        await ClearHandAsync(pcs);
+        var hurting = combatState.CreateCard<Hurting>(player);
+        hurting.UpgradeInternal();
+        await CardPileCmd.Add(hurting, PileType.Hand);
+        await CardCmd.Exhaust(ctx, hurting);
+        var greater = AutoTestAssert.NotNull(pcs.Hand.Cards.OfType<GreaterHurting>().FirstOrDefault(), "Hurting+ Exhaust added GreaterHurting+");
+        AutoTestAssert.True(greater.IsUpgraded, "GreaterHurting from Hurting+ is upgraded");
+        await CardCmd.Exhaust(ctx, greater);
+        var greatest = AutoTestAssert.NotNull(pcs.Hand.Cards.OfType<GreatestHurting>().FirstOrDefault(), "GreaterHurting+ Exhaust added GreatestHurting+");
+        AutoTestAssert.True(greatest.IsUpgraded, "GreatestHurting from GreaterHurting+ is upgraded");
+        await CardCmd.Exhaust(ctx, greatest);
+        AutoTestAssert.True(pcs.Hand.Cards.Any(c => c is Ember), "GreatestHurting Exhaust added Ember");
+
+        // 2. Suffering (2 Doom on Weak/Vuln) + InflictAgony (12 dmg + 2 Weak & 2 Vuln when not Afflicted -> triggers Suffering twice = 4 Doom!)
+        await ClearHandAsync(pcs);
+        var suffering = combatState.CreateCard<Suffering>(player);
+        await CardPileCmd.Add(suffering, PileType.Hand);
+        await CardCmd.AutoPlay(ctx, suffering, null, AutoPlayType.Default);
+        AutoTestAssert.Equal(2, player.Creature.GetPowerAmount<SufferingPower>(), "Suffering applied SufferingPower(2)");
+
+        var agony = combatState.CreateCard<InflictAgony>(player);
+        await CardPileCmd.Add(agony, PileType.Hand);
+        await CardCmd.AutoPlay(ctx, agony, enemy, AutoPlayType.Default);
+        AutoTestAssert.Equal(2, enemy.GetPowerAmount<WeakPower>(), "InflictAgony applied 2 Weak to non-Afflicted enemy");
+        AutoTestAssert.Equal(2, enemy.GetPowerAmount<VulnerablePower>(), "InflictAgony applied 2 Vulnerable to non-Afflicted enemy");
+        AutoTestAssert.Equal(4, enemy.GetPowerAmount<CollectorDoomPower>(), "SufferingPower applied 2 + 2 = 4 Doom on Weak & Vulnerable");
+
+        // Second InflictAgony on now-Afflicted enemy does NOT re-apply Weak/Vuln!
+        var agony2 = combatState.CreateCard<InflictAgony>(player);
+        await CardPileCmd.Add(agony2, PileType.Hand);
+        await CardCmd.AutoPlay(ctx, agony2, enemy, AutoPlayType.Default);
+        AutoTestAssert.Equal(2, enemy.GetPowerAmount<WeakPower>(), "InflictAgony did not apply Weak to already-Afflicted enemy");
+
+        // 3. VoidArmor (10 Block + 1 Blur to EVERYONE) -> IllTakeThat (steals up to 10 Block + deals 10 dmg!)
+        await ClearHandAsync(pcs);
+        await CreatureCmd.LoseBlock(ctx, player.Creature, player.Creature.Block, null);
+        var voidArmor = combatState.CreateCard<VoidArmor>(player);
+        await CardPileCmd.Add(voidArmor, PileType.Hand);
+        await CardCmd.AutoPlay(ctx, voidArmor, null, AutoPlayType.Default);
+        AutoTestAssert.Equal(10, player.Creature.Block, "VoidArmor granted 10 Block to player");
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<BlurPower>(), "VoidArmor applied 1 Blur to player");
+        AutoTestAssert.Equal(10, enemy.Block, "VoidArmor granted 10 Block to enemy");
+        AutoTestAssert.Equal(1, enemy.GetPowerAmount<BlurPower>(), "VoidArmor applied 1 Blur to enemy");
+
+        var steal = combatState.CreateCard<IllTakeThat>(player);
+        await CardPileCmd.Add(steal, PileType.Hand);
+        await CardCmd.AutoPlay(ctx, steal, enemy, AutoPlayType.Default);
+        AutoTestAssert.Equal(0, enemy.Block, "IllTakeThat stole enemy's 10 Block");
+        AutoTestAssert.Equal(20, player.Creature.Block, "IllTakeThat added stolen 10 Block to player");
+
+        // 4. RagingCall (6 Temp HP + TorchHead AoE 3) -> Attack triggers 3 AoE damage!
+        var ragingCall = combatState.CreateCard<RagingCall>(player);
+        await CardPileCmd.Add(ragingCall, PileType.Hand);
+        await CardCmd.AutoPlay(ctx, ragingCall, null, AutoPlayType.Default);
+        AutoTestAssert.True(player.Creature.GetPowerAmount<Downfall.Core.DownfallTempHpPower>() >= 6, "RagingCall granted 6 Temp HP");
+        int hpBeforeRagingAtk = enemy.CurrentHp;
+        var strikeForRaging = combatState.CreateCard<CollectorStrike>(player); // 6 dmg + 3 AoE (plus Vuln on Strike!)
+        await CardPileCmd.Add(strikeForRaging, PileType.Hand);
+        await CardCmd.AutoPlay(ctx, strikeForRaging, enemy, AutoPlayType.Default);
+        AutoTestAssert.True(hpBeforeRagingAtk - enemy.CurrentHp >= 9 + 3, $"RagingCall TorchHead dealt 3 AoE on Attack (total dmg={hpBeforeRagingAtk - enemy.CurrentHp})");
+
+        // 5. SeedOfDoubt (in Hand while RotwoodKindling & OakbrimKindling are Exhausted -> grows Doom 3 -> 5 -> 7!)
+        await ClearHandAsync(pcs);
+        await PowerCmd.Remove<CollectorDoomPower>(enemy);
+        var seed = combatState.CreateCard<SeedOfDoubt>(player);
+        seed.UpgradeInternal(); // +2 Doom per Exhaust while in Hand
+        var rotwood = combatState.CreateCard<RotwoodKindling>(player);
+        var oakbrim = combatState.CreateCard<OakbrimKindling>(player);
+        await CardPileCmd.Add(seed, PileType.Hand);
+        await CardPileCmd.Add(rotwood, PileType.Hand);
+        await CardPileCmd.Add(oakbrim, PileType.Hand);
+        int handBeforeOak = pcs.Hand.Cards.Count;
+        await CardCmd.Exhaust(ctx, oakbrim); // draws 2 cards, SeedOfDoubt +2 -> 5
+        AutoTestAssert.True(pcs.Hand.Cards.Count >= handBeforeOak, "OakbrimKindling Exhaust drew cards");
+        int vulnBeforeRot = enemy.GetPowerAmount<VulnerablePower>();
+        await CardCmd.Exhaust(ctx, rotwood); // applies 2 Vuln + 4 Doom (plus Suffering +2 Doom!), SeedOfDoubt +2 -> 7
+        AutoTestAssert.Equal(vulnBeforeRot + 2, enemy.GetPowerAmount<VulnerablePower>(), "RotwoodKindling applied 2 Vulnerable to all enemies");
+        int doomBeforeSeed = enemy.GetPowerAmount<CollectorDoomPower>();
+        await CardCmd.AutoPlay(ctx, seed, enemy, AutoPlayType.Default);
+        AutoTestAssert.Equal(doomBeforeSeed + 7, enemy.GetPowerAmount<CollectorDoomPower>(), "SeedOfDoubt+ grew from 3 -> 7 Doom after 2 Exhausts in Hand");
+
+        // 6. MiniCurse+ (Pyre, AllEnemies, 1 Weak + 1 Vuln) & Soulforge (Draw from Collection + 1 Upgraded copy!) & ShadowDaggers!
+        await ClearHandAsync(pcs);
+        var mcFodder = combatState.CreateCard<CollectorDefend>(player);
+        var miniCurse = combatState.CreateCard<MiniCurse>(player);
+        miniCurse.UpgradeInternal();
+        AutoTestAssert.Equal(TargetType.AllEnemies, miniCurse.TargetType, "MiniCurse+ targets AllEnemies");
+        int weakBeforeMc = enemy.GetPowerAmount<WeakPower>();
+        await CardPileCmd.Add(mcFodder, PileType.Hand);
+        await CardPileCmd.Add(miniCurse, PileType.Hand);
+        await CardCmd.AutoPlay(ctx, miniCurse, null, AutoPlayType.Default);
+        AutoTestAssert.Equal(weakBeforeMc + 1, enemy.GetPowerAmount<WeakPower>(), "MiniCurse+ applied Weak to all enemies");
+
+        var cData = CollectorCombatState.Get(combatState).GetPlayer(player);
+        cData.CombatCollection.Clear();
+        cData.CombatCollection.Add(combatState.CreateCard<JawWormCard>(player));
+        await ClearHandAsync(pcs);
+        var soulforge = combatState.CreateCard<Soulforge>(player);
+        await CardPileCmd.Add(soulforge, PileType.Hand);
+        await CardCmd.AutoPlay(ctx, soulforge, null, AutoPlayType.Default);
+        var jawCards = pcs.Hand.Cards.OfType<JawWormCard>().ToList();
+        AutoTestAssert.Equal(2, jawCards.Count, "Soulforge drew JawWormCard and added 1 Upgraded copy into Hand");
+        AutoTestAssert.True(jawCards.Any(c => c.IsUpgraded), "Soulforge copy is Upgraded");
+
+        // Play both JawWormCards -> CollectedCardsPlayedThisCombat >= 2 -> ShadowDaggers hits >= 2 times!
+        foreach (var jc in jawCards)
+            await CardCmd.AutoPlay(ctx, jc, null, AutoPlayType.Default);
+        AutoTestAssert.True(cData.CollectedCardsPlayedThisCombat >= 2, "Played 2 Collected cards this combat");
+        await PowerCmd.Remove<VulnerablePower>(enemy);
+        var daggers = combatState.CreateCard<ShadowDaggers>(player);
+        int hpBeforeDaggers = enemy.CurrentHp;
+        await CardPileCmd.Add(daggers, PileType.Hand);
+        await CardCmd.AutoPlay(ctx, daggers, enemy, AutoPlayType.Default);
+        int expectedHits = cData.CollectedCardsPlayedThisCombat;
+        int strForDaggers = player.Creature.GetPowerAmount<StrengthPower>();
+        AutoTestAssert.Equal(hpBeforeDaggers - expectedHits * (3 + strForDaggers) - 3, enemy.CurrentHp, $"ShadowDaggers hit {expectedHits} times for {3 + strForDaggers} each (+ 3 TorchHead AoE)");
+
+        // 7. WhirlingFlame (15 AoE + put Discard card on top of Draw Pile!)
+        await ClearHandAsync(pcs);
+        var discCard = combatState.CreateCard<CollectorStrike>(player);
+        await CardPileCmd.Add(discCard, PileType.Discard);
+        var whirling = combatState.CreateCard<WhirlingFlame>(player);
+        await CardPileCmd.Add(whirling, PileType.Hand);
+        using (DownfallAutoTestRunner.PreferCards(c => ReferenceEquals(c, discCard)))
+        {
+            await CardCmd.AutoPlay(ctx, whirling, null, AutoPlayType.Default);
+        }
+        AutoTestAssert.True(pcs.DrawPile.Cards.FirstOrDefault() == discCard, "WhirlingFlame moved chosen Discard card to top of Draw Pile");
+
+        // 8. Hoard (Pyre, Draw 2, single-turn Retain!) + Karma (Block at end of turn + Afflicted bonus!)
+        //    + VoidArmor (enemy Blur retains Block across turn end!) + Ethereal Hurting end-of-turn exhaust!
+        //    + LanternFlare (Pyre, 12 Doom + +3 Doom at end of enemy turn!)
+        await ClearHandAsync(pcs);
+        await CreatureCmd.LoseBlock(ctx, player.Creature, player.Creature.Block, null);
+        await PowerCmd.Remove<BlurPower>(player.Creature);
+        await PowerCmd.Remove<BlurPower>(enemy);
+        await PowerCmd.Apply<WeakPower>(ctx, enemy, 2m, player.Creature, null);
+        await PowerCmd.Apply<VulnerablePower>(ctx, enemy, 2m, player.Creature, null);
+        var karma = combatState.CreateCard<Karma>(player);
+        await CardPileCmd.Add(karma, PileType.Hand);
+        await CardCmd.AutoPlay(ctx, karma, null, AutoPlayType.Default);
+        AutoTestAssert.Equal(2, player.Creature.GetPowerAmount<KarmaPower>(), "Karma applied KarmaPower(2)");
+
+        // Play VoidArmor right before ending turn so both player (with Karma bonus) & enemy have BlurPower(1) across turn end!
+        var voidArmorForTurnEnd = combatState.CreateCard<VoidArmor>(player);
+        await CardPileCmd.Add(voidArmorForTurnEnd, PileType.Hand);
+        await CardCmd.AutoPlay(ctx, voidArmorForTurnEnd, null, AutoPlayType.Default);
+        AutoTestAssert.Equal(10, enemy.Block, "Enemy has 10 Block from VoidArmor before turn end");
+        AutoTestAssert.Equal(1, enemy.GetPowerAmount<BlurPower>(), "Enemy has 1 Blur from VoidArmor before turn end");
+
+        var lfFodder = combatState.CreateCard<CollectorDefend>(player);
+        var lantern = combatState.CreateCard<LanternFlare>(player);
+        await CardPileCmd.Add(lfFodder, PileType.Hand);
+        await CardPileCmd.Add(lantern, PileType.Hand);
+        await CardCmd.AutoPlay(ctx, lantern, enemy, AutoPlayType.Default);
+        AutoTestAssert.Equal(3, enemy.GetPowerAmount<LanternFlarePower>(), "LanternFlare applied LanternFlarePower(3)");
+
+        await ClearHandAsync(pcs);
+        var retainTarget1 = combatState.CreateCard<CollectorStrike>(player);
+        var retainTarget2 = combatState.CreateCard<CollectorDefend>(player);
+        await CardPileCmd.Add(retainTarget1, PileType.Draw, CardPilePosition.Top);
+        await CardPileCmd.Add(retainTarget2, PileType.Draw, CardPilePosition.Top);
+        var hoardFodder = combatState.CreateCard<CollectorDefend>(player);
+        var hoard = combatState.CreateCard<Hoard>(player);
+        await CardPileCmd.Add(hoardFodder, PileType.Hand);
+        await CardPileCmd.Add(hoard, PileType.Hand);
+        await CardCmd.AutoPlay(ctx, hoard, null, AutoPlayType.Default);
+        AutoTestAssert.True(pcs.Hand.Cards.Contains(retainTarget1) && pcs.Hand.Cards.Contains(retainTarget2), "Hoard drew 2 cards");
+
+        // Also put an Ethereal Hurting in Hand to verify natural end-of-turn Ethereal Exhaust creates GreaterHurting without chain-exhausting!
+        var etherealHurting = combatState.CreateCard<Hurting>(player);
+        await CardPileCmd.Add(etherealHurting, PileType.Hand);
+
+        // Neutralize enemy's attack damage for this turn so we can assert exact KarmaPower (+4 Block) + BlurPower retention!
+        await PowerCmd.Apply<DarkShacklesPower>(ctx, enemy, 50m, player.Creature, null);
+
+        int doomBeforeEndTurn = enemy.GetPowerAmount<CollectorDoomPower>();
+        int greatestCountBeforeEndTurn = pcs.AllCards.Count(c => c is GreatestHurting);
+        await DownfallAutoTestRunner.EndTurnAndWaitForRoundAsync(player, combatState.RoundNumber + 1);
+        AutoTestAssert.True(pcs.Hand.Cards.Contains(retainTarget1) && pcs.Hand.Cards.Contains(retainTarget2), "Hoard retained both drawn cards across turn end");
+        AutoTestAssert.Equal(doomBeforeEndTurn + 3, enemy.GetPowerAmount<CollectorDoomPower>(), "LanternFlarePower added +3 Doom at end of enemy turn");
+        AutoTestAssert.Equal(10, enemy.Block, "Enemy BlurPower from VoidArmor retained enemy's 10 Block across turn end");
+        AutoTestAssert.Equal(0, enemy.GetPowerAmount<BlurPower>(), "Enemy BlurPower decremented 1 -> 0 at start of enemy turn");
+        AutoTestAssert.Equal(14, player.Creature.Block, "KarmaPower granted 2 + 2 (Afflicted) = 4 Block on top of VoidArmor's 10 Block, retained by BlurPower");
+        AutoTestAssert.True(pcs.ExhaustPile.Cards.Contains(etherealHurting), "Hurting Exhausted naturally via Ethereal at end of turn");
+        AutoTestAssert.True(pcs.AllCards.Any(c => c is GreaterHurting && !pcs.ExhaustPile.Cards.Contains(c)), "Ethereal Hurting generated GreaterHurting without chain-exhausting it");
+        AutoTestAssert.Equal(greatestCountBeforeEndTurn, pcs.AllCards.Count(c => c is GreatestHurting), "Ethereal Hurting did NOT chain-exhaust into GreatestHurting on the same turn");
+    }
 }

@@ -234,6 +234,7 @@ internal static class DownfallAutoTestRunner
                 ("CollectorStarterMechanicsAndCollection", CollectorTests.TestStarterMechanicsAndCollection),
                 ("CollectorCommonCardsInCombat", CollectorTests.TestCommonCardsInCombat),
                 ("CollectorUncommonBatch1InCombat", CollectorTests.TestUncommonBatch1InCombat),
+                ("CollectorUncommonBatch2InCombat", CollectorTests.TestUncommonBatch2InCombat),
             ];
 
             int matchedIndex = 0;
@@ -830,6 +831,7 @@ internal static class DownfallAutoTestRunner
         }
         AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-COLLECTOR_PYRE.selectPrompt").Exists(), "Missing Collector Pyre selectPrompt");
         AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-COLLECTIBLE_REWARD.description").Exists(), "Missing CollectibleReward description");
+        AutoTestAssert.True(new LocString("cards", "DOWNFALL-WHIRLING_FLAME.selectionScreenPrompt").Exists(), "Missing WhirlingFlame selectionScreenPrompt");
         AutoTestAssert.True(new LocString("rest_site_ui", "OPTION_DOWNFALL_RELEASE.name").Exists(), "Missing Release rest site name");
         AutoTestAssert.True(new LocString("rest_site_ui", "OPTION_DOWNFALL_RELEASE.description").Exists(), "Missing Release rest site description");
         AutoTestAssert.True(new LocString("rest_site_ui", "OPTION_DOWNFALL_RELEASE.descriptionDisabled").Exists(), "Missing Release rest site descriptionDisabled");
