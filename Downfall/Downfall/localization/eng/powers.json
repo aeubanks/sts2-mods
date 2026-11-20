@@ -550,5 +550,17 @@
   "DOWNFALL-MAX_OUTPUT_POWER.smartDescription": "At the start of your turn, draw [blue]{Amount}[/blue] additional {Amount:plural:card|cards} and [gold]Insert[/gold] [blue]{Amount}[/blue] [gold]Dazed[/gold].",
   "DOWNFALL-OPTIMIZE_POWER.title": "Optimized",
   "DOWNFALL-OPTIMIZE_POWER.description": "[gold]Upgrade[/gold] the next [gold]Upgradable[/gold] card you [gold]Encode[/gold].",
-  "DOWNFALL-OPTIMIZE_POWER.smartDescription": "[gold]Upgrade[/gold] the next [blue]{Amount}[/blue] [gold]Upgradable[/gold] {Amount:plural:card|cards} you [gold]Encode[/gold]."
+  "DOWNFALL-OPTIMIZE_POWER.smartDescription": "[gold]Upgrade[/gold] the next [blue]{Amount}[/blue] [gold]Upgradable[/gold] {Amount:plural:card|cards} you [gold]Encode[/gold].",
+  "DOWNFALL-FULL_RELEASE_POWER.title": "Full Release",
+  "DOWNFALL-FULL_RELEASE_POWER.description": "At the start of your turn, trigger your compiled [gold]Function[/gold] effects.",
+  "DOWNFALL-FULL_RELEASE_POWER.smartDescription": "At the start of your turn:\n{Effects}",
+  "DOWNFALL-HARDENED_FORM_POWER.title": "Summon Orb",
+  "DOWNFALL-HARDENED_FORM_POWER.description": "Whenever you create or play a [gold]Function[/gold], gain [gold]Block[/gold] and deal damage to a random enemy.",
+  "DOWNFALL-HARDENED_FORM_POWER.smartDescription": "Whenever you create or play a [gold]Function[/gold], gain [blue]{Amount}[/blue] [gold]Block[/gold] and deal [blue]{Amount}[/blue] damage to a random enemy.",
+  "DOWNFALL-LIBRARY_POWER.title": "Library",
+  "DOWNFALL-LIBRARY_POWER.description": "At the start of your turn, add a random card with [gold]Encode[/gold] to your [gold]Hand[/gold]; it costs [blue]0[/blue] until played.",
+  "DOWNFALL-LIBRARY_POWER.smartDescription": "At the start of your turn, add [blue]{Amount}[/blue] random {Amount:plural:card|cards} with [gold]Encode[/gold] to your [gold]Hand[/gold]; {Amount:plural:it costs|they cost} [blue]0[/blue] until played.",
+  "DOWNFALL-VERIFY_POWER.title": "Sentient Form",
+  "DOWNFALL-VERIFY_POWER.description": "Whenever you draw a [gold]Function[/gold], increase all numbers on it except cost.",
+  "DOWNFALL-VERIFY_POWER.smartDescription": "Whenever you draw a [gold]Function[/gold], increase all numbers on it by [blue]{Amount}[/blue] except cost."
 }

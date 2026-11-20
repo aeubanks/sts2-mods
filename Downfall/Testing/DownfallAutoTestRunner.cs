@@ -228,6 +228,7 @@ internal static class DownfallAutoTestRunner
                 ("AutomatonCommonCardsInCombat", AutomatonTests.TestCommonCardsInCombat),
                 ("AutomatonUncommonBatch1InCombat", AutomatonTests.TestUncommonBatch1InCombat),
                 ("AutomatonUncommonBatch2InCombat", AutomatonTests.TestUncommonBatch2InCombat),
+                ("AutomatonRareCardsInCombat", AutomatonTests.TestRareCardsInCombat),
             ];
 
             int matchedIndex = 0;
@@ -806,6 +807,10 @@ internal static class DownfallAutoTestRunner
         AutoTestAssert.True(new LocString("cards", "DOWNFALL-CUT_THROUGH.selectionScreenPrompt").Exists(), "Missing CutThrough prompt");
         AutoTestAssert.True(new LocString("cards", "DOWNFALL-REFACTOR.selectionScreenPrompt").Exists(), "Missing Refactor prompt");
         AutoTestAssert.True(new LocString("cards", "DOWNFALL-BRONZE_RETURN.selectionScreenPrompt").Exists(), "Missing BronzeReturn prompt");
+        AutoTestAssert.True(new LocString("cards", "DOWNFALL-ASSEMBLY.selectionScreenPrompt").Exists(), "Missing Assembly prompt");
+        AutoTestAssert.True(new LocString("cards", "DOWNFALL-FIND_AND_REPLACE.selectionScreenPrompt").Exists(), "Missing FindAndReplace prompt");
+        AutoTestAssert.True(new LocString("cards", "DOWNFALL-MUTATOR.selectionScreenPrompt").Exists(), "Missing Mutator prompt");
+        AutoTestAssert.True(new LocString("cards", "DOWNFALL-TINKERERS_TOOLBOX.selectionScreenPrompt").Exists(), "Missing TinkerersToolbox prompt");
 
         return Task.CompletedTask;
     }

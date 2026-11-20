@@ -153,7 +153,7 @@ public abstract class BronzeCard(
     /// <summary>
     /// Runs right before encoded cards are embedded into a FunctionCard (e.g. ChosenStrike permanent scaling).
     /// </summary>
-    public virtual void OnCompilePreEmbed(Player player) { }
+    public virtual void OnCompilePreEmbed(Player player, IReadOnlyList<BronzeCard> encodedCards) { }
 
     /// <summary>
     /// Runs when this card is compiled into a FunctionCard (if CompileEnabled is true).
@@ -212,7 +212,7 @@ public abstract class BronzeCard(
     /// <summary>
     /// Resolves a living single-enemy target, falling back to a random living enemy if null/dead.
     /// </summary>
-    protected static Creature? ResolveTarget(Player owner, Creature? target)
+    internal static Creature? ResolveTarget(Player owner, Creature? target)
     {
         if (target is { IsAlive: true })
             return target;

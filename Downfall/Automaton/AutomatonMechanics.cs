@@ -148,13 +148,15 @@ public static class AutomatonMechanics
     }
 
     /// <summary>
-    /// Scry <paramref name="count"/>: inspect top cards of Draw Pile and discard any chosen cards.
+    /// Scry <paramref name="count"/>: inspect top cards of Draw Pile and optionally discard any chosen cards.
+    /// Pass <paramref name="discardSelected"/> = false when the caller handles each chosen card (e.g. Assembly).
     /// </summary>
     public static async Task<IReadOnlyList<CardModel>> ScryAsync(
         PlayerChoiceContext choiceContext,
         Player player,
         int count,
-        LocString prompt)
+        LocString prompt,
+        bool discardSelected = true)
     {
         if (count <= 0 || !player.Creature.IsAlive || CombatManager.Instance.IsOverOrEnding)
             return [];
@@ -167,11 +169,14 @@ public static class AutomatonMechanics
         var prefs = new CardSelectorPrefs(prompt, 0, topCards.Count);
         var chosen = (await CardSelectCmd.FromSimpleGrid(choiceContext, topCards, player, prefs)).ToList();
 
-        foreach (var card in chosen)
+        if (discardSelected)
         {
-            if (!player.Creature.IsAlive || CombatManager.Instance.IsOverOrEnding)
-                break;
-            await CardPileCmd.Add(card, PileType.Discard);
+            foreach (var card in chosen)
+            {
+                if (!player.Creature.IsAlive || CombatManager.Instance.IsOverOrEnding)
+                    break;
+                await CardPileCmd.Add(card, PileType.Discard);
+            }
         }
 
         return chosen;
@@ -269,8 +274,8 @@ public static class AutomatonMechanics
         }
 
         // Duplicate FullRelease guard: redirect a 2nd FullRelease to Discard instead of encoding.
-        if (card.GetType().Name == "FullRelease"
-            && GetEncodedCards(player).Any(c => c.GetType().Name == "FullRelease"))
+        if (card is FullRelease
+            && GetEncodedCards(player).Any(c => c is FullRelease))
         {
             if (card.Pile?.Type != PileType.Discard)
                 await CardPileCmd.Add(card, PileType.Discard);
@@ -411,7 +416,7 @@ public static class AutomatonMechanics
         foreach (var c in encodedCards)
         {
             if (c.CompileEnabled)
-                c.OnCompilePreEmbed(player);
+                c.OnCompilePreEmbed(player, encodedCards);
         }
 
         // 3. Create FunctionCard and embed clones of the encoded cards.

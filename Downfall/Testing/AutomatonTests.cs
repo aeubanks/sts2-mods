@@ -972,4 +972,367 @@ internal static class AutomatonTests
         int dazedAfterTurn = pcs.DrawPile.Cards.Count(c => c is Dazed) + pcs.DiscardPile.Cards.Count(c => c is Dazed) + pcs.Hand.Cards.Count(c => c is Dazed) + pcs.ExhaustPile.Cards.Count(c => c is Dazed);
         AutoTestAssert.True(dazedAfterTurn > dazedBeforeTurn, "MaxOutputPower inserted a Dazed on Turn 2");
     }
+
+    public static async Task TestRareCardsInCombat()
+    {
+        var (player, runState, combatState) = await DownfallAutoTestRunner.StartCombatAsync<TheAutomaton>("AUTOMATON_9D");
+        var pcs = AutoTestAssert.NotNull(player.PlayerCombatState, "PlayerCombatState");
+        var enemy = AutoTestAssert.NotNull(combatState.HittableEnemies.FirstOrDefault(), "Enemy");
+        var ctx = new BlockingPlayerChoiceContext();
+
+        await CreatureCmd.SetMaxAndCurrentHp(enemy, 1500m);
+
+        async Task PlayCardAsync(CardModel card, Creature? target = null)
+        {
+            await CardCmd.AutoPlay(ctx, card, target, AutoPlayType.Default);
+        }
+
+        async Task ClearHandAndRefillAsync(int energy = 20)
+        {
+            foreach (var c in pcs.Hand.Cards.ToList())
+                await CardPileCmd.Add(c, PileType.Discard);
+            pcs.Energy = energy;
+        }
+
+        void ClearSequence()
+        {
+            foreach (var orb in AutomatonMechanics.GetEncodedOrbs(player).ToList())
+                AutomatonMechanics.RemoveEncodedOrb(player, orb);
+        }
+
+        // 1. Verify all 17 Rare cards are registered in AutomatonCardPool and all 4 Dev Tools tokens are in TokenCardPool!
+        var poolCards = ModelDb.CardPool<AutomatonCardPool>().AllCards.ToList();
+        var rareTypes = new[]
+        {
+            typeof(Assembly), typeof(Downfall.Automaton.Cards.Break), typeof(BurnOut), typeof(ChosenStrike), typeof(FindAndReplace),
+            typeof(Format), typeof(FullRelease), typeof(HardenedForm), typeof(HyperBeam), typeof(Library),
+            typeof(Mutator), typeof(ShipIt), typeof(SpaghettiCode), typeof(ThunderWave), typeof(TinkerersToolbox),
+            typeof(Verify), typeof(Virus)
+        };
+        foreach (var t in rareTypes)
+            AutoTestAssert.True(poolCards.Any(c => c.GetType() == t), $"AutomatonCardPool missing Rare card {t.Name}");
+
+        var tokenCards = ModelDb.CardPool<MegaCrit.Sts2.Core.Models.CardPools.TokenCardPool>().AllCards.ToList();
+        foreach (var t in new[] { typeof(Batch), typeof(ByteShift), typeof(Debug), typeof(Decompile) })
+            AutoTestAssert.True(tokenCards.Any(c => c.GetType() == t), $"TokenCardPool missing Dev Tools token {t.Name}");
+
+        // 2. HardenedForm (Summon Orb: +3 Block & 3 dmg on compile AND on play Function) + ChosenStrike (Cultist Strike permanent [SavedProperty] damage scaling on Compile!)
+        await ClearHandAndRefillAsync();
+        ClearSequence();
+        if (player.Creature.Block > 0)
+            await CreatureCmd.LoseBlock(ctx, player.Creature, player.Creature.Block, null);
+
+        var hardenedForm = combatState.CreateCard<HardenedForm>(player);
+        await CardPileCmd.Add(hardenedForm, PileType.Hand);
+        await PlayCardAsync(hardenedForm);
+        AutoTestAssert.Equal(3, player.Creature.GetPowerAmount<HardenedFormPower>(), "HardenedForm applied HardenedFormPower(3)");
+
+        var deckChosen = runState.CreateCard<ChosenStrike>(player);
+        await CardPileCmd.Add(deckChosen, PileType.Deck);
+        var chosenStrike = (ChosenStrike)combatState.CloneCard(deckChosen);
+        chosenStrike.DeckVersion = deckChosen;
+        AutoTestAssert.Equal(6, chosenStrike.DynamicVars.Damage.IntValue, "ChosenStrike starts at 6 base damage");
+
+        int hpBeforeChosen = enemy.CurrentHp;
+        await CardPileCmd.Add(chosenStrike, PileType.Hand);
+        await PlayCardAsync(chosenStrike, enemy);
+        AutoTestAssert.Equal(hpBeforeChosen - 6, enemy.CurrentHp, "ChosenStrike dealt 6 damage on play");
+
+        // Compile via Batch (also tests Dev Tools Batch token + IsPlayable!)
+        var batch = combatState.CreateCard<Batch>(player);
+        AutoTestAssert.True(batch.CanPlay(), "Batch is playable when cards are Encoded");
+        int hpBeforeCompile = enemy.CurrentHp;
+        await CardPileCmd.Add(batch, PileType.Hand);
+        await PlayCardAsync(batch);
+
+        // ChosenStrike OnCompilePreEmbed bumped damage 6 -> 7 on both DeckVersion and compiled Function!
+        AutoTestAssert.Equal(1, deckChosen.BonusDamage, "ChosenStrike permanently incremented DeckVersion BonusDamage to 1");
+        AutoTestAssert.Equal(7, deckChosen.DynamicVars.Damage.IntValue, "ChosenStrike DeckVersion damage increased to 7");
+        var chosenRoundTrip = (ChosenStrike)CardModel.FromSerializable(deckChosen.ToSerializable());
+        AutoTestAssert.Equal(1, chosenRoundTrip.BonusDamage, "ChosenStrike [SavedProperty] BonusDamage round-trips");
+        AutoTestAssert.Equal(7, chosenRoundTrip.DynamicVars.Damage.IntValue, "ChosenStrike round-tripped Damage is 7");
+
+        // HardenedForm triggered on compile (+3 Block, 3 dmg)
+        AutoTestAssert.Equal(3, player.Creature.Block, "HardenedFormPower triggered on Function compile (+3 Block)");
+        AutoTestAssert.Equal(hpBeforeCompile - 3, enemy.CurrentHp, "HardenedFormPower dealt 3 damage on Function compile");
+
+        var chosenFunc = AutoTestAssert.NotNull(pcs.Hand.Cards.OfType<FunctionCard>().FirstOrDefault(), "Batch compiled FunctionCard into Hand");
+        int hpBeforeFuncPlay = enemy.CurrentHp;
+        await PlayCardAsync(chosenFunc, enemy);
+        // Function dealt 7 dmg (pre-embed permanent buff!) + HardenedForm triggered on Function play (+3 dmg, +3 Block)!
+        AutoTestAssert.Equal(hpBeforeFuncPlay - 10, enemy.CurrentHp, "Compiled ChosenStrike Function dealt 7 + HardenedForm 3 = 10 damage");
+        AutoTestAssert.Equal(6, player.Creature.Block, "HardenedFormPower triggered on Function play (+3 more Block = 6)");
+        AutoTestAssert.True(!combatState.CreateCard<Batch>(player).CanPlay(), "Batch is unplayable when sequence is empty");
+        await PowerCmd.Remove<HardenedFormPower>(player.Creature);
+
+        // Multi-clone ChosenStrike compile sharing DeckVersion: both encoded copies buff each other before embedding!
+        var csA = (ChosenStrike)combatState.CloneCard(deckChosen);
+        var csB = (ChosenStrike)combatState.CloneCard(deckChosen);
+        csA.DeckVersion = deckChosen;
+        csB.DeckVersion = deckChosen;
+        await AutomatonMechanics.EncodeCardAsync(ctx, player, csA);
+        await AutomatonMechanics.EncodeCardAsync(ctx, player, csB);
+        var multiCsFunc = AutoTestAssert.NotNull(await AutomatonMechanics.CompileFunctionAsync(ctx, player), "Compiled 2x ChosenStrike Function");
+        AutoTestAssert.Equal(3, deckChosen.BonusDamage, "2x ChosenStrike compile incremented DeckVersion BonusDamage 1 -> 3");
+        AutoTestAssert.Equal(9, multiCsFunc.EncodedCards[0].DynamicVars.Damage.IntValue, "First embedded ChosenStrike received both pre-embed buffs (9)");
+        AutoTestAssert.Equal(9, multiCsFunc.EncodedCards[1].DynamicVars.Damage.IntValue, "Second embedded ChosenStrike received both pre-embed buffs (9)");
+        var coldCsRoundTrip = (ChosenStrike)CardModel.FromSerializable(deckChosen.ToSerializable());
+        AutoTestAssert.Equal(3, coldCsRoundTrip.BonusDamage, "Cold FromSerializable BonusDamage is 3");
+        AutoTestAssert.Equal(9, coldCsRoundTrip.DynamicVars.Damage.IntValue, "Cold FromSerializable Damage is 6+3=9 (not double-counted)");
+
+        // 3. Break (15 dmg + Compile Error 5 statuses) + Debug (strips Compile Error!) + ByteShift (returns all encoded with Retain) + Decompile (exhausts all encoded, +1 Energy & +1 draw per card)!
+        await ClearHandAndRefillAsync();
+        ClearSequence();
+        var brk1 = combatState.CreateCard<Downfall.Automaton.Cards.Break>(player);
+        await CardPileCmd.Add(brk1, PileType.Hand);
+        await PlayCardAsync(brk1, enemy);
+        var dbg = combatState.CreateCard<Debug>(player);
+        await CardPileCmd.Add(dbg, PileType.Hand);
+        await PlayCardAsync(dbg);
+        await AutomatonMechanics.CompileFunctionAsync(ctx, player);
+        AutoTestAssert.Equal(0, pcs.Hand.Cards.Count(c => c.Type == CardType.Status), "Debug suppressed Break's 5-Status Compile Error");
+
+        // Now test Break WITHOUT Debug -> adds Dazed, Slimed, Wound, Burn, Void!
+        await ClearHandAndRefillAsync();
+        var brk2 = combatState.CreateCard<Downfall.Automaton.Cards.Break>(player);
+        await CardPileCmd.Add(brk2, PileType.Hand);
+        await PlayCardAsync(brk2, enemy);
+        await AutomatonMechanics.CompileFunctionAsync(ctx, player);
+        AutoTestAssert.Equal(5, pcs.Hand.Cards.Count(c => c.Type == CardType.Status), "Break Compile Error added all 5 Statuses to Hand");
+
+        // ByteShift returns all Encoded cards to Hand with Retain
+        await ClearHandAndRefillAsync();
+        var bsCard1 = combatState.CreateCard<Safeguard>(player);
+        var bsCard2 = combatState.CreateCard<Replicate>(player);
+        await AutomatonMechanics.EncodeCardAsync(ctx, player, bsCard1);
+        await AutomatonMechanics.EncodeCardAsync(ctx, player, bsCard2);
+        var byteShift = combatState.CreateCard<ByteShift>(player);
+        await CardPileCmd.Add(byteShift, PileType.Hand);
+        await PlayCardAsync(byteShift);
+        AutoTestAssert.True(AutomatonMechanics.IsSequenceEmpty(player), "ByteShift emptied the sequence");
+        AutoTestAssert.True(pcs.Hand.Cards.Contains(bsCard1) && bsCard1.Keywords.Contains(CardKeyword.Retain), "ByteShift returned Safeguard with Retain");
+        AutoTestAssert.True(pcs.Hand.Cards.Contains(bsCard2) && bsCard2.Keywords.Contains(CardKeyword.Retain), "ByteShift returned Replicate with Retain");
+
+        // Decompile exhausts all Encoded cards, +1 Energy & +1 draw each
+        await ClearHandAndRefillAsync(energy: 5);
+        for (int i = 0; i < 4; i++)
+            await CardPileCmd.Add(combatState.CreateCard<BronzeStrike>(player), PileType.Draw, CardPilePosition.Top);
+        var decCard1 = combatState.CreateCard<Safeguard>(player);
+        var decCard2 = combatState.CreateCard<BronzeDefend>(player);
+        await AutomatonMechanics.EncodeCardAsync(ctx, player, decCard1);
+        await AutomatonMechanics.EncodeCardAsync(ctx, player, decCard2);
+        var decompile = combatState.CreateCard<Decompile>(player);
+        await CardPileCmd.Add(decompile, PileType.Hand);
+        await PlayCardAsync(decompile);
+        AutoTestAssert.True(AutomatonMechanics.IsSequenceEmpty(player), "Decompile emptied the sequence");
+        AutoTestAssert.True(pcs.ExhaustPile.Cards.Contains(decCard1) && pcs.ExhaustPile.Cards.Contains(decCard2), "Decompile exhausted both Encoded cards");
+        AutoTestAssert.Equal(7, pcs.Energy, "Decompile gained +2 Energy (5 -> 7)");
+        AutoTestAssert.Equal(2, pcs.Hand.Cards.Count, "Decompile drew 2 cards");
+
+        // 4. TinkerersToolbox (Dev Tools -> chooses 1 of 4 tokens) + Format (X-cost: Encode X+1 Fragments + gain 1 Energy) + SpaghettiCode (compiles a Function!)
+        await ClearHandAndRefillAsync();
+        var toolbox = combatState.CreateCard<TinkerersToolbox>(player);
+        await CardPileCmd.Add(toolbox, PileType.Hand);
+        using (DownfallAutoTestRunner.PreferCards(c => c is Debug))
+        {
+            await PlayCardAsync(toolbox);
+        }
+        AutoTestAssert.True(pcs.Hand.Cards.Any(c => c is Debug), "TinkerersToolbox added chosen Dev Tools token (Debug) to Hand");
+
+        await ClearHandAndRefillAsync(energy: 2);
+        ClearSequence();
+        var format = combatState.CreateCard<Format>(player);
+        CardCmd.Upgrade(format); // X+1 = 2+1 = 3 Fragments -> compiles immediately! +1 Energy!
+        await CardPileCmd.Add(format, PileType.Hand);
+        AutoTestAssert.True(format.TryManualPlay(null), "Manually play Format+ with X=2 Energy");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(1, pcs.Energy, "Format spent X=2 Energy and gained 1 Energy back");
+        var fmtFunc = AutoTestAssert.NotNull(pcs.Hand.Cards.OfType<FunctionCard>().FirstOrDefault(), "Format+ with X=2 encoded 3 Fragments and compiled a Function");
+        AutoTestAssert.Equal(3, fmtFunc.EncodedCards.Count, "Format+ Function contains 3 Fragments");
+        AutoTestAssert.True(fmtFunc.EncodedCards.All(c => c is FormatEncoded), "All 3 encoded cards in Format+ Function are FormatEncoded");
+
+        await ClearHandAndRefillAsync();
+        ClearSequence();
+        int compiledBeforeSpaghetti = AutomatonCombatState.Get(combatState).FunctionsCompiledThisCombat;
+        var spaghetti = combatState.CreateCard<SpaghettiCode>(player);
+        await CardPileCmd.Add(spaghetti, PileType.Hand);
+        await PlayCardAsync(spaghetti);
+        AutoTestAssert.Equal(compiledBeforeSpaghetti + 1, AutomatonCombatState.Get(combatState).FunctionsCompiledThisCombat, "SpaghettiCode compiled a Function");
+        AutoTestAssert.True(pcs.Hand.Cards.OfType<FunctionCard>().Any(), "SpaghettiCode added compiled Function to Hand");
+
+        // 5. Assembly (Scry 5, encodes discarded Encodable cards in order, discards non-Encodable) + FindAndReplace (fetch from Draw + insert Dazed)
+        await ClearHandAndRefillAsync();
+        ClearSequence();
+        var asmEnc = combatState.CreateCard<Safeguard>(player);
+        var asmNon = combatState.CreateCard<BronzeStrike>(player);
+        await CardPileCmd.Add(asmNon, PileType.Draw, CardPilePosition.Top);
+        await CardPileCmd.Add(asmEnc, PileType.Draw, CardPilePosition.Top);
+        var assembly = combatState.CreateCard<Assembly>(player);
+        await CardPileCmd.Add(assembly, PileType.Hand);
+        using (DownfallAutoTestRunner.PreferCards(c => ReferenceEquals(c, asmEnc) || ReferenceEquals(c, asmNon)))
+        {
+            await PlayCardAsync(assembly);
+        }
+        AutoTestAssert.True(AutomatonMechanics.GetEncodedCards(player).Contains(asmEnc), "Assembly Encoded discarded Encodable card");
+        AutoTestAssert.True(pcs.DiscardPile.Cards.Contains(asmNon), "Assembly discarded non-Encodable card");
+        ClearSequence();
+
+        await ClearHandAndRefillAsync();
+        var farTarget = combatState.CreateCard<BronzeDefend>(player);
+        await CardPileCmd.Add(farTarget, PileType.Draw, CardPilePosition.Top);
+        int dazedInDrawBefore = pcs.DrawPile.Cards.Count(c => c is Dazed);
+        var far = combatState.CreateCard<FindAndReplace>(player);
+        await CardPileCmd.Add(far, PileType.Hand);
+        using (DownfallAutoTestRunner.PreferCards(c => ReferenceEquals(c, farTarget)))
+        {
+            await PlayCardAsync(far);
+        }
+        AutoTestAssert.True(pcs.Hand.Cards.Contains(farTarget), "FindAndReplace fetched chosen card from Draw Pile to Hand");
+        AutoTestAssert.Equal(dazedInDrawBefore + 1, pcs.DrawPile.Cards.Count(c => c is Dazed), "Unupgraded FindAndReplace inserted a Dazed into Draw Pile");
+
+        // FindAndReplace from Discard Pile (unupgraded adds Dazed to Discard) & FindAndReplace+ (adds NO Dazed!)
+        var farDiscardTarget = combatState.CreateCard<BronzeStrike>(player);
+        await CardPileCmd.Add(farDiscardTarget, PileType.Discard);
+        int dazedInDiscardBefore = pcs.DiscardPile.Cards.Count(c => c is Dazed);
+        var far2 = combatState.CreateCard<FindAndReplace>(player);
+        await CardPileCmd.Add(far2, PileType.Hand);
+        using (DownfallAutoTestRunner.PreferCards(c => ReferenceEquals(c, farDiscardTarget)))
+        {
+            await PlayCardAsync(far2);
+        }
+        AutoTestAssert.True(pcs.Hand.Cards.Contains(farDiscardTarget), "FindAndReplace fetched chosen card from Discard Pile");
+        AutoTestAssert.Equal(dazedInDiscardBefore + 1, pcs.DiscardPile.Cards.Count(c => c is Dazed), "Unupgraded FindAndReplace added a Dazed to Discard Pile");
+
+        var farUpTarget = combatState.CreateCard<BronzeDefend>(player);
+        await CardPileCmd.Add(farUpTarget, PileType.Discard);
+        int dazedInDiscardBeforeUp = pcs.DiscardPile.Cards.Count(c => c is Dazed);
+        var farUp = combatState.CreateCard<FindAndReplace>(player);
+        CardCmd.Upgrade(farUp);
+        await CardPileCmd.Add(farUp, PileType.Hand);
+        using (DownfallAutoTestRunner.PreferCards(c => ReferenceEquals(c, farUpTarget)))
+        {
+            await PlayCardAsync(farUp);
+        }
+        AutoTestAssert.True(pcs.Hand.Cards.Contains(farUpTarget), "FindAndReplace+ fetched chosen card from Discard Pile");
+        AutoTestAssert.Equal(dazedInDiscardBeforeUp, pcs.DiscardPile.Cards.Count(c => c is Dazed), "FindAndReplace+ added NO Dazed");
+
+        // 6. HyperBeam (25 AoE + 5 Voids on TOP of Draw Pile) + ThunderWave (12 AoE + 1 Buffer) + BurnOut (exhaust all Statuses & 6 dmg each) + ShipIt (5 dmg + repeat per exhausted Status)
+        await ClearHandAndRefillAsync();
+        int hpBeforeHyper = enemy.CurrentHp;
+        var hyperBeam = combatState.CreateCard<HyperBeam>(player);
+        await CardPileCmd.Add(hyperBeam, PileType.Hand);
+        await PlayCardAsync(hyperBeam);
+        AutoTestAssert.Equal(hpBeforeHyper - 25, enemy.CurrentHp, "HyperBeam dealt 25 AoE damage");
+        AutoTestAssert.Equal(5, pcs.DrawPile.Cards.Take(5).Count(c => c is MegaCrit.Sts2.Core.Models.Cards.Void), "HyperBeam placed 5 Voids on TOP of Draw Pile");
+
+        int hpBeforeThunder = enemy.CurrentHp;
+        var thunder = combatState.CreateCard<ThunderWave>(player);
+        await CardPileCmd.Add(thunder, PileType.Hand);
+        await PlayCardAsync(thunder);
+        AutoTestAssert.Equal(hpBeforeThunder - 12, enemy.CurrentHp, "ThunderWave dealt 12 AoE damage");
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<BufferPower>(), "ThunderWave granted 1 BufferPower");
+
+        int totalStatusesBeforeBurnOut = pcs.DrawPile.Cards.Count(c => c.Type == CardType.Status)
+            + pcs.DiscardPile.Cards.Count(c => c.Type == CardType.Status)
+            + pcs.Hand.Cards.Count(c => c.Type == CardType.Status);
+        AutoTestAssert.True(totalStatusesBeforeBurnOut >= 5, "At least 5 Statuses exist before BurnOut");
+        int hpBeforeBurnOut = enemy.CurrentHp;
+        var burnOut = combatState.CreateCard<BurnOut>(player);
+        await CardPileCmd.Add(burnOut, PileType.Hand);
+        await PlayCardAsync(burnOut);
+        AutoTestAssert.Equal(hpBeforeBurnOut - (6 * totalStatusesBeforeBurnOut), enemy.CurrentHp, "BurnOut dealt 6 damage per Status across Draw/Discard/Hand");
+        AutoTestAssert.Equal(0, pcs.DrawPile.Cards.Count(c => c.Type == CardType.Status) + pcs.DiscardPile.Cards.Count(c => c.Type == CardType.Status) + pcs.Hand.Cards.Count(c => c.Type == CardType.Status), "BurnOut exhausted ALL Statuses");
+
+        int exhaustedStatuses = pcs.ExhaustPile.Cards.Count(c => c.Type == CardType.Status);
+        AutoTestAssert.True(exhaustedStatuses >= 5, "Exhaust Pile holds exhausted Statuses for ShipIt");
+        int hpBeforeShipIt = enemy.CurrentHp;
+        var shipIt = combatState.CreateCard<ShipIt>(player);
+        await CardPileCmd.Add(shipIt, PileType.Hand);
+        await PlayCardAsync(shipIt, enemy);
+        AutoTestAssert.Equal(hpBeforeShipIt - (5 * (1 + exhaustedStatuses)), enemy.CurrentHp, "ShipIt hit 1 + Exhausted Status count times");
+
+        // 7. Mutator (+2 Strength, transforms Status in Hand into copy of Mutator) + Virus+ (6 dmg, discards hand, adds MinorBeam+ per card discarded)
+        await ClearHandAndRefillAsync();
+        await PowerCmd.Remove<StrengthPower>(player.Creature);
+        var mutDazed = combatState.CreateCard<Dazed>(player);
+        var mutator = combatState.CreateCard<Mutator>(player);
+        CardCmd.Upgrade(mutator);
+        await CardPileCmd.Add(mutDazed, PileType.Hand);
+        await CardPileCmd.Add(mutator, PileType.Hand);
+        await PlayCardAsync(mutator);
+        AutoTestAssert.Equal(2, player.Creature.GetPowerAmount<StrengthPower>(), "Mutator granted +2 Strength");
+        AutoTestAssert.True(pcs.ExhaustPile.Cards.Contains(mutDazed), "Mutator exhausted Status card in Hand");
+        AutoTestAssert.True(pcs.Hand.Cards.Any(c => c is Mutator { IsUpgraded: true }), "Mutator added an upgraded copy of itself to Hand");
+        await PowerCmd.Remove<StrengthPower>(player.Creature);
+
+        await ClearHandAndRefillAsync();
+        await CardPileCmd.Add(combatState.CreateCard<BronzeDefend>(player), PileType.Hand);
+        await CardPileCmd.Add(combatState.CreateCard<BronzeDefend>(player), PileType.Hand);
+        int hpBeforeVirus = enemy.CurrentHp;
+        var virus = combatState.CreateCard<Virus>(player);
+        CardCmd.Upgrade(virus);
+        await CardPileCmd.Add(virus, PileType.Hand);
+        await PlayCardAsync(virus, enemy);
+        AutoTestAssert.Equal(hpBeforeVirus - 6, enemy.CurrentHp, "Virus+ dealt 6 damage");
+        AutoTestAssert.Equal(2, pcs.Hand.Cards.Count(c => c is MinorBeam { IsUpgraded: true }), "Virus+ discarded 2 cards and added 2 MinorBeam+ to Hand");
+
+        // 8. FullRelease (blocks 2nd FullRelease, compiles Power Function -> FullReleasePower fires at start of next turn) + Library (LibraryPower adds 0-cost Encodable) + Verify (VerifyPower Fine Tunes drawn Function)!
+        await ClearHandAndRefillAsync();
+        ClearSequence();
+        var fr1 = combatState.CreateCard<FullRelease>(player);
+        var fr2 = combatState.CreateCard<FullRelease>(player);
+        var frGuard = combatState.CreateCard<Safeguard>(player); // 4 Block
+        await CardPileCmd.Add(fr1, PileType.Hand);
+        await CardPileCmd.Add(fr2, PileType.Hand);
+        await CardPileCmd.Add(frGuard, PileType.Hand);
+        await PlayCardAsync(fr1);
+        AutoTestAssert.True(!fr2.CanPlay(), "Second FullRelease is unplayable while one is already Encoded");
+        await PlayCardAsync(frGuard);
+
+        var frFunc = AutoTestAssert.NotNull(await AutomatonMechanics.CompileFunctionAsync(ctx, player), "Compiled FullRelease Function");
+        AutoTestAssert.Equal(CardType.Power, frFunc.Type, "FullRelease turned Function into a Power");
+        AutoTestAssert.Equal(TargetType.Self, frFunc.TargetType, "FullRelease Function targets Self");
+        AutoTestAssert.True(frFunc.Title.EndsWith("()"), $"FullRelease Function title valid: {frFunc.Title}");
+        await PlayCardAsync(frFunc);
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<FullReleasePower>(), "Playing FullRelease Function applied FullReleasePower");
+
+        // Verify canonical ModelDb.Power<FullReleasePower>() isolation AND stacking a 2nd FullRelease Function (+5 Block)!
+        var freshCanonicalClone = (FullReleasePower)ModelDb.Power<FullReleasePower>().ToMutable();
+        AutoTestAssert.Equal(
+            "Trigger your compiled Function effects.",
+            ((MegaCrit.Sts2.Core.Localization.DynamicVars.StringVar)freshCanonicalClone.DynamicVars["Effects"]).StringValue,
+            "Canonical FullReleasePower singleton was NOT mutated by combat RegisterFunction");
+
+        await AutomatonMechanics.EncodeCardAsync(ctx, player, (BronzeCard)combatState.CreateCard<FullRelease>(player));
+        await AutomatonMechanics.EncodeCardAsync(ctx, player, (BronzeCard)combatState.CreateCard<BronzeDefend>(player)); // 5 Block
+        var frFunc2 = AutoTestAssert.NotNull(await AutomatonMechanics.CompileFunctionAsync(ctx, player), "Compiled 2nd FullRelease Function");
+        await PlayCardAsync(frFunc2);
+        AutoTestAssert.Equal(2, player.Creature.GetPowerAmount<FullReleasePower>(), "Playing 2nd FullRelease Function stacked FullReleasePower to 2");
+
+        var library = combatState.CreateCard<Library>(player);
+        await CardPileCmd.Add(library, PileType.Hand);
+        await PlayCardAsync(library);
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<LibraryPower>(), "Library applied LibraryPower(1)");
+
+        var verify = combatState.CreateCard<Verify>(player);
+        AutoTestAssert.True(verify.Keywords.Contains(CardKeyword.Ethereal), "Unupgraded Verify is Ethereal");
+        CardCmd.Upgrade(verify);
+        AutoTestAssert.True(!verify.Keywords.Contains(CardKeyword.Ethereal), "Upgraded Verify removes Ethereal");
+        await CardPileCmd.Add(verify, PileType.Hand);
+        await PlayCardAsync(verify);
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<VerifyPower>(), "Verify applied VerifyPower(1)");
+
+        // Put a fresh Safeguard(4 Block) Function on top of Draw Pile to verify VerifyPower on real turn draw!
+        var drawSub = combatState.CreateCard<Safeguard>(player);
+        await AutomatonMechanics.EncodeCardAsync(ctx, player, drawSub);
+        var drawFunc = AutoTestAssert.NotNull(await AutomatonMechanics.CompileFunctionAsync(ctx, player), "Compiled Function for VerifyPower draw test");
+        await CardPileCmd.Add(drawFunc, PileType.Draw, CardPilePosition.Top);
+        AutoTestAssert.Equal(4, drawFunc.EncodedCards[0].DynamicVars.Block.IntValue, "Function starts at 4 Block before VerifyPower draw");
+
+        await DownfallAutoTestRunner.EndTurnAndWaitForRoundAsync(player, combatState.RoundNumber + 1);
+        AutoTestAssert.True(player.Creature.Block >= 9, $"Stacked FullReleasePower granted 4 + 5 = 9 Block at start of Turn 2 (Block={player.Creature.Block})");
+        AutoTestAssert.Equal(5, drawFunc.EncodedCards[0].DynamicVars.Block.IntValue, "VerifyPower Fine Tuned drawn Function from 4 -> 5 Block");
+        AutoTestAssert.True(pcs.Hand.Cards.Any(c => c is BronzeCard { Encodes: true } && c.EnergyCost.GetWithModifiers(CostModifiers.All) == 0),
+            "LibraryPower added a 0-cost Encodable card to Hand on Turn 2");
+    }
 }

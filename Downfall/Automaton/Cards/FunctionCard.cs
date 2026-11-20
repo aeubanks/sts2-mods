@@ -1,4 +1,6 @@
+using Downfall.Automaton.Powers;
 using MegaCrit.Sts2.Core.Combat;
+using MegaCrit.Sts2.Core.Commands;
 using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.GameActions.Multiplayer;
@@ -143,7 +145,13 @@ public sealed class FunctionCard() : BronzeTokenCard(1, CardType.Skill, CardRari
 
         if (_isFullRelease)
         {
-            // FullReleasePower is wired directly here in Phase 9D.
+            var power = await PowerCmd.Apply<FullReleasePower>(
+                choiceContext,
+                Owner.Creature,
+                1m,
+                Owner.Creature,
+                this);
+            power?.RegisterFunction(this);
             return;
         }
 
