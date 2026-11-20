@@ -220,6 +220,7 @@ internal static class DownfallAutoTestRunner
                 ("HexaStarterGhostflamesAndAfterlife", HexaghostTests.TestStarterGhostflamesAndAfterlife),
                 ("HexaCommonCardsInCombat", HexaghostTests.TestCommonCardsInCombat),
                 ("HexaUncommonBatch1InCombat", HexaghostTests.TestUncommonBatch1InCombat),
+                ("HexaUncommonBatch2InCombat", HexaghostTests.TestUncommonBatch2InCombat),
             ];
 
             int matchedIndex = 0;
@@ -776,6 +777,11 @@ internal static class DownfallAutoTestRunner
         }
         AutoTestAssert.True(new LocString("cards", "DOWNFALL-SHIELD_OF_DARKNESS.selectionScreenPrompt").Exists(), "Missing ShieldOfDarkness prompt");
         AutoTestAssert.True(new LocString("cards", "DOWNFALL-SWORD_OF_DARKNESS.selectionScreenPrompt").Exists(), "Missing SwordOfDarkness prompt");
+        AutoTestAssert.True(new LocString("cards", "DOWNFALL-NECESSARY_SACRIFICE.selectionScreenPrompt").Exists(), "Missing NecessarySacrifice prompt");
+        AutoTestAssert.True(new LocString("cards", "DOWNFALL-RECURRING_NIGHTMARE.selectionScreenPrompt").Exists(), "Missing RecurringNightmare prompt");
+        AutoTestAssert.True(new LocString("cards", "DOWNFALL-REWIND.selectionScreenPrompt").Exists(), "Missing Rewind prompt");
+        AutoTestAssert.True(new LocString("cards", "DOWNFALL-SEVENTH_EYE.selectionScreenPrompt").Exists(), "Missing SeventhEye prompt");
+        AutoTestAssert.True(new LocString("cards", "DOWNFALL-SPECTRAL_GRACE.selectionScreenPrompt").Exists(), "Missing SpectralGrace prompt");
 
         return Task.CompletedTask;
     }

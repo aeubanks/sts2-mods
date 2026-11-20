@@ -895,4 +895,283 @@ internal static class HexaghostTests
         await HexaMechanics.AdvanceAsync(ctx, player, isEndTurn: false);
         AutoTestAssert.Equal(handRound2BeforeAdv + 1, pcs.Hand.Cards.Count, "PastPower reset on Round 2 and drew 1 card on Advance");
     }
+
+    internal static async Task TestUncommonBatch2InCombat()
+    {
+        var (player, _, combatState) = await DownfallAutoTestRunner.StartCombatAsync<TheHexaghost>("HEXA_UNC2");
+        var pcs = AutoTestAssert.NotNull(player.PlayerCombatState, "PlayerCombatState");
+        var enemy = AutoTestAssert.NotNull(combatState.HittableEnemies.FirstOrDefault(e => e.IsAlive), "Alive enemy");
+        var ctx = new ThrowingPlayerChoiceContext();
+
+        await CreatureCmd.SetMaxAndCurrentHp(enemy, 1000);
+        if (enemy.Block > 0)
+            await CreatureCmd.LoseBlock(ctx, enemy, enemy.Block, null);
+
+        async Task ClearHandAndRefillAsync()
+        {
+            foreach (var c in pcs.Hand.Cards.ToList())
+                await CardPileCmd.Add(c, PileType.Discard);
+            pcs.Energy = 20;
+        }
+
+        // 1. Incineration: 4 dmg + 4 Soulburn x3 (12 dmg, 12 Soulburn)!
+        await ClearHandAndRefillAsync();
+        await PowerCmd.Remove<SoulburnPower>(enemy);
+        int hpBeforeInc = enemy.CurrentHp;
+        var inc = combatState.CreateCard<Incineration>(player);
+        await CardPileCmd.Add(inc, PileType.Hand);
+        await PlayCardAsync(inc, enemy);
+        AutoTestAssert.Equal(hpBeforeInc - 12, enemy.CurrentHp, "Incineration dealt 4x3 = 12 damage");
+        AutoTestAssert.Equal(12, enemy.GetPowerAmount<SoulburnPower>(), "Incineration applied 4x3 = 12 Soulburn");
+
+        // 2. RadiantFlame (Radiant Reverb): 18 dmg + removes target's Soulburn + grants +2 Intensity!
+        // Note: Incineration + RadiantFlame are 2 Attacks on Slot 0 (Searing) -> Searing ignites (+6 Soulburn) in BeforeCardPlayed, then RadiantFlame removes ALL Soulburn and grants +2 Intensity!
+        await ClearHandAndRefillAsync();
+        int hpBeforeRad = enemy.CurrentHp;
+        var rad = combatState.CreateCard<RadiantFlame>(player);
+        await CardPileCmd.Add(rad, PileType.Hand);
+        await PlayCardAsync(rad, enemy);
+        AutoTestAssert.Equal(hpBeforeRad - 18, enemy.CurrentHp, "RadiantFlame dealt 18 damage");
+        AutoTestAssert.Equal(0, enemy.GetPowerAmount<SoulburnPower>(), "RadiantFlame removed target Soulburn");
+        AutoTestAssert.Equal(2, HexaMechanics.GetIntensity(player), "RadiantFlame granted +2 Intensity");
+        await PowerCmd.Remove<EnhancePower>(player.Creature);
+
+        // RadiantFlame without Soulburn deals 18 dmg and grants 0 Intensity
+        int hpBeforeRadMiss = enemy.CurrentHp;
+        var radMiss = combatState.CreateCard<RadiantFlame>(player);
+        await CardPileCmd.Add(radMiss, PileType.Hand);
+        await PlayCardAsync(radMiss, enemy);
+        AutoTestAssert.Equal(hpBeforeRadMiss - 18, enemy.CurrentHp, "RadiantFlame without Soulburn dealt 18 damage");
+        AutoTestAssert.Equal(0, HexaMechanics.GetIntensity(player), "RadiantFlame without Soulburn granted 0 Intensity");
+
+        // 3. RainOfEmbers (X-cost): spend 3 Energy -> 6x3 = 18 dmg + 3 Weak!
+        await ClearHandAndRefillAsync();
+        await PowerCmd.Remove<WeakPower>(enemy);
+        pcs.Energy = 3;
+        int hpBeforeRain = enemy.CurrentHp;
+        var rain = combatState.CreateCard<RainOfEmbers>(player);
+        await CardPileCmd.Add(rain, PileType.Hand);
+        await PlayCardAsync(rain, enemy);
+        AutoTestAssert.Equal(0, pcs.Energy, "RainOfEmbers spent all 3 Energy");
+        AutoTestAssert.Equal(hpBeforeRain - 18, enemy.CurrentHp, "RainOfEmbers dealt 6x3 = 18 damage");
+        AutoTestAssert.Equal(3, enemy.GetPowerAmount<WeakPower>(), "RainOfEmbers applied 3 Weak");
+        await PowerCmd.Remove<WeakPower>(enemy);
+
+        // 4. NecessarySacrifice (Worthy Sacrifice): Exhaust 1 Attack + 1 Skill -> creates 1 Skill + 1 Attack (upgraded when Worthy Sacrifice+)!
+        await ClearHandAndRefillAsync();
+        var sacAtk = combatState.CreateCard<HexaStrike>(player);
+        var sacSkl = combatState.CreateCard<HexaDefend>(player);
+        var sac = combatState.CreateCard<NecessarySacrifice>(player);
+        CardCmd.Upgrade(sac);
+        await CardPileCmd.Add(sacAtk, PileType.Hand);
+        await CardPileCmd.Add(sacSkl, PileType.Hand);
+        await CardPileCmd.Add(sac, PileType.Hand);
+        await PlayCardAsync(sac);
+        AutoTestAssert.True(pcs.ExhaustPile.Cards.Contains(sacAtk), "NecessarySacrifice exhausted Attack");
+        AutoTestAssert.True(pcs.ExhaustPile.Cards.Contains(sacSkl), "NecessarySacrifice exhausted Skill");
+        AutoTestAssert.True(pcs.ExhaustPile.Cards.Contains(sac), "NecessarySacrifice exhausted itself");
+        AutoTestAssert.Equal(2, pcs.Hand.Cards.Count, "NecessarySacrifice added 2 transformed cards");
+        AutoTestAssert.True(pcs.Hand.Cards.Any(c => c.Type == CardType.Skill), "Exhausted Attack became a Skill");
+        AutoTestAssert.True(pcs.Hand.Cards.Any(c => c.Type == CardType.Attack), "Exhausted Skill became an Attack");
+        AutoTestAssert.True(pcs.Hand.Cards.All(c => c.IsUpgraded || !c.IsUpgradable), "NecessarySacrifice+ upgraded generated cards");
+
+        // 5. OpposingAction: Retract (Slot 0 -> Slot 5) + Gain 2 Energy + Exhaust!
+        await ClearHandAndRefillAsync();
+        AutoTestAssert.Equal(0, HexaMechanics.GetActiveSlotIndex(player), "On Slot 0 before OpposingAction");
+        pcs.Energy = 1;
+        var opp = combatState.CreateCard<OpposingAction>(player);
+        await CardPileCmd.Add(opp, PileType.Hand);
+        await PlayCardAsync(opp);
+        AutoTestAssert.Equal(5, HexaMechanics.GetActiveSlotIndex(player), "OpposingAction retracted to Slot 5");
+        AutoTestAssert.Equal(3, pcs.Energy, "OpposingAction granted +2 Energy (1 -> 3)");
+        AutoTestAssert.True(pcs.ExhaustPile.Cards.Contains(opp), "OpposingAction exhausted");
+
+        // 6. PowerFromBeyond: OnPlay (+1 EnergyNextTurn, +2 DrawNextTurn) & Afterlife (+2 DrawNextTurn only!)
+        await ClearHandAndRefillAsync();
+        var pfb1 = combatState.CreateCard<PowerFromBeyond>(player);
+        CardCmd.Upgrade(pfb1); // +2 Energy next turn, +2 Draw next turn
+        await CardPileCmd.Add(pfb1, PileType.Hand);
+        await PlayCardAsync(pfb1);
+        AutoTestAssert.Equal(2, player.Creature.GetPowerAmount<EnergyNextTurnPower>(), "PowerFromBeyond+ granted 2 EnergyNextTurn");
+        AutoTestAssert.Equal(2, player.Creature.GetPowerAmount<DrawCardsNextTurnPower>(), "PowerFromBeyond+ granted 2 DrawCardsNextTurn");
+
+        var pfb2 = combatState.CreateCard<PowerFromBeyond>(player);
+        await CardPileCmd.Add(pfb2, PileType.Hand);
+        await CardCmd.Exhaust(ctx, pfb2, causedByEthereal: true);
+        AutoTestAssert.Equal(2, player.Creature.GetPowerAmount<EnergyNextTurnPower>(), "PowerFromBeyond Afterlife did not grant EnergyNextTurn");
+        AutoTestAssert.Equal(4, player.Creature.GetPowerAmount<DrawCardsNextTurnPower>(), "PowerFromBeyond Afterlife granted +2 DrawCardsNextTurn (2 -> 4)");
+
+        // 7. Premonition: place non-matching Attack on top of EmpoweredFlame -> choose Power -> auto-plays EmpoweredFlame past Attack!
+        await ClearHandAndRefillAsync();
+        foreach (var c in pcs.DrawPile.Cards.ToList())
+            await CardPileCmd.Add(c, PileType.Discard);
+        var drawEmp = combatState.CreateCard<EmpoweredFlame>(player);
+        var topAttack = combatState.CreateCard<HexaStrike>(player);
+        await CardPileCmd.Add(drawEmp, PileType.Draw, CardPilePosition.Top);
+        await CardPileCmd.Add(topAttack, PileType.Draw, CardPilePosition.Top);
+        var prem = combatState.CreateCard<Premonition>(player);
+        await CardPileCmd.Add(prem, PileType.Hand);
+        using (DownfallAutoTestRunner.PreferCards(c => c is HexaPremonitionPower))
+        {
+            await PlayCardAsync(prem);
+        }
+        AutoTestAssert.Equal(1, HexaMechanics.GetIntensity(player), "Premonition auto-played EmpoweredFlame past non-matching top Attack (+1 Intensity)");
+        AutoTestAssert.True(pcs.DrawPile.Cards.Contains(topAttack), "Premonition left non-matching Attack in Draw Pile");
+        AutoTestAssert.True(pcs.ExhaustPile.Cards.Contains(prem), "Unupgraded Premonition exhausted");
+
+        var premPlus = combatState.CreateCard<Premonition>(player);
+        CardCmd.Upgrade(premPlus);
+        AutoTestAssert.True(!premPlus.Keywords.Contains(CardKeyword.Exhaust), "Premonition+ removed Exhaust");
+        await PowerCmd.Remove<EnhancePower>(player.Creature);
+
+        // 8. RecurringNightmare (Nightmare Vision): Retract + Exhume Ethereal card from Exhaust Pile!
+        await ClearHandAndRefillAsync();
+        int slotBeforeRn = HexaMechanics.GetActiveSlotIndex(player);
+        var exhSear = combatState.CreateCard<Sear>(player);
+        await CardPileCmd.Add(exhSear, PileType.Exhaust);
+        var rn = combatState.CreateCard<RecurringNightmare>(player);
+        await CardPileCmd.Add(rn, PileType.Hand);
+        using (DownfallAutoTestRunner.PreferCards(c => ReferenceEquals(c, exhSear)))
+        {
+            await PlayCardAsync(rn);
+        }
+        AutoTestAssert.Equal((slotBeforeRn + 5) % 6, HexaMechanics.GetActiveSlotIndex(player), "RecurringNightmare retracted 1 slot");
+        AutoTestAssert.True(pcs.Hand.Cards.Contains(exhSear), "RecurringNightmare exhumed Ethereal Sear into Hand");
+        AutoTestAssert.True(pcs.ExhaustPile.Cards.Contains(rn), "RecurringNightmare exhausted itself");
+
+        // 9. Rewind: Retract + Fetch card from Discard Pile!
+        await ClearHandAndRefillAsync();
+        int slotBeforeRw = HexaMechanics.GetActiveSlotIndex(player);
+        var discCard = combatState.CreateCard<HexaStrike>(player);
+        await CardPileCmd.Add(discCard, PileType.Discard);
+        var rw = combatState.CreateCard<Rewind>(player);
+        await CardPileCmd.Add(rw, PileType.Hand);
+        using (DownfallAutoTestRunner.PreferCards(c => ReferenceEquals(c, discCard)))
+        {
+            await PlayCardAsync(rw);
+        }
+        AutoTestAssert.Equal((slotBeforeRw + 5) % 6, HexaMechanics.GetActiveSlotIndex(player), "Rewind retracted 1 slot");
+        AutoTestAssert.True(pcs.Hand.Cards.Contains(discCard), "Rewind fetched HexaStrike from Discard Pile");
+
+        // 10. SeventhEye: Fetch from Draw Pile + Switch to a random OTHER Ghostflame!
+        await ClearHandAndRefillAsync();
+        int slotBeforeSe = HexaMechanics.GetActiveSlotIndex(player);
+        var drawTarget = combatState.CreateCard<HexaDefend>(player);
+        await CardPileCmd.Add(drawTarget, PileType.Draw, CardPilePosition.Top);
+        var seventh = combatState.CreateCard<SeventhEye>(player);
+        await CardPileCmd.Add(seventh, PileType.Hand);
+        using (DownfallAutoTestRunner.PreferCards(c => ReferenceEquals(c, drawTarget)))
+        {
+            await PlayCardAsync(seventh);
+        }
+        AutoTestAssert.True(pcs.Hand.Cards.Contains(drawTarget), "SeventhEye fetched HexaDefend from Draw Pile");
+        AutoTestAssert.True(HexaMechanics.GetActiveSlotIndex(player) != slotBeforeSe, "SeventhEye switched to a different Ghostflame");
+
+        // 11. SoulSteal (Living Bomb): applies 4 Soulburn + LivingBombPower; detonation consumes LivingBombPower and deals AoE damage!
+        await PowerCmd.Remove<SoulburnPower>(enemy);
+        await ClearHandAndRefillAsync();
+        var livingBomb = combatState.CreateCard<SoulSteal>(player);
+        await CardPileCmd.Add(livingBomb, PileType.Hand);
+        await PlayCardAsync(livingBomb, enemy);
+        AutoTestAssert.Equal(4, enemy.GetPowerAmount<SoulburnPower>(), "SoulSteal applied 4 Soulburn");
+        AutoTestAssert.Equal(1, enemy.GetPowerAmount<LivingBombPower>(), "SoulSteal applied LivingBombPower");
+        int hpBeforeLbDet = enemy.CurrentHp;
+        await enemy.GetPower<SoulburnPower>()!.DetonateAsync(ctx, leaveOne: false);
+        AutoTestAssert.Equal(hpBeforeLbDet - 4, enemy.CurrentHp, "LivingBomb Soulburn detonation dealt 4 damage");
+        AutoTestAssert.Equal(0, enemy.GetPowerAmount<LivingBombPower>(), "LivingBombPower removed after detonation");
+
+        // 12. SpectralSpark (Naughty Spirit): returns to Hand and Retracts when active Ghostflame is Ignited; goes to Discard when unignited!
+        await ClearHandAndRefillAsync();
+        HexaCombatState.Get(combatState).ActiveSlotIndex = 2; // Slot 2 Bolstering
+        var slot2 = HexaMechanics.GetGhostflames(player)[2];
+        await HexaMechanics.IgniteAsync(ctx, player, slot2, extinguishFirstIfIgnited: true);
+        await PowerCmd.Remove<StrengthPower>(player.Creature);
+        await PowerCmd.Remove<SoulburnPower>(enemy);
+        var spark = combatState.CreateCard<SpectralSpark>(player);
+        await CardPileCmd.Add(spark, PileType.Hand);
+        await PlayCardAsync(spark, enemy);
+        AutoTestAssert.Equal(3, enemy.GetPowerAmount<SoulburnPower>(), "SpectralSpark applied 3 Soulburn");
+        AutoTestAssert.Equal(1, HexaMechanics.GetActiveSlotIndex(player), "SpectralSpark retracted from Slot 2 to Slot 1");
+        AutoTestAssert.True(pcs.Hand.Cards.Contains(spark), "SpectralSpark returned to Hand after playing on Ignited Ghostflame");
+
+        // Playing SpectralSpark again on unignited Slot 1 does NOT return to Hand and does NOT retract!
+        await PlayCardAsync(spark, enemy);
+        AutoTestAssert.Equal(6, enemy.GetPowerAmount<SoulburnPower>(), "2nd SpectralSpark applied +3 Soulburn");
+        AutoTestAssert.Equal(1, HexaMechanics.GetActiveSlotIndex(player), "SpectralSpark on unignited flame did not retract");
+        AutoTestAssert.True(pcs.DiscardPile.Cards.Contains(spark), "SpectralSpark on unignited flame went to Discard");
+
+        // 13. SpectralGrace: Discard 2 cards + Deal 13 damage!
+        await ClearHandAndRefillAsync();
+        var d1 = combatState.CreateCard<HexaStrike>(player);
+        var d2 = combatState.CreateCard<HexaDefend>(player);
+        var grace = combatState.CreateCard<SpectralGrace>(player);
+        await CardPileCmd.Add(d1, PileType.Hand);
+        await CardPileCmd.Add(d2, PileType.Hand);
+        await CardPileCmd.Add(grace, PileType.Hand);
+        int hpBeforeGrace = enemy.CurrentHp;
+        await PlayCardAsync(grace, enemy);
+        AutoTestAssert.Equal(hpBeforeGrace - 13, enemy.CurrentHp, "SpectralGrace dealt 13 damage");
+        AutoTestAssert.True(pcs.DiscardPile.Cards.Contains(d1) && pcs.DiscardPile.Cards.Contains(d2), "SpectralGrace discarded 2 cards");
+
+        // 14. StepThrough (7 dmg + draw 1 per Ignited Ghostflame) & SpectralAdrenaline (reset wheel to 0, extinguish all ignited, +1 Energy & +1 Draw per extinguished!)
+        await ClearHandAndRefillAsync();
+        for (int i = 0; i < 6; i++)
+            await CardPileCmd.Add(combatState.CreateCard<HexaStrike>(player), PileType.Draw, CardPilePosition.Top);
+        var flames = HexaMechanics.GetGhostflames(player);
+        for (int i = 0; i < 6; i++)
+            await HexaMechanics.ExtinguishAsync(ctx, player, flames[i]);
+        await HexaMechanics.IgniteAsync(ctx, player, flames[0]);
+        await HexaMechanics.IgniteAsync(ctx, player, flames[3]); // 2 ignited total!
+        HexaCombatState.Get(combatState).ActiveSlotIndex = 2; // Bolstering (needs a Power, so Attack/Skill won't ignite it)
+
+        int hpBeforeStep = enemy.CurrentHp;
+        var step = combatState.CreateCard<StepThrough>(player);
+        await CardPileCmd.Add(step, PileType.Hand);
+        await PlayCardAsync(step, enemy);
+        AutoTestAssert.Equal(hpBeforeStep - 7, enemy.CurrentHp, "StepThrough dealt 7 damage");
+        AutoTestAssert.Equal(2, pcs.Hand.Cards.Count, "StepThrough drew 2 cards for 2 Ignited Ghostflames");
+
+        await ClearHandAndRefillAsync();
+        pcs.Energy = 2;
+        var brightRitual = combatState.CreateCard<SpectralAdrenaline>(player);
+        await CardPileCmd.Add(brightRitual, PileType.Hand);
+        await PlayCardAsync(brightRitual);
+        AutoTestAssert.Equal(0, HexaMechanics.GetActiveSlotIndex(player), "SpectralAdrenaline reset Wheel to Slot 0");
+        AutoTestAssert.Equal(0, HexaMechanics.GetIgnitedCount(player), "SpectralAdrenaline extinguished all Ignited Ghostflames");
+        AutoTestAssert.Equal(2, pcs.Energy, "SpectralAdrenaline cost 2 and refunded +2 Energy for 2 Extinguished flames");
+        AutoTestAssert.Equal(2, pcs.Hand.Cards.Count, "SpectralAdrenaline drew 2 cards for 2 Extinguished flames");
+
+        // 15. TimeOfNeed: Retain, Exhaust, adds random Power costing 1 less this combat!
+        await ClearHandAndRefillAsync();
+        var ton = combatState.CreateCard<TimeOfNeed>(player);
+        AutoTestAssert.True(ton.Keywords.Contains(CardKeyword.Retain), "TimeOfNeed has Retain");
+        await CardPileCmd.Add(ton, PileType.Hand);
+        await PlayCardAsync(ton);
+        var genPower = AutoTestAssert.NotNull(pcs.Hand.Cards.FirstOrDefault(), "TimeOfNeed added a Power to Hand");
+        AutoTestAssert.Equal(CardType.Power, genPower.Type, "TimeOfNeed generated a Power card");
+        AutoTestAssert.True(
+            genPower.EnergyCost.GetWithModifiers(CostModifiers.All) == Math.Max(0, genPower.EnergyCost.Canonical - 1),
+            "TimeOfNeed reduced generated Power cost by 1 this combat");
+
+        // 16. Toasty (Flare Flick): 10 (14) dmg + Ignite active + Advance (Toasty+: ChooseMove Retract!)
+        await ClearHandAndRefillAsync();
+        await PowerCmd.Remove<SoulburnPower>(enemy);
+        HexaCombatState.Get(combatState).ActiveSlotIndex = 0; // Searing
+        int hpBeforeToasty = enemy.CurrentHp;
+        var toasty = combatState.CreateCard<Toasty>(player);
+        await CardPileCmd.Add(toasty, PileType.Hand);
+        await PlayCardAsync(toasty, enemy);
+        AutoTestAssert.Equal(hpBeforeToasty - 10, enemy.CurrentHp, "Toasty dealt 10 damage");
+        AutoTestAssert.Equal(6, enemy.GetPowerAmount<SoulburnPower>(), "Toasty ignited Searing (+6 Soulburn)");
+        AutoTestAssert.Equal(1, HexaMechanics.GetActiveSlotIndex(player), "Unupgraded Toasty advanced from Slot 0 to Slot 1");
+
+        var toastyPlus = combatState.CreateCard<Toasty>(player);
+        CardCmd.Upgrade(toastyPlus);
+        await CardPileCmd.Add(toastyPlus, PileType.Hand);
+        using (DownfallAutoTestRunner.PreferCards(c => c is HexaRetractChoice))
+        {
+            await PlayCardAsync(toastyPlus, enemy);
+        }
+        AutoTestAssert.Equal(0, HexaMechanics.GetActiveSlotIndex(player), "Toasty+ Retract moved back from Slot 1 to Slot 0");
+    }
 }

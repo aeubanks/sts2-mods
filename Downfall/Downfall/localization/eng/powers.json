@@ -490,5 +490,8 @@
   "DOWNFALL-PAST_POWER.smartDescription": "The first {Amount:plural:time|[blue]{}[/blue] times} you [gold]Advance[/gold] or [gold]Retract[/gold] each turn, draw [blue]1[/blue] card.",
   "DOWNFALL-SOULBURN_ON_EXHAUST_POWER.title": "Soulburn Infestation",
   "DOWNFALL-SOULBURN_ON_EXHAUST_POWER.description": "Whenever you [gold]Exhaust[/gold] a card this turn, apply [gold]Soulburn[/gold] to this enemy.",
-  "DOWNFALL-SOULBURN_ON_EXHAUST_POWER.smartDescription": "Whenever you [gold]Exhaust[/gold] a card this turn, apply [blue]{Amount}[/blue] [gold]Soulburn[/gold] to this enemy."
+  "DOWNFALL-SOULBURN_ON_EXHAUST_POWER.smartDescription": "Whenever you [gold]Exhaust[/gold] a card this turn, apply [blue]{Amount}[/blue] [gold]Soulburn[/gold] to this enemy.",
+  "DOWNFALL-LIVING_BOMB_POWER.title": "Living Bomb",
+  "DOWNFALL-LIVING_BOMB_POWER.description": "The next time this enemy's [gold]Soulburn[/gold] detonates, it affects ALL enemies.",
+  "DOWNFALL-LIVING_BOMB_POWER.smartDescription": "The next time this enemy's [gold]Soulburn[/gold] detonates, it affects ALL enemies."
 }

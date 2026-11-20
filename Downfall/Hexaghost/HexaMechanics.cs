@@ -400,6 +400,29 @@ public static class HexaMechanics
         RefreshGhostflameVisuals(player);
     }
 
+    public static async Task SwitchToRandomOtherGhostflameAsync(PlayerChoiceContext choiceContext, Player player)
+    {
+        if (player.Creature.CombatState is not { } combatState
+            || !player.Creature.IsAlive
+            || CombatManager.Instance.IsOverOrEnding)
+        {
+            return;
+        }
+
+        var flames = GetGhostflames(player);
+        if (flames.Count <= 1)
+            return;
+
+        int currentIdx = GetActiveSlotIndex(player);
+        var otherIndices = Enumerable.Range(0, flames.Count).Where(i => i != currentIdx).ToList();
+        int nextIdx = player.RunState.Rng.CombatCardSelection.NextItem(otherIndices);
+
+        var state = HexaCombatState.Get(combatState);
+        state.ActiveSlotIndex = nextIdx;
+        await ExtinguishAsync(choiceContext, player, flames[nextIdx]);
+        RefreshGhostflameVisuals(player);
+    }
+
     public static void ReplaceGhostflame(Player player, int slotIndex, GhostflameOrb newOrb)
     {
         if (player.PlayerCombatState is null || CombatManager.Instance.IsOverOrEnding)
