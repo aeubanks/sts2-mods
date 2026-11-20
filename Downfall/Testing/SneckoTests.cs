@@ -1273,8 +1273,8 @@ internal static class SneckoTests
         var rewardCards = addedReward.Cards.ToList();
         AutoTestAssert.Equal(3, rewardCards.Count, "DiceRollPotion CardReward contains 3 cards");
         AutoTestAssert.Equal(3, rewardCards.Select(c => c.Id).Distinct().Count(), "DiceRollPotion CardReward cards are distinct");
-        AutoTestAssert.True(rewardCards.All(c => SneckoOffclass.IsOffclass(c, player) && c.Rarity == CardRarity.Uncommon && c.IsUpgraded),
-            "DiceRollPotion CardReward cards are all Upgraded Uncommon Offclass");
+        AutoTestAssert.True(rewardCards.All(c => SneckoOffclass.IsOffclass(c, player) && c.Rarity == CardRarity.Uncommon && (c.IsUpgraded || c.MaxUpgradeLevel == 0)),
+            "DiceRollPotion CardReward cards are all Upgraded (when upgradable) Uncommon Offclass");
 
         // 7. CheatPotion (CheatPower 3 -> Overflow triggers with 1 card in hand!) + ConfusingCodex (every 3rd Overflow -> 1 Weak + 1 Vulnerable to enemy, counter wraps 0->1->2->0)!
         await ClearHandAndRefillEnergy(player, pcs);

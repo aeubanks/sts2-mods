@@ -69,5 +69,13 @@
   "DOWNFALL-CLEAN_CODE_POTION.title": "Alchyrical Elixir",
   "DOWNFALL-CLEAN_CODE_POTION.description": "Remove all [gold]Compile[/gold] [red]Error[/red] effects from the next {Functions:plural:[gold]Function[/gold]|[blue]{}[/blue] [gold]Functions[/gold]} you create; {Functions:plural:it costs|they cost} [blue]0[/blue] until played.",
   "DOWNFALL-BUILD_A_FUNCTION_POTION.title": "Kio's Clever Concoction",
-  "DOWNFALL-BUILD_A_FUNCTION_POTION.description": "Choose [blue]1[/blue] of [blue]3[/blue] random cards to [gold]Encode[/gold]; repeat until you create a [gold]Function[/gold]{Copies:plural:| and gain [blue]{}[/blue] total copies of it}."
+  "DOWNFALL-BUILD_A_FUNCTION_POTION.description": "Choose [blue]1[/blue] of [blue]3[/blue] random cards to [gold]Encode[/gold]; repeat until you create a [gold]Function[/gold]{Copies:plural:| and gain [blue]{}[/blue] total copies of it}.",
+  "DOWNFALL-MINI_CURSE_POTION.title": "Soul Extract",
+  "DOWNFALL-MINI_CURSE_POTION.description": "Apply [blue]{WeakPower}[/blue] [gold]Weak[/gold], [blue]{VulnerablePower}[/blue] [gold]Vulnerable[/gold], and [blue]{CollectorDoomPower}[/blue] [gold]Doom[/gold].",
+  "DOWNFALL-TEMP_HP_POTION.title": "Felwater",
+  "DOWNFALL-TEMP_HP_POTION.description": "Gain [blue]{TempHp}[/blue] [gold]Temp HP[/gold].",
+  "DOWNFALL-RESERVE_POTION.title": "Reserve Potion",
+  "DOWNFALL-RESERVE_POTION.description": "Gain [blue]{Reserves}[/blue] {Reserves:plural:[gold]Reserve[/gold]|[gold]Reserves[/gold]}.",
+  "DOWNFALL-DEBUFF_DOUBLE_POTION.title": "Embalming Oils",
+  "DOWNFALL-DEBUFF_DOUBLE_POTION.description": "{ExtraCopies:plural:Double the target's debuffs.|Add [blue]{}[/blue]x the target's current debuffs.}"
 }

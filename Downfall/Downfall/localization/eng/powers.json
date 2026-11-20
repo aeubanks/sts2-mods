@@ -631,5 +631,8 @@
   "DOWNFALL-OMEN_POWER.smartDescription": "Whenever you play a [gold]Collected[/gold] card, gain [blue]{Amount}[/blue] [gold]Strength[/gold].",
   "DOWNFALL-SHOOTING_STAR_POWER.title": "Shooting Star",
   "DOWNFALL-SHOOTING_STAR_POWER.description": "The first time you [gold]Pyre[/gold] an Attack each turn, add a copy of it into your [gold]Hand[/gold]. It costs [blue]0[/blue] until played.",
-  "DOWNFALL-SHOOTING_STAR_POWER.smartDescription": "The first {Amount:plural:time|[blue]{}[/blue] times} you [gold]Pyre[/gold] an Attack each turn, add a copy of it into your [gold]Hand[/gold]. It costs [blue]0[/blue] until played."
+  "DOWNFALL-SHOOTING_STAR_POWER.smartDescription": "The first {Amount:plural:time|[blue]{}[/blue] times} you [gold]Pyre[/gold] an Attack each turn, add a copy of it into your [gold]Hand[/gold]. It costs [blue]0[/blue] until played.",
+  "DOWNFALL-MORE_BLOCK_WITH_TEMP_HP_POWER.title": "Thimble Helm",
+  "DOWNFALL-MORE_BLOCK_WITH_TEMP_HP_POWER.description": "While you have [gold]Temp HP[/gold], cards grant additional [gold]Block[/gold].",
+  "DOWNFALL-MORE_BLOCK_WITH_TEMP_HP_POWER.smartDescription": "While you have [gold]Temp HP[/gold], cards grant [blue]{Amount}[/blue] additional [gold]Block[/gold]."
 }

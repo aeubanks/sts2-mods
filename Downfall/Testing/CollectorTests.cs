@@ -1158,4 +1158,139 @@ internal static class CollectorTests
         var returnedCoffin = AutoTestAssert.NotNull(pcs.Hand.Cards.OfType<CoffinNail>().FirstOrDefault(), "CoffinNail returned to Hand next turn via AddCopyNextTurnPower");
         AutoTestAssert.Equal(12m, returnedCoffin.DynamicVars.Damage.BaseValue, "Returned CoffinNail has 6 + 6 = 12 base damage");
     }
+
+    public static async Task TestRelicsAndPotionsInCombat()
+    {
+        var (player, _, combatState) = await DownfallAutoTestRunner.StartCombatAsync<TheCollector>("COLLECTOR_10E");
+        var pcs = AutoTestAssert.NotNull(player.PlayerCombatState, "PlayerCombatState");
+        var enemy = AutoTestAssert.NotNull(combatState.HittableEnemies.FirstOrDefault(), "Enemy");
+        var ctx = new BlockingPlayerChoiceContext();
+
+        await CreatureCmd.SetMaxAndCurrentHp(enemy, 1000m);
+
+        static async Task ClearHandAsync(PlayerCombatState p)
+        {
+            foreach (var c in p.Hand.Cards.ToList())
+                await CardPileCmd.Add(c, PileType.Discard);
+        }
+
+        // 1. Verify CollectorRelicPool composition: EmeraldTorch + PrismaticTorch (Starter) + 11 Pool Relics (0 Boss relics!)
+        var collectorRelics = ModelDb.RelicPool<CollectorRelicPool>().AllRelics.ToList();
+        AutoTestAssert.Equal(13, collectorRelics.Count, "CollectorRelicPool has 2 Starter + 11 Pool = 13 relics");
+        AutoTestAssert.True(collectorRelics.All(r => r.Rarity != MegaCrit.Sts2.Core.Entities.Relics.RelicRarity.Ancient && r.Rarity != MegaCrit.Sts2.Core.Entities.Relics.RelicRarity.None),
+            "CollectorRelicPool contains no non-upgrade Boss/invalid relics");
+
+        // 2. Pickup relics: SoullitLamp (+3 Essence), TheContract (+10 Essence), ForbiddenFruit (+Injury + 10 Max HP), BottledCollectible!
+        var runData = CollectorRunState.GetOrCreate(player);
+        int essence0 = runData.Essence;
+        await RelicCmd.Obtain<SoullitLamp>(player);
+        AutoTestAssert.Equal(essence0 + 3, runData.Essence, "SoullitLamp granted +3 Essence on pickup");
+
+        await RelicCmd.Obtain<TheContract>(player);
+        AutoTestAssert.Equal(essence0 + 13, runData.Essence, "TheContract granted +10 Essence on pickup");
+
+        int maxHp0 = player.Creature.MaxHp;
+        await RelicCmd.Obtain<ForbiddenFruit>(player);
+        AutoTestAssert.Equal(maxHp0 + 10, player.Creature.MaxHp, "ForbiddenFruit granted +10 Max HP");
+        AutoTestAssert.True(player.Deck.Cards.Any(c => c is MegaCrit.Sts2.Core.Models.Cards.Injury), "ForbiddenFruit added Injury Curse to Deck");
+
+        // Add 2 collectibles to run Collection and test BottledCollectible picking index 1 (SentryCard -> Upgraded & Bottled!)
+        runData.AddToCollection(player, combatState.CreateCard<JawWormCard>(player));
+        runData.AddToCollection(player, combatState.CreateCard<SentryCard>(player));
+        using (DownfallAutoTestRunner.PreferCards(c => c is SentryCard))
+        {
+            await RelicCmd.Obtain<BottledCollectible>(player);
+        }
+        AutoTestAssert.Equal(1, runData.BottledCollectionIndex, "BottledCollectible bottled SentryCard at index 1");
+        AutoTestAssert.Equal(1, runData.Collection[1].UpgradeLevel, "BottledCollectible upgraded SentryCard");
+
+        // 3. Turn-1 start relics (verify directly on Round 1 via Obtain + invoking AfterPlayerTurnStart):
+        //    AutoCurser (1 Weak + 1 Vuln), Bagpipes (+1 to Weak/Vuln applied -> 2 Weak + 2 Vuln!), BagOfTricks (draw 2 Collected),
+        //    SoullitLamp (Ember), ThimbleHelm (3 Temp HP + MoreBlockWithTempHPPower(1)), ForbiddenFruit (1 Dexterity)!
+        await ClearHandAsync(pcs);
+        CollectorMechanics.InitializeCombatCollection(combatState, player);
+        await RelicCmd.Obtain<Bagpipes>(player);
+        await RelicCmd.Obtain<AutoCurser>(player);
+        await RelicCmd.Obtain<BagOfTricks>(player);
+        await RelicCmd.Obtain<ThimbleHelm>(player);
+
+        // Fire Turn 1 start hooks on the newly obtained relics while combatState.RoundNumber == 1!
+        foreach (var relic in player.Relics.Where(r => r is AutoCurser or BagOfTricks or SoullitLamp or ThimbleHelm or ForbiddenFruit).ToList())
+            await relic.AfterPlayerTurnStart(ctx, player);
+
+        AutoTestAssert.Equal(2, enemy.GetPowerAmount<WeakPower>(), "AutoCurser + Bagpipes applied 1 + 1 = 2 Weak");
+        AutoTestAssert.Equal(2, enemy.GetPowerAmount<VulnerablePower>(), "AutoCurser + Bagpipes applied 1 + 1 = 2 Vulnerable");
+        AutoTestAssert.True(pcs.Hand.Cards.Any(c => c is Ember), "SoullitLamp added Ember to Hand on Turn 1");
+        AutoTestAssert.True(pcs.Hand.Cards.Any(c => c is SentryCard { IsUpgraded: true }), "BagOfTricks drew bottled SentryCard+");
+        AutoTestAssert.True(pcs.Hand.Cards.Any(c => c is JawWormCard), "BagOfTricks drew 2nd Collected card (JawWormCard)");
+        AutoTestAssert.Equal(3, player.Creature.GetPowerAmount<Downfall.Core.DownfallTempHpPower>(), "ThimbleHelm granted 3 Temp HP");
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<MoreBlockWithTempHPPower>(), "ThimbleHelm applied MoreBlockWithTempHPPower(1)");
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<DexterityPower>(), "ForbiddenFruit granted 1 Dexterity");
+
+        // Test MoreBlockWithTempHPPower: CollectorDefend (5 base + 1 Dex + 1 ThimbleHelm = 7 Block!)
+        await CreatureCmd.LoseBlock(ctx, player.Creature, player.Creature.Block, null);
+        var defendWithTemp = combatState.CreateCard<CollectorDefend>(player);
+        await CardPileCmd.Add(defendWithTemp, PileType.Hand);
+        await CardCmd.AutoPlay(ctx, defendWithTemp, null, AutoPlayType.Default);
+        AutoTestAssert.Equal(7, player.Creature.Block, "CollectorDefend gained 5 + 1 (Dex) + 1 (ThimbleHelm w/ Temp HP) = 7 Block");
+
+        // 4. HolidayCoal (empty Collection draw -> LuckyWick!) & JadeRing (+6 Doom damage!)
+        await RelicCmd.Obtain<HolidayCoal>(player);
+        await RelicCmd.Obtain<JadeRing>(player);
+        var cData = CollectorCombatState.Get(combatState).GetPlayer(player);
+        cData.CombatCollection.Clear();
+        await ClearHandAsync(pcs);
+        var coalCard = await CollectorMechanics.DrawFromCollectionAsync(ctx, player);
+        AutoTestAssert.True(coalCard is LuckyWick && pcs.Hand.Cards.Contains(coalCard), "HolidayCoal generated LuckyWick when drawing from empty Collected pile");
+
+        // 5. All 4 Collector Potions: MiniCursePotion (Soul Extract), TempHPPotion (Felwater), ReservePotion, DebuffDoublePotion (Embalming Oils)!
+        await PowerCmd.Remove<WeakPower>(enemy);
+        await PowerCmd.Remove<VulnerablePower>(enemy);
+        await PowerCmd.Remove<CollectorDoomPower>(enemy);
+
+        var miniCursePot = ModelDb.Potion<Downfall.Collector.Potions.MiniCursePotion>().ToMutable();
+        await PotionCmd.TryToProcure(miniCursePot, player);
+        await miniCursePot.OnUseWrapper(ctx, enemy);
+        // With Bagpipes (+1 to Weak/Vuln): 2 Weak, 2 Vulnerable, 6 Doom!
+        AutoTestAssert.Equal(2, enemy.GetPowerAmount<WeakPower>(), "MiniCursePotion (+ Bagpipes) applied 2 Weak");
+        AutoTestAssert.Equal(2, enemy.GetPowerAmount<VulnerablePower>(), "MiniCursePotion (+ Bagpipes) applied 2 Vulnerable");
+        AutoTestAssert.Equal(6, enemy.GetPowerAmount<CollectorDoomPower>(), "MiniCursePotion applied 6 Doom");
+
+        // Also apply -2 Strength (a negative-stack Debuff) to confirm DebuffDoublePotion doubles negative debuffs too (-2 -> -4)!
+        await PowerCmd.Apply<StrengthPower>(ctx, enemy, -2m, player.Creature, null);
+
+        var doublePot = ModelDb.Potion<Downfall.Collector.Potions.DebuffDoublePotion>().ToMutable();
+        await PotionCmd.TryToProcure(doublePot, player);
+        await doublePot.OnUseWrapper(ctx, enemy);
+        AutoTestAssert.Equal(4, enemy.GetPowerAmount<WeakPower>(), "DebuffDoublePotion doubled Weak 2 -> 4");
+        AutoTestAssert.Equal(4, enemy.GetPowerAmount<VulnerablePower>(), "DebuffDoublePotion doubled Vulnerable 2 -> 4");
+        AutoTestAssert.Equal(12, enemy.GetPowerAmount<CollectorDoomPower>(), "DebuffDoublePotion doubled Doom 6 -> 12");
+        AutoTestAssert.Equal(-4, enemy.GetPowerAmount<StrengthPower>(), "DebuffDoublePotion doubled negative Strength -2 -> -4");
+
+        int tempBeforePot = player.Creature.GetPowerAmount<Downfall.Core.DownfallTempHpPower>();
+        var tempPot = ModelDb.Potion<Downfall.Collector.Potions.TempHPPotion>().ToMutable();
+        await PotionCmd.TryToProcure(tempPot, player);
+        await tempPot.OnUseWrapper(ctx, null);
+        AutoTestAssert.Equal(tempBeforePot + 8, player.Creature.GetPowerAmount<Downfall.Core.DownfallTempHpPower>(), "TempHPPotion granted 8 Temp HP");
+
+        int resBeforePot = CollectorMechanics.GetReserves(player);
+        var resPot = ModelDb.Potion<Downfall.Collector.Potions.ReservePotion>().ToMutable();
+        await PotionCmd.TryToProcure(resPot, player);
+        await resPot.OnUseWrapper(ctx, null);
+        AutoTestAssert.Equal(resBeforePot + 2, CollectorMechanics.GetReserves(player), "ReservePotion granted 2 Reserves");
+
+        // 6. FuelCanister (Retain lowest-cost card in Hand across turn end) + JadeRing (+6 Doom damage: 12 + 6 = 18 HP loss!)
+        await RelicCmd.Obtain<FuelCanister>(player);
+        await ClearHandAsync(pcs);
+        var lowCostCard = combatState.CreateCard<Misdirect>(player); // 0 cost
+        var highCostCard = combatState.CreateCard<Billow>(player);   // 3 cost
+        await CardPileCmd.Add(lowCostCard, PileType.Hand);
+        await CardPileCmd.Add(highCostCard, PileType.Hand);
+
+        int enemyHpBeforeJadeDoom = enemy.CurrentHp;
+        await DownfallAutoTestRunner.EndTurnAndWaitForRoundAsync(player, combatState.RoundNumber + 1);
+        AutoTestAssert.Equal(enemyHpBeforeJadeDoom - 18, enemy.CurrentHp, "JadeRing added +6 damage to 12 Doom (18 HP loss)");
+        AutoTestAssert.True(pcs.Hand.Cards.Contains(lowCostCard), "FuelCanister retained lowest-cost card (0-cost Misdirect) across turn end");
+        AutoTestAssert.True(!pcs.Hand.Cards.Contains(highCostCard), "FuelCanister did NOT retain 3-cost Billow");
+    }
 }
