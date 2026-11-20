@@ -216,6 +216,8 @@ internal static class DownfallAutoTestRunner
                 ("GuardianUncommonBatch2InCombat", GuardianTests.TestUncommonBatch2InCombat),
                 ("GuardianRareCardsInCombat", GuardianTests.TestRareCardsInCombat),
                 ("GuardianRelicsAndPotionsInCombat", GuardianTests.TestRelicsAndPotionsInCombat),
+                ("HexaVisualsRuntime", HexaghostTests.TestVisualsRuntime),
+                ("HexaStarterGhostflamesAndAfterlife", HexaghostTests.TestStarterGhostflamesAndAfterlife),
             ];
 
             int matchedIndex = 0;
@@ -745,6 +747,31 @@ internal static class DownfallAutoTestRunner
         AutoTestAssert.True(new LocString("rest_site_ui", "OPTION_DOWNFALL_SOCKET_GEM.selectTargetPrompt").Exists(), "Missing SocketGem selectTargetPrompt loc");
         AutoTestAssert.True(ResourceLoader.Exists("res://images/ui/rest_site/option_downfall_socket_gem.png"), "Missing SocketGem rest site icon");
         AutoTestAssert.True(ResourceLoader.Exists(Guardian.GuardianMechanics.DefensiveSpritePath), "Missing Guardian defensive sprite");
+        foreach (var flameOrb in new[]
+        {
+            "searing_ghostflame_orb",
+            "crushing_ghostflame_orb",
+            "bolstering_ghostflame_orb",
+            "inferno_ghostflame_orb"
+        })
+        {
+            AutoTestAssert.True(
+                ResourceLoader.Exists($"res://Downfall/images/hexaghost/orbs/{flameOrb}_bright.png"),
+                $"Missing Hexaghost bright orb texture: {flameOrb}_bright.png");
+        }
+        foreach (var hexaTipKey in new[]
+        {
+            "DOWNFALL-HEXA_AFTERLIFE",
+            "DOWNFALL-HEXA_GHOSTFLAME",
+            "DOWNFALL-HEXA_IGNITE",
+            "DOWNFALL-HEXA_ADVANCE",
+            "DOWNFALL-HEXA_RETRACT",
+            "DOWNFALL-HEXA_EXTINGUISH"
+        })
+        {
+            AutoTestAssert.True(new LocString("gameplay_ui", $"{hexaTipKey}.title").Exists(), $"Missing {hexaTipKey}.title");
+            AutoTestAssert.True(new LocString("gameplay_ui", $"{hexaTipKey}.description").Exists(), $"Missing {hexaTipKey}.description");
+        }
 
         return Task.CompletedTask;
     }

@@ -54,5 +54,17 @@
   "DOWNFALL-VOLATILE_KEYWORD.title": "Volatile",
   "DOWNFALL-VOLATILE_KEYWORD.description": "When released from [gold]Stasis[/gold], this card is [gold]Exhausted[/gold] instead of returning to your [gold]Hand[/gold].",
   "DOWNFALL-GEM_KEYWORD.title": "Gem",
-  "DOWNFALL-GEM_KEYWORD.description": "Can be socketed into open card sockets at Rest Sites to permanently add its effect to that card."
+  "DOWNFALL-GEM_KEYWORD.description": "Can be socketed into open card sockets at Rest Sites to permanently add its effect to that card.",
+  "DOWNFALL-HEXA_AFTERLIFE.title": "Afterlife",
+  "DOWNFALL-HEXA_AFTERLIFE.description": "Triggers its [gold]Afterlife[/gold] effect whenever this card is [gold]Exhausted[/gold].",
+  "DOWNFALL-HEXA_GHOSTFLAME.title": "Ghostflame",
+  "DOWNFALL-HEXA_GHOSTFLAME.description": "The [gold]Active[/gold] Ghostflame can be [gold]Ignited[/gold] by meeting its Ignition requirement. At the end of your turn, if it is [gold]Ignited[/gold], [gold]Advance[/gold] to the next Ghostflame.",
+  "DOWNFALL-HEXA_IGNITE.title": "Ignite",
+  "DOWNFALL-HEXA_IGNITE.description": "Triggers the Ignition effect of a Ghostflame.",
+  "DOWNFALL-HEXA_ADVANCE.title": "Advance",
+  "DOWNFALL-HEXA_ADVANCE.description": "Move to the next Ghostflame and [gold]Extinguish[/gold] it.",
+  "DOWNFALL-HEXA_RETRACT.title": "Retract",
+  "DOWNFALL-HEXA_RETRACT.description": "Move to the previous Ghostflame and [gold]Extinguish[/gold] it.",
+  "DOWNFALL-HEXA_EXTINGUISH.title": "Extinguish",
+  "DOWNFALL-HEXA_EXTINGUISH.description": "Resets a Ghostflame so it can be [gold]Ignited[/gold] again."
 }

@@ -20,6 +20,22 @@ public abstract class DownfallOrb : CustomOrbModel
     public virtual bool ShowSecondaryLabel => false;
 
     /// <summary>
+    /// Live texture path rendered by the orb's Sprite2D. Defaults to CustomIconPath;
+    /// dynamic orbs (such as Ghostflames) can override this to swap dim/ignited textures in-place.
+    /// </summary>
+    public virtual string SpriteTexturePath => CustomIconPath;
+
+    /// <summary>
+    /// Text shown in the primary (passive) counter label during normal display.
+    /// </summary>
+    public virtual string PrimaryLabelText => PassiveVal.ToString("0");
+
+    /// <summary>
+    /// Text shown in the secondary (evoke) counter label when ShowSecondaryLabel is true.
+    /// </summary>
+    public virtual string SecondaryLabelText => EvokeVal.ToString("0");
+
+    /// <summary>
     /// Text shown in the Evoke label when hovering a card that evokes this orb.
     /// </summary>
     public virtual string EvokePreviewText => EvokeVal.ToString("0");
@@ -29,9 +45,14 @@ public abstract class DownfallOrb : CustomOrbModel
     /// </summary>
     public virtual Color SpriteTint => Colors.White;
 
+    /// <summary>
+    /// Scale applied to the orb sprite once spawned (e.g. slightly enlarged active Ghostflame).
+    /// </summary>
+    public virtual Vector2 SpriteScale => Vector2.One;
+
     public override Node2D CreateCustomSprite()
     {
-        var tex = PreloadManager.Cache.GetCompressedTexture2D(CustomIconPath);
+        var tex = PreloadManager.Cache.GetCompressedTexture2D(SpriteTexturePath);
         return new Sprite2D
         {
             Texture = tex,

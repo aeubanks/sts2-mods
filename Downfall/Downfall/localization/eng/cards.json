@@ -1181,5 +1181,21 @@
   "DOWNFALL-PACKAGE_DEFECT.title": "Package: Defect",
   "DOWNFALL-PACKAGE_DEFECT.description": "Add a [gold]Reroute{IfUpgraded:show:+|}[/gold], [gold]Preprogram{IfUpgraded:show:+|}[/gold], and [gold]Time Capacitor{IfUpgraded:show:+|}[/gold] to your [gold]Hand[/gold].",
   "DOWNFALL-GEMSTONE_GUN_CARD.title": "Gemstone Gun",
-  "DOWNFALL-GEMSTONE_GUN_CARD.description": "Trigger all socketed [gold]Gems[/gold].{SocketText}"
+  "DOWNFALL-GEMSTONE_GUN_CARD.description": "Trigger all socketed [gold]Gems[/gold].{SocketText}",
+  "DOWNFALL-HEXA_STRIKE.title": "Strike",
+  "DOWNFALL-HEXA_STRIKE.description": "Deal {Damage:diff()} damage.",
+  "DOWNFALL-HEXA_DEFEND.title": "Defend",
+  "DOWNFALL-HEXA_DEFEND.description": "Gain {Block:diff()} [gold]Block[/gold].",
+  "DOWNFALL-SEAR.title": "Sear",
+  "DOWNFALL-SEAR.description": "[gold]Afterlife[/gold]. Deal {Damage:diff()} damage.\nApply {Soulburn:diff()} [gold]Soulburn[/gold].\n[gold]Afterlife[/gold]: Apply {Soulburn:diff()} [gold]Soulburn[/gold] to a random enemy.",
+  "DOWNFALL-FLOAT.title": "Float",
+  "DOWNFALL-FLOAT.description": "Draw [blue]1[/blue] card.\n{IfUpgraded:show:You may choose to [gold]Retract[/gold] or [gold]Advance[/gold].|[gold]Advance[/gold].}",
+  "DOWNFALL-SKIP_A_BEAT.title": "Kindle",
+  "DOWNFALL-SKIP_A_BEAT.description": "{IfUpgraded:show:[gold]Extinguish[/gold] and [gold]Ignite[/gold] the active Ghostflame.|If the active Ghostflame is not [gold]Ignited[/gold], [gold]Ignite[/gold] it.}",
+  "DOWNFALL-HEXA_ADVANCE_CHOICE.title": "Advance",
+  "DOWNFALL-HEXA_ADVANCE_CHOICE.description": "[gold]Advance[/gold] to the next Ghostflame.",
+  "DOWNFALL-HEXA_RETRACT_CHOICE.title": "Retract",
+  "DOWNFALL-HEXA_RETRACT_CHOICE.description": "[gold]Retract[/gold] to the previous Ghostflame.",
+  "DOWNFALL-HEXA_STAY_CHOICE.title": "Stay",
+  "DOWNFALL-HEXA_STAY_CHOICE.description": "Remain on the current Ghostflame."
 }

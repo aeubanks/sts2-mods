@@ -13,6 +13,22 @@ using MegaCrit.Sts2.Core.ValueProps;
 namespace Downfall.Core;
 
 /// <summary>
+/// Implemented by powers on a Soulburned creature (e.g. Living Bomb) that make Soulburn detonation hit ALL enemies.
+/// </summary>
+public interface ISoulburnAoeModifier
+{
+    Task OnSoulburnAoeDetonatedAsync(PlayerChoiceContext choiceContext, Creature primaryTarget);
+}
+
+/// <summary>
+/// Implemented by powers on the player/applier (e.g. Extra Crispy) that react whenever Soulburn detonates.
+/// </summary>
+public interface ISoulburnDetonatedListener
+{
+    Task OnSoulburnDetonatedAsync(PlayerChoiceContext choiceContext, Creature target, int damage);
+}
+
+/// <summary>
 /// Shared Downfall Soulburn debuff (Hexaghost &amp; Slime Boss's Ghostflame Slime).
 /// Starts with a 3-turn countdown; at the start of the owner's turn when countdown == 1,
 /// detonates for unblockable HP loss equal to Amount and removes itself.
@@ -79,23 +95,72 @@ public sealed class SoulburnPower : DownfallPower, IHasSecondAmount
         }
     }
 
-    public async Task DetonateAsync(PlayerChoiceContext choiceContext)
+    public async Task DetonateAsync(PlayerChoiceContext choiceContext, bool leaveOne = false)
     {
-        if (!Owner.IsAlive || CombatManager.Instance.IsOverOrEnding || Amount <= 0)
+        int damage = leaveOne ? Amount - 1 : Amount;
+        if (!Owner.IsAlive || CombatManager.Instance.IsOverOrEnding || damage <= 0)
             return;
 
-        int damage = Amount;
+        var target = Owner;
+        var dealer = Applier ?? Owner;
+        var combatState = target.CombatState;
         Flash();
-        await PowerCmd.Remove(this);
 
-        if (damage > 0 && Owner.IsAlive && !CombatManager.Instance.IsOverOrEnding)
+        if (leaveOne)
         {
-            await CreatureCmd.Damage(
-                choiceContext,
-                Owner,
-                damage,
-                ValueProp.Unblockable | ValueProp.Unpowered,
-                Applier ?? Owner);
+            await PowerCmd.ModifyAmount(choiceContext, this, 1 - Amount, dealer, null);
+        }
+        else
+        {
+            await PowerCmd.Remove(this);
+        }
+
+        if (damage > 0 && !CombatManager.Instance.IsOverOrEnding)
+        {
+            var aoeModifiers = target.Powers.OfType<ISoulburnAoeModifier>().ToList();
+            if (aoeModifiers.Count > 0 && combatState is not null)
+            {
+                var enemies = combatState.GetTeammatesOf(target).Where(c => c.IsAlive).ToList();
+                if (enemies.Count > 0)
+                {
+                    await CreatureCmd.Damage(
+                        choiceContext,
+                        enemies,
+                        (decimal)damage,
+                        ValueProp.Unblockable | ValueProp.Unpowered,
+                        dealer);
+                }
+
+                foreach (var mod in aoeModifiers)
+                {
+                    if (!CombatManager.Instance.IsOverOrEnding)
+                        await mod.OnSoulburnAoeDetonatedAsync(choiceContext, target);
+                }
+            }
+            else if (target.IsAlive)
+            {
+                await CreatureCmd.Damage(
+                    choiceContext,
+                    target,
+                    damage,
+                    ValueProp.Unblockable | ValueProp.Unpowered,
+                    dealer);
+            }
+        }
+
+        if (combatState is not null && !CombatManager.Instance.IsOverOrEnding)
+        {
+            var listeners = combatState.Allies
+                .Where(c => c.IsAlive)
+                .SelectMany(c => c.Powers)
+                .OfType<ISoulburnDetonatedListener>()
+                .ToList();
+
+            foreach (var listener in listeners)
+            {
+                if (!CombatManager.Instance.IsOverOrEnding)
+                    await listener.OnSoulburnDetonatedAsync(choiceContext, target, damage);
+            }
         }
     }
 }

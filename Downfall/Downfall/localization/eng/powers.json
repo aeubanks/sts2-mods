@@ -475,5 +475,11 @@
   "DOWNFALL-GUARDIAN_STUNNED_POWER.smartDescription": "Skip your next {Amount:plural:turn|[blue]{}[/blue] turns}.",
   "DOWNFALL-BLOCK_ON_CARD_USE_POWER.title": "Armorer's Tincture",
   "DOWNFALL-BLOCK_ON_CARD_USE_POWER.description": "Whenever you play a card this turn, gain [gold]Block[/gold].",
-  "DOWNFALL-BLOCK_ON_CARD_USE_POWER.smartDescription": "Whenever you play a card this turn, gain [blue]{Amount}[/blue] [gold]Block[/gold]."
+  "DOWNFALL-BLOCK_ON_CARD_USE_POWER.smartDescription": "Whenever you play a card this turn, gain [blue]{Amount}[/blue] [gold]Block[/gold].",
+  "DOWNFALL-ENHANCE_POWER.title": "Intensity",
+  "DOWNFALL-ENHANCE_POWER.description": "Modifies the damage, [gold]Soulburn[/gold], and [gold]Block[/gold] applied by Ghostflames when [gold]Ignited[/gold].",
+  "DOWNFALL-ENHANCE_POWER.smartDescription": "Modifies the damage, [gold]Soulburn[/gold], and [gold]Block[/gold] applied by Ghostflames when [gold]Ignited[/gold] by [blue]{Amount}[/blue].",
+  "DOWNFALL-FLAME_AFFECT_ALL_ENEMIES_POWER.title": "Hexaburn",
+  "DOWNFALL-FLAME_AFFECT_ALL_ENEMIES_POWER.description": "Your Ghostflame effects affect ALL enemies.",
+  "DOWNFALL-FLAME_AFFECT_ALL_ENEMIES_POWER.smartDescription": "Your Ghostflame effects affect ALL enemies and trigger [blue]{Amount}[/blue] {Amount:plural:time|times}."
 }

@@ -103,5 +103,20 @@
   "DOWNFALL-THE_GUARDIAN.goldMonologue": "Metallic currency acquired.",
   "DOWNFALL-THE_GUARDIAN.banter": "INITIATING DEFENSIVE PROTOCOLS.",
   "DOWNFALL-THE_GUARDIAN.bestiaryQuote": "The ancient bronze sentinel of the Exordium.",
-  "DOWNFALL-THE_GUARDIAN.aromaPrinciple": "Hot bronze and crystalline ozone."
+  "DOWNFALL-THE_GUARDIAN.aromaPrinciple": "Hot bronze and crystalline ozone.",
+  "DOWNFALL-THE_HEXAGHOST.title": "The Hexaghost",
+  "DOWNFALL-THE_HEXAGHOST.titleObject": "the Hexaghost",
+  "DOWNFALL-THE_HEXAGHOST.shortTitle": "Hexaghost",
+  "DOWNFALL-THE_HEXAGHOST.description": "An accursed spirit of the Spire sealed to an eternal fate as a protector.\nChannels six Ghostflames, inflicts Soulburn, and unleashes Afterlife effects upon Exhaust.",
+  "DOWNFALL-THE_HEXAGHOST.pronounObject": "it",
+  "DOWNFALL-THE_HEXAGHOST.possessiveAdjective": "its",
+  "DOWNFALL-THE_HEXAGHOST.pronounPossessive": "its",
+  "DOWNFALL-THE_HEXAGHOST.pronounSubject": "it",
+  "DOWNFALL-THE_HEXAGHOST.cardsModifierTitle": "Hexaghost's Cards",
+  "DOWNFALL-THE_HEXAGHOST.cardsModifierDescription": "Hexaghost cards can now appear in rewards and shops.",
+  "DOWNFALL-THE_HEXAGHOST.eventDeathPrevention": "THE FLAMES WILL NOT FADE...",
+  "DOWNFALL-THE_HEXAGHOST.goldMonologue": "Cold gold... warms no spirit.",
+  "DOWNFALL-THE_HEXAGHOST.banter": "THE SIX FLAMES AWAKEN.",
+  "DOWNFALL-THE_HEXAGHOST.bestiaryQuote": "A spectral sentinel wreathed in six eternal Ghostflames.",
+  "DOWNFALL-THE_HEXAGHOST.aromaPrinciple": "Brimstone, cold ash, and spectral embers."
 }

@@ -269,5 +269,12 @@
   "SEA_GLASS.DOWNFALL-THE_CHAMP.title": "Sea Glass (Champ)",
   "SEA_GLASS.DOWNFALL-THE_SNECKO.title": "Sea Glass (Snecko)",
   "SEA_GLASS.DOWNFALL-THE_SLIME_BOSS.title": "Sea Glass (Slime Boss)",
-  "SEA_GLASS.DOWNFALL-THE_GUARDIAN.title": "Sea Glass (Guardian)"
+  "SEA_GLASS.DOWNFALL-THE_GUARDIAN.title": "Sea Glass (Guardian)",
+  "SEA_GLASS.DOWNFALL-THE_HEXAGHOST.title": "Sea Glass (Hexaghost)",
+  "DOWNFALL-SPIRIT_BRAND.title": "Spirit Brand",
+  "DOWNFALL-SPIRIT_BRAND.description": "The first time you [gold]Ignite[/gold] a Ghostflame each turn, gain [blue]4[/blue] [gold]Block[/gold].",
+  "DOWNFALL-SPIRIT_BRAND.flavor": "A bound protector.",
+  "DOWNFALL-UNBROKEN_SOUL.title": "Mark of the Ether",
+  "DOWNFALL-UNBROKEN_SOUL.description": "Replaces [gold]Spirit Brand[/gold].\nWhenever you [gold]Ignite[/gold] a Ghostflame, gain [blue]4[/blue] [gold]Block[/gold].",
+  "DOWNFALL-UNBROKEN_SOUL.flavor": "Let's see if we can do... better."
 }

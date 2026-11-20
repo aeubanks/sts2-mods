@@ -1,0 +1,20 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Texture2D" path="res://Downfall/images/hexaghost/char/hexaghost.png" id="1_hexaghost"]
+
+[node name="HexaghostVisuals" type="Node2D"]
+
+[node name="Visuals" type="Sprite2D" parent="."]
+unique_name_in_owner = true
+position = Vector2(0, -186)
+texture = ExtResource("1_hexaghost")
+
+[node name="Bounds" type="Control" parent="."]
+unique_name_in_owner = true
+layout_mode = 3
+anchors_preset = 0
+mouse_filter = 2
+offset_left = -120.0
+offset_top = -240.0
+offset_right = 120.0
+offset_bottom = 0.0

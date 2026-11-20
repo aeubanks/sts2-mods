@@ -2,6 +2,7 @@ using System.Reflection;
 using Godot;
 using HarmonyLib;
 using MegaCrit.Sts2.addons.mega_text;
+using MegaCrit.Sts2.Core.Assets;
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Nodes.Orbs;
@@ -51,7 +52,7 @@ internal static class DownfallOrbPatch
             var curTween = (Tween?)CurTweenField.GetValue(__instance);
             curTween?.Kill();
             var tween = __instance.CreateTween();
-            tween.TweenProperty(sprite, "scale", Vector2.One, 0.35)
+            tween.TweenProperty(sprite, "scale", orb.SpriteScale, 0.35)
                 .From(Vector2.Zero)
                 .SetTrans(Tween.TransitionType.Back)
                 .SetEase(Tween.EaseType.Out);
@@ -65,7 +66,18 @@ internal static class DownfallOrbPatch
         if (!isLocal)
             __instance.Modulate = orb.DarkenedColor;
         if (sprite is not null)
+        {
             sprite.Modulate = orb.SpriteTint;
+            if (sprite is Sprite2D sprite2D)
+            {
+                var desiredTex = PreloadManager.Cache.GetCompressedTexture2D(orb.SpriteTexturePath);
+                if (sprite2D.Texture != desiredTex)
+                    sprite2D.Texture = desiredTex;
+            }
+            var curTween = (Tween?)CurTweenField.GetValue(__instance);
+            if (curTween is null || !curTween.IsRunning())
+                sprite.Scale = orb.SpriteScale;
+        }
 
         if (passiveLabel is not null && evokeLabel is not null)
         {
@@ -79,14 +91,14 @@ internal static class DownfallOrbPatch
             {
                 passiveLabel.Visible = true;
                 evokeLabel.Visible = true;
-                passiveLabel.SetTextAutoSize(orb.PassiveVal.ToString("0"));
-                evokeLabel.SetTextAutoSize(orb.EvokeVal.ToString("0"));
+                passiveLabel.SetTextAutoSize(orb.PrimaryLabelText);
+                evokeLabel.SetTextAutoSize(orb.SecondaryLabelText);
             }
             else
             {
                 passiveLabel.Visible = true;
                 evokeLabel.Visible = false;
-                passiveLabel.SetTextAutoSize(orb.PassiveVal.ToString("0"));
+                passiveLabel.SetTextAutoSize(orb.PrimaryLabelText);
             }
         }
 
