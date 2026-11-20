@@ -43,11 +43,21 @@ public sealed class CounterPower : ChampPower
         }
 
         int counterAmount = Amount;
+        int riposteCount = 1;
         Flash();
         await PowerCmd.Remove(this);
 
-        if (Owner.IsAlive && !CombatManager.Instance.IsOverOrEnding)
+        if (Owner.GetPower<ParryPower>() is { } parry)
         {
+            riposteCount += parry.Amount;
+            await parry.ConsumeAsync();
+        }
+
+        for (int i = 0; i < riposteCount; i++)
+        {
+            if (!Owner.IsAlive || CombatManager.Instance.IsOverOrEnding)
+                break;
+
             var riposte = combatState.CreateCard<Riposte>(player);
             riposte.DynamicVars.Damage.BaseValue = counterAmount;
             await CardPileCmd.AddGeneratedCardToCombat(riposte, PileType.Hand, player);

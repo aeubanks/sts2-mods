@@ -250,5 +250,14 @@
   "DOWNFALL-DOUBLE_STYLE_POWER.smartDescription": "[gold]Skill Bonuses[/gold] grant [blue]{Amount}[/blue] more [gold]Vigor[/gold] and [gold]Counter[/gold].",
   "DOWNFALL-FOCUSED_BER_POWER.title": "Fancy Footwork",
   "DOWNFALL-FOCUSED_BER_POWER.description": "The next time you play a [gold]Finisher[/gold] this turn, deal damage to ALL enemies.",
-  "DOWNFALL-FOCUSED_BER_POWER.smartDescription": "The next time you play a [gold]Finisher[/gold] this turn, deal [blue]{Amount}[/blue] damage to ALL enemies."
+  "DOWNFALL-FOCUSED_BER_POWER.smartDescription": "The next time you play a [gold]Finisher[/gold] this turn, deal [blue]{Amount}[/blue] damage to ALL enemies.",
+  "DOWNFALL-IRON_FORTRESS_POWER.title": "Technical Jig",
+  "DOWNFALL-IRON_FORTRESS_POWER.description": "Whenever you enter a [gold]Stance[/gold], gain [gold]Block[/gold].",
+  "DOWNFALL-IRON_FORTRESS_POWER.smartDescription": "Whenever you enter a [gold]Stance[/gold], gain [blue]{Amount}[/blue] [gold]Block[/gold].",
+  "DOWNFALL-PARRY_POWER.title": "Parrying",
+  "DOWNFALL-PARRY_POWER.description": "If [gold]Counter[/gold] triggers this turn, add an extra [gold]Riposte Strike[/gold] to your [gold]Hand[/gold].",
+  "DOWNFALL-PARRY_POWER.smartDescription": "If [gold]Counter[/gold] triggers this turn, add [blue]{Amount}[/blue] extra {Amount:plural:[gold]Riposte Strike[/gold]|[gold]Riposte Strikes[/gold]} to your [gold]Hand[/gold].",
+  "DOWNFALL-SHIELD_WALL_BLOCK_POWER.title": "Iron Fortress",
+  "DOWNFALL-SHIELD_WALL_BLOCK_POWER.description": "At the end of your turn, gain [gold]Block[/gold].",
+  "DOWNFALL-SHIELD_WALL_BLOCK_POWER.smartDescription": "At the end of your turn, gain [blue]{Amount}[/blue] [gold]Block[/gold]."
 }

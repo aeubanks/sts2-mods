@@ -866,4 +866,260 @@ internal static class ChampTests
         AutoTestAssert.Equal(4, pcs.Energy, "Turn 2 started with 3 + 1 = 4 Energy from FalseCounter");
         AutoTestAssert.Equal(7, pcs.Hand.Cards.Count, "Turn 2 started with 5 + 2 = 7 cards drawn from FalseCounter");
     }
+
+    public static async Task TestUncommonBatch2InCombat()
+    {
+        var (player, _, combatState) = await DownfallAutoTestRunner.StartCombatAsync<TheChamp>("DFCHP04");
+        var pcs = AutoTestAssert.NotNull(player.PlayerCombatState, "PlayerCombatState");
+        var enemy = AutoTestAssert.NotNull(combatState.HittableEnemies.FirstOrDefault(), "First enemy");
+        var ctx = new ThrowingPlayerChoiceContext();
+
+        foreach (var e in combatState.HittableEnemies.ToList())
+            await CreatureCmd.GainMaxHp(e, 2500m);
+
+        async Task ResetCombatState(int energy = 10)
+        {
+            foreach (var c in pcs.Hand.Cards.ToList())
+                await CardPileCmd.Add(c, PileType.Discard);
+            if (pcs.Energy > energy)
+                await PlayerCmd.LoseEnergy(pcs.Energy - energy, player);
+            else if (pcs.Energy < energy)
+                await PlayerCmd.GainEnergy(energy - pcs.Energy, player);
+            if (player.Creature.Block > 0)
+                await CreatureCmd.LoseBlock(ctx, player.Creature, player.Creature.Block, null);
+            foreach (var p in player.Creature.Powers.ToList())
+                await PowerCmd.Remove(p);
+            foreach (var e in combatState.HittableEnemies.ToList())
+            {
+                foreach (var ep in e.Powers.ToList())
+                    await PowerCmd.Remove(ep);
+            }
+        }
+
+        // 1. GutPunch: Neutral -> 8 dmg + stays Neutral; In Stance -> 8 dmg + Ultimate Stance + UltimateFormPower(1) + Exhaust!
+        await ResetCombatState();
+        int hp = enemy.CurrentHp;
+        var gutNeutral = combatState.CreateCard<GutPunch>(player);
+        await CardPileCmd.Add(gutNeutral, PileType.Hand);
+        AutoTestAssert.True(gutNeutral.TryManualPlay(enemy), "Play GutPunch in Neutral");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(hp - 8, enemy.CurrentHp, "GutPunch dealt 8 damage");
+        AutoTestAssert.Equal(ChampStanceKind.None, ChampStances.GetCurrentStance(player.Creature), "GutPunch Neutral did not enter Ultimate");
+        AutoTestAssert.Equal(PileType.Exhaust, gutNeutral.Pile?.Type, "GutPunch exhausted");
+
+        await ChampStances.EnterStanceAsync(player, ChampStanceKind.Berserker, ctx);
+        var gutStance = combatState.CreateCard<GutPunch>(player);
+        await CardPileCmd.Add(gutStance, PileType.Hand);
+        AutoTestAssert.True(gutStance.TryManualPlay(enemy), "Play GutPunch in Berserker");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(ChampStanceKind.Ultimate, ChampStances.GetCurrentStance(player.Creature), "GutPunch Combo entered Ultimate Stance");
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<UltimateFormPower>(), "GutPunch Combo applied UltimateFormPower(1)");
+
+        // 2. IronFortress (Technical Jig) -> IronFortressPower(3): entering a new Stance grants 3 Block; exiting/same-stance grants 0!
+        await ResetCombatState();
+        var jig = combatState.CreateCard<IronFortress>(player);
+        await CardPileCmd.Add(jig, PileType.Hand);
+        AutoTestAssert.True(jig.TryManualPlay(null), "Play IronFortress (Technical Jig)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(3, player.Creature.GetPowerAmount<IronFortressPower>(), "IronFortressPower(3) applied");
+
+        await ChampStances.EnterStanceAsync(player, ChampStanceKind.Berserker, ctx);
+        AutoTestAssert.Equal(3, player.Creature.Block, "IronFortressPower granted 3 Block on entering Berserker");
+        await ChampStances.EnterStanceAsync(player, ChampStanceKind.Berserker, ctx);
+        AutoTestAssert.Equal(3, player.Creature.Block, "IronFortressPower did not trigger on same Stance");
+        await ChampStances.ExitStanceAsync(player, ctx);
+        AutoTestAssert.Equal(3, player.Creature.Block, "IronFortressPower did not trigger on exiting to Neutral");
+
+        // 3. Lariat (X-cost): at 3 Energy in Berserker -> 5*3 = 15 Block + 3 Skill Bonuses (+6 Vigor) + 1 Skill charge (+2 Vigor) = 8 Vigor!
+        await ResetCombatState(energy: 3);
+        await ChampStances.EnterStanceAsync(player, ChampStanceKind.Berserker, ctx);
+        var lariat = combatState.CreateCard<Lariat>(player);
+        await CardPileCmd.Add(lariat, PileType.Hand);
+        AutoTestAssert.True(lariat.TryManualPlay(null), "Play Lariat at X=3 in Berserker");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(0, pcs.Energy, "Lariat spent all 3 Energy");
+        AutoTestAssert.Equal(15, player.Creature.Block, "Lariat gained 5 * 3 = 15 Block");
+        AutoTestAssert.Equal(8, player.Creature.GetPowerAmount<VigorPower>(), "Lariat triggered Berserker Skill Bonus 3 times (+6) plus 1 charge (+2) = 8 Vigor");
+
+        // 4. Parry + ParryPower: 8 Block + 4 Counter + ParryPower(1) -> attacked adds 2 Ripostes (each 4 dmg) & consumes ParryPower!
+        await ResetCombatState();
+        var parry = combatState.CreateCard<Parry>(player);
+        await CardPileCmd.Add(parry, PileType.Hand);
+        AutoTestAssert.True(parry.TryManualPlay(null), "Play Parry");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(8, player.Creature.Block, "Parry gained 8 Block");
+        AutoTestAssert.Equal(4, player.Creature.GetPowerAmount<CounterPower>(), "Parry gained 4 Counter");
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<Downfall.Champ.Powers.ParryPower>(), "Parry applied ParryPower(1)");
+
+        await CreatureCmd.Damage(ctx, player.Creature, 5m, ValueProp.Move, enemy, null, null);
+        AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<CounterPower>(), "CounterPower consumed");
+        AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<Downfall.Champ.Powers.ParryPower>(), "ParryPower consumed");
+        var ripostes = pcs.Hand.Cards.OfType<Riposte>().ToList();
+        AutoTestAssert.Equal(2, ripostes.Count, "ParryPower doubled Riposte Strike generation (2 Ripostes)");
+        AutoTestAssert.True(ripostes.All(r => r.DynamicVars.Damage.BaseValue == 4m), "Both Ripostes deal 4 base damage");
+
+        // 5. PreemptiveStrike: deals Counter damage AOE; loses half Counter outside Defensive, keeps all Counter inside Defensive!
+        await ResetCombatState();
+        await PowerCmd.Apply<CounterPower>(ctx, player.Creature, 10m, player.Creature, null);
+        hp = enemy.CurrentHp;
+        var preemptNeutral = combatState.CreateCard<PreemptiveStrike>(player);
+        await CardPileCmd.Add(preemptNeutral, PileType.Hand);
+        AutoTestAssert.True(preemptNeutral.TryManualPlay(null), "Play PreemptiveStrike outside Defensive");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(hp - 10, enemy.CurrentHp, "PreemptiveStrike dealt 10 Counter damage");
+        AutoTestAssert.Equal(5, player.Creature.GetPowerAmount<CounterPower>(), "PreemptiveStrike halved Counter outside Defensive (10 -> 5)");
+
+        await ChampStances.EnterStanceAsync(player, ChampStanceKind.Defensive, ctx);
+        hp = enemy.CurrentHp;
+        var preemptDef = combatState.CreateCard<PreemptiveStrike>(player);
+        await CardPileCmd.Add(preemptDef, PileType.Hand);
+        AutoTestAssert.True(preemptDef.TryManualPlay(null), "Play PreemptiveStrike inside Defensive");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(hp - 5, enemy.CurrentHp, "PreemptiveStrike dealt 5 Counter damage");
+        AutoTestAssert.Equal(5, player.Creature.GetPowerAmount<CounterPower>(), "PreemptiveStrike Defensive Combo kept all 5 Counter");
+
+        // 6. RageSigil (Battle Plan): enters Defensive, 2 Block, Scry 2!
+        await ResetCombatState();
+        for (int i = 0; i < 3; i++)
+            await CardPileCmd.Add(combatState.CreateCard<ChampStrike>(player), PileType.Draw);
+        var battlePlan = combatState.CreateCard<RageSigil>(player);
+        await CardPileCmd.Add(battlePlan, PileType.Hand);
+        AutoTestAssert.True(battlePlan.TryManualPlay(null), "Play RageSigil (Battle Plan)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(ChampStanceKind.Defensive, ChampStances.GetCurrentStance(player.Creature), "RageSigil entered Defensive");
+        AutoTestAssert.Equal(2, player.Creature.Block, "RageSigil gained 2 Block");
+
+        // 7. RecklessLeap (Reckless Strike): enters Berserker, 6 dmg, +1 Strength; base Exhausts, Upgraded Discards!
+        await ResetCombatState();
+        hp = enemy.CurrentHp;
+        var recklessBase = combatState.CreateCard<RecklessLeap>(player);
+        await CardPileCmd.Add(recklessBase, PileType.Hand);
+        AutoTestAssert.True(recklessBase.TryManualPlay(enemy), "Play base RecklessLeap");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(ChampStanceKind.Berserker, ChampStances.GetCurrentStance(player.Creature), "RecklessLeap entered Berserker");
+        AutoTestAssert.Equal(hp - 6, enemy.CurrentHp, "RecklessLeap dealt 6 damage");
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<StrengthPower>(), "RecklessLeap granted +1 Strength");
+        AutoTestAssert.Equal(PileType.Exhaust, recklessBase.Pile?.Type, "Base RecklessLeap exhausted");
+
+        var recklessPlus = combatState.CreateCard<RecklessLeap>(player);
+        CardCmd.Upgrade(recklessPlus);
+        await CardPileCmd.Add(recklessPlus, PileType.Hand);
+        AutoTestAssert.True(recklessPlus.TryManualPlay(enemy), "Play upgraded RecklessLeap+");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(PileType.Discard, recklessPlus.Pile?.Type, "Upgraded RecklessLeap+ went to Discard instead of Exhaust");
+
+        // 8. SetATrap: 8 Block + Defensive Combo Weak to ALL enemies.
+        await ResetCombatState();
+        await ChampStances.EnterStanceAsync(player, ChampStanceKind.Defensive, ctx);
+        var trap = combatState.CreateCard<SetATrap>(player);
+        await CardPileCmd.Add(trap, PileType.Hand);
+        AutoTestAssert.True(trap.TryManualPlay(null), "Play SetATrap in Defensive");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(8, player.Creature.Block, "SetATrap gained 8 Block");
+        foreach (var e in combatState.HittableEnemies)
+            AutoTestAssert.Equal(1, e.GetPowerAmount<WeakPower>(), "SetATrap Defensive Combo applied 1 Weak to all enemies");
+
+        // 9. Shatter: 14 dmg + Any Stance Combo applies 1 Weak & 1 Vulnerable.
+        await ResetCombatState();
+        await ChampStances.EnterStanceAsync(player, ChampStanceKind.Berserker, ctx);
+        hp = enemy.CurrentHp;
+        var shatter = combatState.CreateCard<Shatter>(player);
+        await CardPileCmd.Add(shatter, PileType.Hand);
+        AutoTestAssert.True(shatter.TryManualPlay(enemy), "Play Shatter in Berserker");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(hp - 14, enemy.CurrentHp, "Shatter dealt 14 damage");
+        AutoTestAssert.Equal(1, enemy.GetPowerAmount<WeakPower>(), "Shatter Combo applied 1 Weak");
+        AutoTestAssert.Equal(1, enemy.GetPowerAmount<VulnerablePower>(), "Shatter Combo applied 1 Vulnerable");
+
+        // 10. ShieldSlam (Moment of Truth): Retain + Finisher -> draws 1 card + triggers Finisher Bonus + exits Stance!
+        await ResetCombatState();
+        await ChampStances.EnterStanceAsync(player, ChampStanceKind.Berserker, ctx);
+        await CardPileCmd.Add(combatState.CreateCard<ChampStrike>(player), PileType.Draw);
+        var truth = combatState.CreateCard<ShieldSlam>(player);
+        AutoTestAssert.True(truth.Keywords.Contains(CardKeyword.Retain), "ShieldSlam has Retain");
+        await CardPileCmd.Add(truth, PileType.Hand);
+        AutoTestAssert.True(truth.TryManualPlay(null), "Play ShieldSlam in Berserker");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(1, pcs.Hand.Cards.Count, "ShieldSlam drew 1 card");
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<StrengthPower>(), "ShieldSlam triggered Berserker Finisher (+1 Strength)");
+        AutoTestAssert.Equal(ChampStanceKind.None, ChampStances.GetCurrentStance(player.Creature), "ShieldSlam exited Stance");
+
+        // 11. SkillfulDodge: Defensive Combo permanently scales its Block & Counter by +3 this combat!
+        await ResetCombatState();
+        await ChampStances.EnterStanceAsync(player, ChampStanceKind.Defensive, ctx);
+        var dodge = combatState.CreateCard<SkillfulDodge>(player);
+        await CardPileCmd.Add(dodge, PileType.Hand);
+        AutoTestAssert.True(dodge.TryManualPlay(null), "Play SkillfulDodge #1 in Defensive");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(4, player.Creature.Block, "SkillfulDodge #1 gained 4 Block");
+        AutoTestAssert.Equal(7, player.Creature.GetPowerAmount<CounterPower>(), "SkillfulDodge #1 gained 4 + 3 (Skill Bonus) = 7 Counter");
+        AutoTestAssert.Equal(7m, dodge.DynamicVars.Block.BaseValue, "SkillfulDodge Block scaled to 7");
+        AutoTestAssert.Equal(7m, dodge.DynamicVars[nameof(CounterPower)].BaseValue, "SkillfulDodge Counter scaled to 7");
+
+        await CreatureCmd.LoseBlock(ctx, player.Creature, player.Creature.Block, null);
+        await CardPileCmd.Add(dodge, PileType.Hand);
+        AutoTestAssert.True(dodge.TryManualPlay(null), "Play SkillfulDodge #2 in Defensive");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(7, player.Creature.Block, "SkillfulDodge #2 gained 7 Block");
+
+        // 12. SwordSigil (Sigil of Victory) & ViciousMockery: trigger Skill Bonus!
+        await ResetCombatState();
+        await ChampStances.EnterStanceAsync(player, ChampStanceKind.Berserker, ctx);
+        var swordSigil = combatState.CreateCard<SwordSigil>(player);
+        await CardPileCmd.Add(swordSigil, PileType.Hand);
+        AutoTestAssert.True(swordSigil.TryManualPlay(null), "Play SwordSigil in Berserker");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        // 1 charge (+2 Vigor) + 3 triggers (+6 Vigor) = 8 Vigor!
+        AutoTestAssert.Equal(8, player.Creature.GetPowerAmount<VigorPower>(), "SwordSigil triggered Berserker Skill Bonus 3 times (+6) + 1 charge (+2) = 8 Vigor");
+
+        var mockery = combatState.CreateCard<ViciousMockery>(player);
+        await CardPileCmd.Add(mockery, PileType.Hand);
+        AutoTestAssert.True(mockery.TryManualPlay(enemy), "Play ViciousMockery in Berserker");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        // +3 own Vigor + 1 charge (+2) + 1 explicit Skill Bonus (+2) = +7 Vigor -> 15 total!
+        AutoTestAssert.Equal(15, player.Creature.GetPowerAmount<VigorPower>(), "ViciousMockery granted +3 Vigor + 1 charge (+2) + 1 Skill Bonus (+2) = 15 Vigor");
+        AutoTestAssert.Equal(1, enemy.GetPowerAmount<WeakPower>(), "ViciousMockery applied 1 Weak");
+
+        // 13. WindUp: chooses Stance AND fetches a Finisher from Draw Pile to Hand! Base Exhausts, Upgraded Discards!
+        await ResetCombatState();
+        var fetchedFinisher = combatState.CreateCard<Execute>(player);
+        await CardPileCmd.Add(fetchedFinisher, PileType.Draw);
+        var windUpBase = combatState.CreateCard<WindUp>(player);
+        await CardPileCmd.Add(windUpBase, PileType.Hand);
+        using (DownfallAutoTestRunner.PreferCards(c => c is ChooseDefensiveStance || ReferenceEquals(c, fetchedFinisher)))
+        {
+            AutoTestAssert.True(windUpBase.TryManualPlay(null), "Play WindUp");
+            await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        }
+        AutoTestAssert.Equal(ChampStanceKind.Defensive, ChampStances.GetCurrentStance(player.Creature), "WindUp entered Defensive Stance");
+        AutoTestAssert.True(pcs.Hand.Cards.Contains(fetchedFinisher), "WindUp fetched Execute from Draw Pile into Hand");
+        AutoTestAssert.Equal(PileType.Exhaust, windUpBase.Pile?.Type, "Base WindUp exhausted");
+
+        var windUpPlus = combatState.CreateCard<WindUp>(player);
+        CardCmd.Upgrade(windUpPlus);
+        await CardPileCmd.Add(windUpPlus, PileType.Hand);
+        using (DownfallAutoTestRunner.PreferCards(c => c is ChooseBerserkerStance))
+        {
+            AutoTestAssert.True(windUpPlus.TryManualPlay(null), "Play upgraded WindUp+");
+            await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        }
+        AutoTestAssert.Equal(PileType.Discard, windUpPlus.Pile?.Type, "Upgraded WindUp+ went to Discard instead of Exhaust");
+
+        // 14. ShieldWall (Iron Fortress) -> Dexterity(2) + ShieldWallBlockPower(3) (non-decaying!) + unused ParryPower expiry!
+        await ResetCombatState();
+        var wall = combatState.CreateCard<ShieldWall>(player);
+        await CardPileCmd.Add(wall, PileType.Hand);
+        AutoTestAssert.True(wall.TryManualPlay(null), "Play ShieldWall (Iron Fortress)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(2, player.Creature.GetPowerAmount<DexterityPower>(), "ShieldWall granted +2 Dexterity");
+        AutoTestAssert.Equal(3, player.Creature.GetPowerAmount<ShieldWallBlockPower>(), "ShieldWall applied ShieldWallBlockPower(3)");
+
+        await PowerCmd.Apply<Downfall.Champ.Powers.ParryPower>(ctx, player.Creature, 1m, player.Creature, null);
+        // Take unblocked damage before ending turn to prove ShieldWallBlockPower never decays like PlatingPower!
+        await CreatureCmd.Damage(ctx, player.Creature, 1m, ValueProp.Unpowered, enemy, null, null);
+        await CreatureCmd.GainBlock(player.Creature, 80m, ValueProp.Unpowered, null);
+        await DownfallAutoTestRunner.EndTurnAndWaitForRoundAsync(player, 2);
+        AutoTestAssert.Equal(3, player.Creature.GetPowerAmount<ShieldWallBlockPower>(), "ShieldWallBlockPower did NOT decay across turns or damage");
+        AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<Downfall.Champ.Powers.ParryPower>(), "Unused ParryPower expired at end of round");
+    }
 }

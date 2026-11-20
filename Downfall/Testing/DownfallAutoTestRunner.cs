@@ -154,6 +154,7 @@ internal static class DownfallAutoTestRunner
                 ("ChampStarterCombat", ChampTests.TestStarterCombat),
                 ("ChampCommonCardsInCombat", ChampTests.TestCommonCardsInCombat),
                 ("ChampUncommonBatch1InCombat", ChampTests.TestUncommonBatch1InCombat),
+                ("ChampUncommonBatch2InCombat", ChampTests.TestUncommonBatch2InCombat),
             ];
 
             foreach (var (name, run) in tests)
@@ -558,6 +559,7 @@ internal static class DownfallAutoTestRunner
         AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-COMBO_KEYWORD.title").Exists(), "Missing Combo title loc");
         AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-COMBO_KEYWORD.description").Exists(), "Missing Combo desc loc");
         AutoTestAssert.True(new LocString("cards", "DOWNFALL-CHAMP_HEADBUTT.selectionScreenPrompt").Exists(), "Missing ChampHeadbutt selectionScreenPrompt loc");
+        AutoTestAssert.True(new LocString("cards", "DOWNFALL-WIND_UP.selectionScreenPrompt").Exists(), "Missing WindUp selectionScreenPrompt loc");
 
         return Task.CompletedTask;
     }
