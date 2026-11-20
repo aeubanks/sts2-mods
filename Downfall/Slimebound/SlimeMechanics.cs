@@ -131,8 +131,9 @@ internal static class SlimeMechanics
             return 0;
 
         int exhumed = 0;
+        int limit = Math.Min(count, pcs.ExhaustPile.Cards.Count);
         var rng = player.RunState.Rng.CombatCardGeneration;
-        for (int i = 0; i < count; i++)
+        for (int i = 0; i < limit; i++)
         {
             if (!player.Creature.IsAlive || CombatManager.Instance.IsOverOrEnding)
                 break;
@@ -162,13 +163,15 @@ internal static class SlimeMechanics
         int count = 1,
         bool applyMinionMaster = true)
     {
-        if (count <= 0 || !player.Creature.IsAlive || CombatManager.Instance.IsOverOrEnding)
+        if (count < 0 || !player.Creature.IsAlive || CombatManager.Instance.IsOverOrEnding)
             return;
 
         int extra = applyMinionMaster
             ? player.Creature.Powers.OfType<IMinionMasterProvider>().Sum(p => p.ExtraCommands)
             : 0;
         int total = count + extra;
+        if (total <= 0)
+            return;
 
         for (int i = 0; i < total; i++)
         {

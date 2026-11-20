@@ -193,6 +193,7 @@ internal static class DownfallAutoTestRunner
                 ("SlimeboundCommonCardsInCombat", SlimeboundTests.TestCommonCardsInCombat),
                 ("SlimeboundUncommonBatch1InCombat", SlimeboundTests.TestUncommonBatch1AndSpecialistsInCombat),
                 ("SlimeboundUncommonBatch2InCombat", SlimeboundTests.TestUncommonBatch2InCombat),
+                ("SlimeboundRareCardsInCombat", SlimeboundTests.TestRareCardsInCombat),
             ];
 
             int matchedIndex = 0;

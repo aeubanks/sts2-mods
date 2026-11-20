@@ -955,6 +955,302 @@ internal static class SlimeboundTests
         AutoTestAssert.Equal(7, pcs.Hand.Cards.Count, "Round 2 started with 5 + 2 = 7 cards from Prepare");
     }
 
+    internal static async Task TestRareCardsInCombat()
+    {
+        var (player, _, combatState) = await DownfallAutoTestRunner.StartCombatAsync<TheSlimeBoss>("SLIME_RARE");
+        var pcs = AutoTestAssert.NotNull(player.PlayerCombatState, "PlayerCombatState");
+        var enemy1 = AutoTestAssert.NotNull(combatState.HittableEnemies.FirstOrDefault(), "Enemy 1");
+        var enemy2 = await CreatureCmd.Add<MegaCrit.Sts2.Core.Models.Monsters.Nibbit>(combatState);
+        var ctx = new ThrowingPlayerChoiceContext();
+        await CreatureCmd.GainMaxHp(enemy1, 1000m);
+        await CreatureCmd.GainMaxHp(enemy2, 1000m);
+
+        // 1. CheckThePlaybook: adds 3 random Tackles costing 1 less this combat, Exhausts.
+        await ClearHandAndRefillEnergy(player, pcs);
+        var playbook = combatState.CreateCard<CheckThePlaybook>(player);
+        await CardPileCmd.Add(playbook, PileType.Hand);
+        AutoTestAssert.True(playbook.TryManualPlay(null), "Play CheckThePlaybook");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        var generatedTackles = pcs.Hand.Cards.OfType<SlimeCard>().Where(c => c.IsTackle).ToList();
+        AutoTestAssert.Equal(3, generatedTackles.Count, "CheckThePlaybook added 3 random Tackle cards");
+        foreach (var t in generatedTackles)
+        {
+            AutoTestAssert.Equal(
+                Math.Max(0, t.EnergyCost.Canonical - 1),
+                t.EnergyCost.GetWithModifiers(CostModifiers.All),
+                $"CheckThePlaybook reduced {t.Id} cost by 1");
+        }
+        AutoTestAssert.True(pcs.ExhaustPile.Cards.Contains(playbook), "CheckThePlaybook exhausted");
+
+        // 2. DouseInSlime (14 Goop + PreventSlimeDecay(1)) + SlimeSlap (DontRemoveOnce keeps Goop AND preserves PreventSlimeDecay!)
+        //    + Strike 1 (consumes PreventSlimeDecay, keeps Goop!) + Strike 2 (consumes & removes Goop!).
+        await ClearHandAndRefillEnergy(player, pcs);
+        var douse = combatState.CreateCard<DouseInSlime>(player);
+        var slap = combatState.CreateCard<SlimeSlap>(player);
+        var strike1 = combatState.CreateCard<SlimeboundStrike>(player);
+        var strike2 = combatState.CreateCard<SlimeboundStrike>(player);
+        await CardPileCmd.Add(douse, PileType.Hand);
+        await CardPileCmd.Add(slap, PileType.Hand);
+        await CardPileCmd.Add(strike1, PileType.Hand);
+        await CardPileCmd.Add(strike2, PileType.Hand);
+
+        AutoTestAssert.True(douse.TryManualPlay(enemy1), "Play DouseInSlime");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(14, enemy1.GetPowerAmount<SlimedPower>(), "DouseInSlime applied 14 Goop");
+        AutoTestAssert.Equal(1, enemy1.GetPowerAmount<PreventSlimeDecayPower>(), "DouseInSlime applied PreventSlimeDecayPower(1)");
+
+        int e1Hp = enemy1.CurrentHp;
+        AutoTestAssert.True(slap.TryManualPlay(enemy1), "Play SlimeSlap (8 + 14 = 22 dmg, keeps Goop & PreventSlimeDecay)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(e1Hp - 22, enemy1.CurrentHp, "SlimeSlap gained 14 Goop bonus (22 dmg)");
+        AutoTestAssert.Equal(14, enemy1.GetPowerAmount<SlimedPower>(), "SlimeSlap did NOT remove Goop");
+        AutoTestAssert.Equal(1, enemy1.GetPowerAmount<PreventSlimeDecayPower>(), "SlimeSlap did NOT consume PreventSlimeDecayPower");
+
+        e1Hp = enemy1.CurrentHp;
+        AutoTestAssert.True(strike1.TryManualPlay(enemy1), "Play Strike 1 (6 + 14 = 20 dmg, consumes PreventSlimeDecay, keeps Goop)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(e1Hp - 20, enemy1.CurrentHp, "Strike 1 dealt 20 damage");
+        AutoTestAssert.Equal(14, enemy1.GetPowerAmount<SlimedPower>(), "PreventSlimeDecay kept Goop after Strike 1");
+        AutoTestAssert.Equal(0, enemy1.GetPowerAmount<PreventSlimeDecayPower>(), "PreventSlimeDecay decremented to 0");
+
+        e1Hp = enemy1.CurrentHp;
+        AutoTestAssert.True(strike2.TryManualPlay(enemy1), "Play Strike 2 (6 + 14 = 20 dmg, removes Goop)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(e1Hp - 20, enemy1.CurrentHp, "Strike 2 dealt 20 damage");
+        AutoTestAssert.Equal(0, enemy1.GetPowerAmount<SlimedPower>(), "Goop removed after Strike 2");
+
+        // 3. DuplicatedForm+: doubles 1st enemy-targeting card each turn (ignores Self-targeting card!) + DuplicatedFormEnergyPower(1).
+        await ClearHandAndRefillEnergy(player, pcs);
+        var dupForm = combatState.CreateCard<DuplicatedForm>(player);
+        CardCmd.Upgrade(dupForm);
+        var selfDef = combatState.CreateCard<SlimeboundDefend>(player);
+        var dupStrike = combatState.CreateCard<SlimeboundStrike>(player);
+        await CardPileCmd.Add(dupForm, PileType.Hand);
+        await CardPileCmd.Add(selfDef, PileType.Hand);
+        await CardPileCmd.Add(dupStrike, PileType.Hand);
+
+        AutoTestAssert.True(dupForm.TryManualPlay(null), "Play DuplicatedForm+");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(1, player.Creature.GetPower<DuplicatedFormPower>()!.RemainingThisTurn, "DuplicatedFormPower starts with 1 charge");
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<DuplicatedFormEnergyPower>(), "DuplicatedForm+ applied DuplicatedFormEnergyPower(1)");
+
+        AutoTestAssert.True(selfDef.TryManualPlay(null), "Play Self-targeting Defend");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(1, player.Creature.GetPower<DuplicatedFormPower>()!.RemainingThisTurn, "Self-targeting card did NOT consume DuplicatedFormPower");
+
+        e1Hp = enemy1.CurrentHp;
+        AutoTestAssert.True(dupStrike.TryManualPlay(enemy1), "Play Strike doubled by DuplicatedForm (2x6 = 12 dmg)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(e1Hp - 12, enemy1.CurrentHp, "DuplicatedForm doubled Strike to 12 damage");
+        AutoTestAssert.Equal(0, player.Creature.GetPower<DuplicatedFormPower>()!.RemainingThisTurn, "DuplicatedFormPower decremented to 0");
+
+        // 4. FirmFortitude (Liquidate: +2 Potency, -2 Strength) + FormOfPuddle (Intangible 1, Ethereal + Exhaust) + LeechLife (heal unblocked dmg) + MassFeed (Fatal +2 Max HP).
+        await ClearHandAndRefillEnergy(player, pcs);
+        var liquidate = combatState.CreateCard<FirmFortitude>(player);
+        var puddle = combatState.CreateCard<FormOfPuddle>(player);
+        await CardPileCmd.Add(liquidate, PileType.Hand);
+        await CardPileCmd.Add(puddle, PileType.Hand);
+        AutoTestAssert.True(liquidate.TryManualPlay(null), "Play FirmFortitude");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(2, player.Creature.GetPowerAmount<PotencyPower>(), "FirmFortitude granted +2 Potency");
+        AutoTestAssert.Equal(-2, player.Creature.GetPowerAmount<StrengthPower>(), "FirmFortitude reduced Strength by 2");
+        await PowerCmd.Remove<StrengthPower>(player.Creature);
+        await PowerCmd.Remove<PotencyPower>(player.Creature);
+
+        AutoTestAssert.True(puddle.TryManualPlay(null), "Play FormOfPuddle");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<IntangiblePower>(), "FormOfPuddle granted 1 Intangible");
+        AutoTestAssert.True(pcs.ExhaustPile.Cards.Contains(puddle), "FormOfPuddle exhausted");
+        await PowerCmd.Remove<IntangiblePower>(player.Creature);
+
+        await CreatureCmd.Damage(ctx, player.Creature, 20m, ValueProp.Unblockable | ValueProp.Unpowered, player.Creature);
+        int hpBefore = player.Creature.CurrentHp;
+        var leechLife = combatState.CreateCard<LeechLife>(player);
+        await CardPileCmd.Add(leechLife, PileType.Hand);
+        AutoTestAssert.True(leechLife.TryManualPlay(enemy1), "Play LeechLife (8 unblocked dmg -> heal 8 HP)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(hpBefore + 8, player.Creature.CurrentHp, "LeechLife healed 8 HP equal to unblocked damage");
+        AutoTestAssert.True(pcs.ExhaustPile.Cards.Contains(leechLife), "LeechLife exhausted");
+
+        var fodder1 = await CreatureCmd.Add<MegaCrit.Sts2.Core.Models.Monsters.Nibbit>(combatState);
+        var fodder2 = await CreatureCmd.Add<MegaCrit.Sts2.Core.Models.Monsters.Nibbit>(combatState);
+        await CreatureCmd.Damage(ctx, fodder1, fodder1.CurrentHp - 5, ValueProp.Unblockable | ValueProp.Unpowered, player.Creature);
+        await CreatureCmd.Damage(ctx, fodder2, fodder2.CurrentHp - 5, ValueProp.Unblockable | ValueProp.Unpowered, player.Creature);
+        int maxHpBefore = player.Creature.MaxHp;
+        var massFeed = combatState.CreateCard<MassFeed>(player);
+        await CardPileCmd.Add(massFeed, PileType.Hand);
+        AutoTestAssert.True(massFeed.TryManualPlay(null), "Play MassFeed killing 2 5-HP fodders for +4 Max HP");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.True(fodder1.IsDead && fodder2.IsDead, "MassFeed killed both fodder enemies");
+        AutoTestAssert.Equal(maxHpBefore + 4, player.Creature.MaxHp, "MassFeed Fatal raised Max HP by 2x2 = 4");
+        AutoTestAssert.True(pcs.ExhaustPile.Cards.Contains(massFeed), "MassFeed exhausted");
+
+        // 5. MinionMaster (+1 extra Command) + OneTwoCombo (4 dmg + 2 Commands; returns from Discard on Split!) + SlimeboundTagTeam+ + MassRepurpose+ + Teamwork (X-cost) + RallyTheTroops!
+        await ClearHandAndRefillEnergy(player, pcs);
+        await SlimeMechanics.AbsorbAllSlimesAsync(ctx, player);
+        await PowerCmd.Remove<StrengthPower>(player.Creature);
+        await SlimeMechanics.SplitSlimeAsync<PoisonSlime>(ctx, player);
+
+        var mm = combatState.CreateCard<MinionMaster>(player);
+        var otc = combatState.CreateCard<OneTwoCombo>(player);
+        await CardPileCmd.Add(mm, PileType.Hand);
+        await CardPileCmd.Add(otc, PileType.Hand);
+        AutoTestAssert.True(mm.TryManualPlay(null), "Play MinionMaster");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<BuffSecondarySlimeEffectsPower>(), "MinionMaster applied BuffSecondarySlimeEffectsPower(1)");
+
+        int e2Hp = enemy2.CurrentHp;
+        AutoTestAssert.True(otc.TryManualPlay(enemy1), "Play OneTwoCombo with MinionMaster (commands PoisonSlime 1+1 = 2 times -> 6 AoE)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(e2Hp - 6, enemy2.CurrentHp, "OneTwoCombo + MinionMaster dealt 6 AoE to enemy2");
+        AutoTestAssert.True(pcs.DiscardPile.Cards.Contains(otc), "OneTwoCombo went to Discard Pile");
+
+        // Split triggers OneTwoCombo return from Discard -> Hand!
+        await SlimeMechanics.SplitSlimeAsync<ShieldSlime>(ctx, player);
+        AutoTestAssert.True(pcs.Hand.Cards.Contains(otc), "Splitting a Slime returned OneTwoCombo from Discard Pile to Hand");
+
+        // Teamwork (X-cost): set Energy to 2 -> 2x5=10 Block + Command 2 + 1 MinionMaster = 3x ShieldSlime (+9 Block -> 19 total)!
+        await ClearHandAndRefillEnergy(player, pcs);
+        await CreatureCmd.LoseBlock(ctx, player.Creature, player.Creature.Block, null);
+        await PlayerCmd.LoseEnergy(pcs.Energy - 2, player);
+        var teamwork = combatState.CreateCard<Teamwork>(player);
+        await CardPileCmd.Add(teamwork, PileType.Hand);
+        AutoTestAssert.True(teamwork.TryManualPlay(null), "Play Teamwork with X=2 Energy");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(0, pcs.Energy, "Teamwork spent all 2 Energy");
+        AutoTestAssert.Equal(19, player.Creature.Block, "Teamwork (2x5=10) + 3x ShieldSlime (3x3=9) = 19 Block");
+
+        // RallyTheTroops: 1st play applies CommandOnPlayPower(2) without consuming its own stack;
+        // 2nd stacked RallyTheTroops DOES trigger existing CommandOnPlayPower (+2 stacks then -1 = 3) and Commands!
+        await ClearHandAndRefillEnergy(player, pcs);
+        await CreatureCmd.LoseBlock(ctx, player.Creature, player.Creature.Block, null);
+        var rally1 = combatState.CreateCard<RallyTheTroops>(player);
+        var rally2 = combatState.CreateCard<RallyTheTroops>(player);
+        var triggerDef = combatState.CreateCard<SlimeboundDefend>(player);
+        await CardPileCmd.Add(rally1, PileType.Hand);
+        await CardPileCmd.Add(rally2, PileType.Hand);
+        await CardPileCmd.Add(triggerDef, PileType.Hand);
+        AutoTestAssert.True(rally1.TryManualPlay(enemy1), "Play RallyTheTroops #1");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(2, player.Creature.GetPowerAmount<CommandOnPlayPower>(), "RallyTheTroops #1 did NOT consume its own CommandOnPlayPower stack");
+        AutoTestAssert.Equal(0, player.Creature.Block, "RallyTheTroops #1 did NOT trigger ShieldSlime Command");
+
+        AutoTestAssert.True(rally2.TryManualPlay(enemy1), "Play stacked RallyTheTroops #2 triggering active CommandOnPlayPower (+2-1=3, 2x ShieldSlime=+6 Block)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(3, player.Creature.GetPowerAmount<CommandOnPlayPower>(), "Stacked RallyTheTroops #2 left 3 CommandOnPlayPower stacks (2 + 2 - 1)");
+        AutoTestAssert.Equal(6, player.Creature.Block, "Stacked RallyTheTroops #2 triggered ShieldSlime Command + MinionMaster (+6 Block)");
+
+        await CreatureCmd.LoseBlock(ctx, player.Creature, player.Creature.Block, null);
+        AutoTestAssert.True(triggerDef.TryManualPlay(null), "Play Defend triggering RallyTheTroops Command + MinionMaster (2x ShieldSlime = +6 Block)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(11, player.Creature.Block, "Defend (5) + 2x ShieldSlime (6) = 11 Block");
+        AutoTestAssert.Equal(2, player.Creature.GetPowerAmount<CommandOnPlayPower>(), "CommandOnPlayPower decremented 3 -> 2");
+        await PowerCmd.Remove<CommandOnPlayPower>(player.Creature);
+
+        // SlimeboundTagTeam+ (Glop Chop: 12 dmg, Split random Specialist, Command 3+1=4 times) + MassRepurpose+ (Absorb all -> Specialists -> Command ALL)!
+        await ClearHandAndRefillEnergy(player, pcs);
+        var glopChop = combatState.CreateCard<SlimeboundTagTeam>(player);
+        CardCmd.Upgrade(glopChop);
+        await CardPileCmd.Add(glopChop, PileType.Hand);
+        AutoTestAssert.True(glopChop.TryManualPlay(enemy1), "Play SlimeboundTagTeam+");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(3, SlimeMechanics.GetSlimes(player).Count, "Glop Chop filled 3 Slime slots");
+
+        var massRep = combatState.CreateCard<MassRepurpose>(player);
+        CardCmd.Upgrade(massRep);
+        await CardPileCmd.Add(massRep, PileType.Hand);
+        AutoTestAssert.True(massRep.TryManualPlay(null), "Play MassRepurpose+");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(3, SlimeMechanics.GetSlimes(player).Count, "MassRepurpose+ replaced all 3 Slimes with 3 Specialist Slimes");
+        AutoTestAssert.True(pcs.ExhaustPile.Cards.Contains(massRep), "MassRepurpose+ exhausted");
+
+        // 6. WasteNot+ (does NOT exhaust; exhumes ALL Licks from Exhaust Pile!).
+        await ClearHandAndRefillEnergy(player, pcs);
+        foreach (var ex in pcs.ExhaustPile.Cards.ToList())
+            await CardPileCmd.Add(ex, PileType.Discard);
+        var exLick1 = combatState.CreateCard<Lick>(player);
+        var exLick2 = combatState.CreateCard<HauntingLick>(player);
+        await CardPileCmd.Add(exLick1, PileType.Exhaust);
+        await CardPileCmd.Add(exLick2, PileType.Exhaust);
+        var wasteNot = combatState.CreateCard<WasteNot>(player);
+        CardCmd.Upgrade(wasteNot);
+        await CardPileCmd.Add(wasteNot, PileType.Hand);
+        AutoTestAssert.True(wasteNot.TryManualPlay(null), "Play WasteNot+");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.True(pcs.Hand.Cards.Contains(exLick1) && pcs.Hand.Cards.Contains(exLick2), "WasteNot+ exhumed ALL Lick cards");
+        AutoTestAssert.True(pcs.DiscardPile.Cards.Contains(wasteNot), "WasteNot+ went to Discard Pile instead of Exhaust");
+
+        // 7. Turn-based Rare powers across Rounds 2 & 3:
+        //    OozeBath (6 Goop on enemy1 at enemy turn start), Overexert (+5 Potency, LoseSlimesPower(2) -> 1 on R2 -> absorbs all on R3),
+        //    PrepareCrush+ (4 Energy + 5 Strength + SlimeCrush+ [AllEnemies 35 AoE] on R2), Recycling (exhumes 1 Lick on R2), DuplicatedFormEnergy (+1 Energy)!
+        await ClearHandAndRefillEnergy(player, pcs);
+        await SlimeMechanics.AbsorbAllSlimesAsync(ctx, player);
+        await PowerCmd.Remove<StrengthPower>(player.Creature);
+        await PowerCmd.Remove<PotencyPower>(player.Creature);
+        await PowerCmd.Remove<SlimedPower>(enemy1);
+        await PowerCmd.Remove<SlimedPower>(enemy2);
+        await PowerCmd.Remove<VulnerablePower>(enemy1);
+        await PowerCmd.Remove<VulnerablePower>(enemy2);
+        await PowerCmd.Remove<WeakPower>(player.Creature);
+        await SlimeMechanics.SplitSlimeAsync<ShieldSlime>(ctx, player);
+
+        var recLick = combatState.CreateCard<Lick>(player);
+        await CardPileCmd.Add(recLick, PileType.Exhaust);
+
+        var oozeBath = combatState.CreateCard<OozeBath>(player);
+        var overexert = combatState.CreateCard<Overexert>(player);
+        var prepCrush = combatState.CreateCard<PrepareCrush>(player);
+        CardCmd.Upgrade(prepCrush);
+        var recycling = combatState.CreateCard<Recycling>(player);
+        await CardPileCmd.Add(oozeBath, PileType.Hand);
+        await CardPileCmd.Add(overexert, PileType.Hand);
+        await CardPileCmd.Add(prepCrush, PileType.Hand);
+        await CardPileCmd.Add(recycling, PileType.Hand);
+
+        AutoTestAssert.True(oozeBath.TryManualPlay(enemy1), "Play OozeBath on enemy1");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.True(overexert.TryManualPlay(null), "Play Overexert");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.True(prepCrush.TryManualPlay(null), "Play PrepareCrush+");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.True(recycling.TryManualPlay(null), "Play Recycling");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(5, player.Creature.GetPowerAmount<PotencyPower>(), "Overexert granted +5 Potency");
+        AutoTestAssert.Equal(2, player.Creature.GetPowerAmount<LoseSlimesPower>(), "Overexert applied LoseSlimesPower(2)");
+
+        // End Round 1 -> Start Round 2:
+        await CreatureCmd.GainBlock(player.Creature, 80m, ValueProp.Unpowered, null);
+        await DownfallAutoTestRunner.EndTurnAndWaitForRoundAsync(player, 2);
+        AutoTestAssert.Equal(6, enemy1.GetPowerAmount<SlimedPower>(), "OozeBath applied 6 Goop to enemy1 at enemy turn start");
+        AutoTestAssert.Equal(8, pcs.Energy, "Round 2 started with 3 + 1 DuplicatedFormEnergy + 4 PrepareCrush+ = 8 Energy");
+        AutoTestAssert.Equal(5, player.Creature.GetPowerAmount<StrengthPower>(), "PrepareCrush+ granted +5 Strength on Round 2");
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<LoseSlimesPower>(), "LoseSlimesPower decremented 2 -> 1 on Round 2");
+        AutoTestAssert.Equal(1, SlimeMechanics.GetSlimes(player).Count, "Slime still alive on Round 2");
+        AutoTestAssert.True(pcs.Hand.Cards.Contains(recLick), "Recycling exhumed Lick on Round 2");
+        var slimeCrushPlus = AutoTestAssert.NotNull(pcs.Hand.Cards.OfType<SlimeCrush>().FirstOrDefault(), "PrepareCrush+ added SlimeCrush+ to Hand on Round 2");
+        AutoTestAssert.True(slimeCrushPlus.IsUpgraded, "SlimeCrush is upgraded");
+        AutoTestAssert.Equal(TargetType.AllEnemies, slimeCrushPlus.TargetType, "SlimeCrush+ targets ALL enemies");
+
+        // Verify DuplicatedFormPower reset on Round 2, then remove it so SlimeCrush+ deals exact single-play AoE damage!
+        AutoTestAssert.Equal(1, player.Creature.GetPower<DuplicatedFormPower>()!.RemainingThisTurn, "DuplicatedFormPower charge reset to 1 at start of Round 2");
+        await PowerCmd.Remove<DuplicatedFormPower>(player.Creature);
+        e1Hp = enemy1.CurrentHp;
+        e2Hp = enemy2.CurrentHp;
+        AutoTestAssert.True(slimeCrushPlus.TryManualPlay(null), "Play SlimeCrush+ (AoE 35 + 5 Str)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(e1Hp - 46, enemy1.CurrentHp, "SlimeCrush+ dealt 35 + 5 Str + 6 Goop = 46 to enemy1");
+        AutoTestAssert.Equal(e2Hp - 40, enemy2.CurrentHp, "SlimeCrush+ dealt 35 + 5 Str = 40 to enemy2");
+        AutoTestAssert.True(pcs.ExhaustPile.Cards.Contains(slimeCrushPlus), "SlimeCrush+ exhausted");
+
+        // End Round 2 -> Start Round 3: LoseSlimesPower hits 0 and Absorbs all Slimes (+1 Strength)!
+        int strBeforeR3 = player.Creature.GetPowerAmount<StrengthPower>();
+        await CreatureCmd.GainBlock(player.Creature, 80m, ValueProp.Unpowered, null);
+        await DownfallAutoTestRunner.EndTurnAndWaitForRoundAsync(player, 3);
+        AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<LoseSlimesPower>(), "LoseSlimesPower removed on Round 3");
+        AutoTestAssert.Equal(0, SlimeMechanics.GetSlimes(player).Count, "LoseSlimesPower absorbed all Slimes on Round 3");
+        AutoTestAssert.Equal(strBeforeR3 + 1, player.Creature.GetPowerAmount<StrengthPower>(), "Absorbed Slime on Round 3 granted +1 Strength");
+    }
+
     internal static async Task ClearHandAndRefillEnergy(
         MegaCrit.Sts2.Core.Entities.Players.Player player,
         MegaCrit.Sts2.Core.Entities.Players.PlayerCombatState pcs)
