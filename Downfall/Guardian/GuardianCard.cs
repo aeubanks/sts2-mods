@@ -8,6 +8,7 @@ using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.GameActions.Multiplayer;
 using MegaCrit.Sts2.Core.HoverTips;
 using MegaCrit.Sts2.Core.Localization;
+using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Saves.Runs;
 
 namespace Downfall.Guardian;
@@ -29,7 +30,9 @@ public abstract class GuardianCard(
     public virtual bool IsVolatile => false;
     public virtual bool IsGem => false;
     public virtual GemType? ThisGemType => null;
+    public virtual bool IsBeam => false;
     public virtual bool UsesDefensiveModeGlow => false;
+    public virtual bool UsesStasisGlow => false;
 
     [SavedProperty]
     public string SocketedGemsCsv
@@ -66,9 +69,9 @@ public abstract class GuardianCard(
     }
 
     protected override bool ShouldGlowGoldInternal =>
-        UsesDefensiveModeGlow
-        && CombatState is not null
-        && Owner?.Creature.HasPower<DefensiveModePower>() == true;
+        CombatState is not null
+        && ((UsesDefensiveModeGlow && Owner?.Creature.HasPower<DefensiveModePower>() == true)
+            || (UsesStasisGlow && GuardianMechanics.GetStasisOrbs(Owner).Count > 0));
 
     protected override void AddExtraArgsToDescription(LocString description)
     {
@@ -118,13 +121,13 @@ public abstract class GuardianCard(
         }
     }
 
-    public override async Task AfterCardPlayed(PlayerChoiceContext choiceContext, CardPlay cardPlay)
+    public override async Task AfterCardChangedPiles(CardModel card, PileType oldPileType, AbstractModel? clonedBy)
     {
-        await base.AfterCardPlayed(choiceContext, cardPlay);
+        await base.AfterCardChangedPiles(card, oldPileType, clonedBy);
 
         if (!IsSelfStasis
-            || !ReferenceEquals(cardPlay.Card, this)
-            || cardPlay.PlayIndex < cardPlay.PlayCount - 1
+            || !ReferenceEquals(card, this)
+            || oldPileType != PileType.Play
             || Pile?.Type != PileType.Discard
             || !Owner.Creature.IsAlive
             || CombatManager.Instance.IsOverOrEnding)
@@ -132,7 +135,7 @@ public abstract class GuardianCard(
             return;
         }
 
-        await GuardianMechanics.PlaceInStasisAsync(choiceContext, Owner, this, isSelfStasis: true);
+        await GuardianMechanics.PlaceInStasisAsync(new ThrowingPlayerChoiceContext(), Owner, this, isSelfStasis: true);
     }
 
     internal static IHoverTip BraceHoverTip => new HoverTip(

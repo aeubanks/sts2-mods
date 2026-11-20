@@ -427,5 +427,11 @@
   "DOWNFALL-MODE_SHIFT_POWER.smartDescription": "After losing [blue]{Amount}[/blue] more HP or [gold]Bracing[/gold] [blue]{Amount}[/blue], gain [blue]16[/blue] [gold]Block[/gold] and enter [gold]Defensive Mode[/gold].",
   "DOWNFALL-DEFENSIVE_MODE_POWER.title": "Defensive Mode",
   "DOWNFALL-DEFENSIVE_MODE_POWER.description": "You have [blue]3[/blue] [gold]Thorns[/gold] and your [gold]Block[/gold] does not expire at the start of your turn.",
-  "DOWNFALL-DEFENSIVE_MODE_POWER.smartDescription": "You have [blue]3[/blue] [gold]Thorns[/gold] and your [gold]Block[/gold] does not expire for [blue]{Amount}[/blue] {Amount:plural:turn|turns}."
+  "DOWNFALL-DEFENSIVE_MODE_POWER.smartDescription": "You have [blue]3[/blue] [gold]Thorns[/gold] and your [gold]Block[/gold] does not expire for [blue]{Amount}[/blue] {Amount:plural:turn|turns}.",
+  "DOWNFALL-CLONE_POWER.title": "Reroute",
+  "DOWNFALL-CLONE_POWER.description": "The next card you play this turn is placed into [gold]Stasis[/gold].",
+  "DOWNFALL-CLONE_POWER.smartDescription": "The next {Amount:plural:card|[blue]{}[/blue] cards} you play this turn {Amount:plural:is|are} placed into [gold]Stasis[/gold].",
+  "DOWNFALL-NEXT_TURN_TEMP_STRENGTH_POWER.title": "Charging Up",
+  "DOWNFALL-NEXT_TURN_TEMP_STRENGTH_POWER.description": "At the start of your next turn, gain temporary [gold]Strength[/gold].",
+  "DOWNFALL-NEXT_TURN_TEMP_STRENGTH_POWER.smartDescription": "At the start of your next turn, gain [blue]{Amount}[/blue] temporary [gold]Strength[/gold]."
 }
