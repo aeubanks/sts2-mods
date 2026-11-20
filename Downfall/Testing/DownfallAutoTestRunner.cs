@@ -183,6 +183,7 @@ internal static class DownfallAutoTestRunner
                 ("ChampRelicsAndPotionsInCombat", ChampTests.TestRelicsAndPotionsInCombat),
                 ("SneckoVisualsRuntime", SneckoTests.TestVisualsRuntime),
                 ("SneckoStarterCombat", SneckoTests.TestStarterCombat),
+                ("SneckoCommonCardsInCombat", SneckoTests.TestCommonCardsInCombat),
             ];
 
             int matchedIndex = 0;
@@ -629,6 +630,8 @@ internal static class DownfallAutoTestRunner
         AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-LUCKY_KEYWORD.title").Exists(), "Missing Lucky title loc");
         AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-LUCKY_KEYWORD.description").Exists(), "Missing Lucky desc loc");
         AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-SNECKO_MUDDLE.selectionScreenPrompt").Exists(), "Missing Snecko Muddle prompt loc");
+        AutoTestAssert.True(new LocString("cards", "DOWNFALL-CRYSTAL_BOOMERANG.selectionScreenPrompt").Exists(), "Missing CrystalBoomerang prompt loc");
+        AutoTestAssert.True(new LocString("cards", "DOWNFALL-NOPE.selectionScreenPrompt").Exists(), "Missing Nope prompt loc");
 
         return Task.CompletedTask;
     }

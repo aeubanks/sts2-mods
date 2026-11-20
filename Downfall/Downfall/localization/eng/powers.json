@@ -295,5 +295,8 @@
   "DOWNFALL-STRIKE_OF_GENIUS_POWER.smartDescription": "At the start of your turn, add [blue]{Amount}[/blue] random \"Strike\" {Amount:plural:[gold]Echo[/gold]|[gold]Echoes[/gold]} costing 0 until played.",
   "DOWNFALL-STRIKE_OF_GENIUS_UPGRADED_POWER.title": "Strike of Genius+",
   "DOWNFALL-STRIKE_OF_GENIUS_UPGRADED_POWER.description": "At the start of your turn, add a random Upgraded \"Strike\" [gold]Echo[/gold] costing 0 until played.",
-  "DOWNFALL-STRIKE_OF_GENIUS_UPGRADED_POWER.smartDescription": "At the start of your turn, add [blue]{Amount}[/blue] random Upgraded \"Strike\" {Amount:plural:[gold]Echo[/gold]|[gold]Echoes[/gold]} costing 0 until played."
+  "DOWNFALL-STRIKE_OF_GENIUS_UPGRADED_POWER.smartDescription": "At the start of your turn, add [blue]{Amount}[/blue] random Upgraded \"Strike\" {Amount:plural:[gold]Echo[/gold]|[gold]Echoes[/gold]} costing 0 until played.",
+  "DOWNFALL-VENOM_POWER.title": "Venom",
+  "DOWNFALL-VENOM_POWER.description": "Whenever you apply a non-Venom debuff to this creature, it loses HP.",
+  "DOWNFALL-VENOM_POWER.smartDescription": "Whenever you apply a non-Venom debuff to this creature, it loses [blue]{Amount}[/blue] HP."
 }

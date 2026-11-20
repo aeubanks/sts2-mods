@@ -1,11 +1,16 @@
+using Downfall.Hermit.Cards;
+using Downfall.Hermit.Powers;
 using Downfall.Snecko;
 using Downfall.Snecko.Cards;
+using Downfall.Snecko.Powers;
 using Downfall.Snecko.Relics;
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Commands;
 using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Entities.Relics;
+using MegaCrit.Sts2.Core.GameActions.Multiplayer;
 using MegaCrit.Sts2.Core.Models;
+using MegaCrit.Sts2.Core.Models.Cards;
 using MegaCrit.Sts2.Core.Models.Powers;
 using MegaCrit.Sts2.Core.Runs;
 using MegaCrit.Sts2.Core.ValueProps;
@@ -135,6 +140,258 @@ internal static class SneckoTests
         AutoTestAssert.True(
             pcs.Hand.Cards.Any(c => c.EnergyCost.GetWithModifiers(CostModifiers.All) != c.EnergyCost.Canonical),
             "SuperSneckoSoul muddled the extra drawn card on Round 4");
+    }
+
+    internal static async Task TestCommonCardsInCombat()
+    {
+        var (player, runState, combatState) = await DownfallAutoTestRunner.StartCombatAsync<TheSnecko>("SNECKO_COM01");
+        var pcs = AutoTestAssert.NotNull(player.PlayerCombatState, "Snecko PlayerCombatState");
+        var enemy1 = AutoTestAssert.NotNull(combatState.HittableEnemies.FirstOrDefault(), "Enemy 1");
+        var enemy2 = await CreatureCmd.Add<MegaCrit.Sts2.Core.Models.Monsters.Nibbit>(combatState);
+        await CreatureCmd.GainMaxHp(enemy1, 800m);
+        await CreatureCmd.GainMaxHp(enemy2, 800m);
+        var ctx = new ThrowingPlayerChoiceContext();
+
+        // 1. Gift deck-obtain test: adding Medusa to Deck triggers Gift choice and adds a Common Debuff offclass card!
+        int deckBeforeGift = player.Deck.Cards.Count;
+        var deckMedusa = (Medusa)runState.CreateCard<Medusa>(player);
+        await CardPileCmd.Add(deckMedusa, PileType.Deck);
+        AutoTestAssert.True(deckMedusa.GiftClaimed, "Medusa marked GiftClaimed=true after deck obtain");
+        AutoTestAssert.Equal(deckBeforeGift + 2, player.Deck.Cards.Count, "Medusa Gift added 1 offclass card to deck alongside Medusa");
+        var giftedCard = player.Deck.Cards.Last();
+        AutoTestAssert.True(SneckoOffclass.IsOffclass(giftedCard, player), "Medusa Gift card is Offclass");
+        AutoTestAssert.Equal(CardRarity.Common, giftedCard.Rarity, "Medusa Gift card is Common");
+        AutoTestAssert.True(SneckoOffclass.IsDebuffCard(giftedCard), "Medusa Gift card is a Debuff card");
+
+        // 2. Amass: 9 base Block + total energy cost of Hand (Amass=2 + Strike=1 + TailWhip=2 -> +5 = 14 Block)!
+        await ClearHandAndRefillEnergy(player, pcs);
+        var amass = combatState.CreateCard<Amass>(player);
+        var c1 = combatState.CreateCard<SneckoStrike>(player);
+        var c2 = combatState.CreateCard<TailWhip>(player);
+        await CardPileCmd.Add(amass, PileType.Hand);
+        await CardPileCmd.Add(c1, PileType.Hand);
+        await CardPileCmd.Add(c2, PileType.Hand);
+        int blockBefore = player.Creature.Block;
+        AutoTestAssert.True(amass.TryManualPlay(null), "Play Amass");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(blockBefore + 14, player.Creature.Block, "Amass gained 9 base + 5 hand cost = 14 Block");
+
+        // 3. Behold (Overflow -> +2 Shivs), DiceBlock (Overflow -> 2x Block), DiceCrush (Overflow -> draw 2), QuickMove (Overflow -> 1 Vuln ALL)!
+        await ClearHandAndRefillEnergy(player, pcs);
+        var behold = combatState.CreateCard<Behold>(player);
+        var diceBlock = combatState.CreateCard<DiceBlock>(player);
+        var diceCrush = combatState.CreateCard<DiceCrush>(player);
+        var quickMove = combatState.CreateCard<QuickMove>(player);
+        await CardPileCmd.Add(behold, PileType.Hand);
+        await CardPileCmd.Add(diceBlock, PileType.Hand);
+        await CardPileCmd.Add(diceCrush, PileType.Hand);
+        await CardPileCmd.Add(quickMove, PileType.Hand);
+        await CardPileCmd.Add(combatState.CreateCard<SneckoDefend>(player), PileType.Hand);
+        await CardPileCmd.Add(combatState.CreateCard<SneckoDefend>(player), PileType.Hand);
+
+        int e1Hp = enemy1.CurrentHp;
+        AutoTestAssert.True(behold.TryManualPlay(enemy1), "Play Behold with Overflow (6 cards)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(e1Hp - 6, enemy1.CurrentHp, "Behold dealt 6 damage");
+        AutoTestAssert.Equal(2, pcs.Hand.Cards.OfType<Shiv>().Count(), "Behold Overflow added 2 Shivs");
+
+        // Hand now has 7 cards -> Overflow still active for DiceBlock (5+5=10 Block), DiceCrush (18 dmg + draw 2), QuickMove (7 Block + 1 Vuln ALL)!
+        blockBefore = player.Creature.Block;
+        AutoTestAssert.True(diceBlock.TryManualPlay(null), "Play DiceBlock with Overflow");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(blockBefore + 10, player.Creature.Block, "DiceBlock Overflow gained 5+5=10 Block");
+
+        await CardPileCmd.Add(combatState.CreateCard<SneckoStrike>(player), PileType.Draw, CardPilePosition.Top);
+        await CardPileCmd.Add(combatState.CreateCard<SneckoStrike>(player), PileType.Draw, CardPilePosition.Top);
+        int handBeforeCrush = pcs.Hand.Cards.Count;
+        e1Hp = enemy1.CurrentHp;
+        AutoTestAssert.True(diceCrush.TryManualPlay(enemy1), "Play DiceCrush with Overflow");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(e1Hp - 18, enemy1.CurrentHp, "DiceCrush dealt 18 damage");
+        AutoTestAssert.Equal(handBeforeCrush - 1 + 2, pcs.Hand.Cards.Count, "DiceCrush Overflow drew 2 cards");
+
+        blockBefore = player.Creature.Block;
+        AutoTestAssert.True(quickMove.TryManualPlay(null), "Play QuickMove with Overflow");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(blockBefore + 7, player.Creature.Block, "QuickMove gained 7 Block");
+        AutoTestAssert.Equal(1, enemy1.GetPowerAmount<VulnerablePower>(), "QuickMove Overflow applied 1 Vulnerable to enemy 1");
+        AutoTestAssert.Equal(1, enemy2.GetPowerAmount<VulnerablePower>(), "QuickMove Overflow applied 1 Vulnerable to enemy 2");
+        await PowerCmd.Remove<VulnerablePower>(enemy1);
+        await PowerCmd.Remove<VulnerablePower>(enemy2);
+
+        // 4. BeyondArmor (5 Block + pull 2 offclass from Draw), Cower+ (18 Block + HoleUp+ + Exhaust), CrystalBoomerang (pull offclass from Discard -> +5 Block)!
+        await ClearHandAndRefillEnergy(player, pcs);
+        var drawOff1 = combatState.CreateCard<Bash>(player);
+        var drawOff2 = combatState.CreateCard<Neutralize>(player);
+        await CardPileCmd.Add(drawOff1, PileType.Draw);
+        await CardPileCmd.Add(drawOff2, PileType.Draw);
+        var beyondArmor = combatState.CreateCard<BeyondArmor>(player);
+        await CardPileCmd.Add(beyondArmor, PileType.Hand);
+        blockBefore = player.Creature.Block;
+        AutoTestAssert.True(beyondArmor.TryManualPlay(null), "Play BeyondArmor");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(blockBefore + 5, player.Creature.Block, "BeyondArmor gained 5 Block");
+        AutoTestAssert.True(pcs.Hand.Cards.Contains(drawOff1) && pcs.Hand.Cards.Contains(drawOff2), "BeyondArmor fetched 2 offclass cards from Draw");
+
+        var cower = combatState.CreateCard<Cower>(player);
+        CardCmd.Upgrade(cower);
+        await CardPileCmd.Add(cower, PileType.Hand);
+        blockBefore = player.Creature.Block;
+        AutoTestAssert.True(cower.TryManualPlay(null), "Play Cower+");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(blockBefore + 18, player.Creature.Block, "Cower+ gained 18 Block");
+        AutoTestAssert.True(pcs.ExhaustPile.Cards.Contains(cower), "Cower+ exhausted");
+        var holeUp = AutoTestAssert.NotNull(pcs.Hand.Cards.OfType<HoleUp>().FirstOrDefault(), "Cower+ added HoleUp to Hand");
+        AutoTestAssert.True(holeUp.IsUpgraded, "Cower+ added Upgraded HoleUp+");
+
+        var discardOff = combatState.CreateCard<ShrugItOff>(player);
+        await CardPileCmd.Add(discardOff, PileType.Discard);
+        var boomerang = combatState.CreateCard<CrystalBoomerang>(player);
+        await CardPileCmd.Add(boomerang, PileType.Hand);
+        blockBefore = player.Creature.Block;
+        using (DownfallAutoTestRunner.PreferCards(c => ReferenceEquals(c, discardOff)))
+        {
+            AutoTestAssert.True(boomerang.TryManualPlay(null), "Play CrystalBoomerang picking offclass card");
+            await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        }
+        AutoTestAssert.True(pcs.Hand.Cards.Contains(discardOff), "CrystalBoomerang returned card to Hand");
+        AutoTestAssert.Equal(blockBefore + 5, player.Creature.Block, "CrystalBoomerang granted 5 Block for Offclass card");
+
+        // 5. Medusa (7 dmg + 2 Venom) -> IronFang (6 dmg + 1 Weak ALL -> triggers Venom for 2 HP loss!) + Negative Strength triggers Venom, Venom itself does NOT!
+        await ClearHandAndRefillEnergy(player, pcs);
+        var medusa = combatState.CreateCard<Medusa>(player);
+        await CardPileCmd.Add(medusa, PileType.Hand);
+        e1Hp = enemy1.CurrentHp;
+        AutoTestAssert.True(medusa.TryManualPlay(enemy1), "Play Medusa");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(e1Hp - 7, enemy1.CurrentHp, "Medusa dealt 7 damage (and applying Venom did not self-trigger)");
+        AutoTestAssert.Equal(2, enemy1.GetPowerAmount<VenomPower>(), "Medusa applied 2 Venom");
+
+        var ironFang = combatState.CreateCard<IronFang>(player);
+        await CardPileCmd.Add(ironFang, PileType.Hand);
+        e1Hp = enemy1.CurrentHp;
+        int e2Hp = enemy2.CurrentHp;
+        AutoTestAssert.True(ironFang.TryManualPlay(null), "Play IronFang");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(e1Hp - 6 - 2, enemy1.CurrentHp, "IronFang dealt 6 dmg + Weak triggered Venom for 2 HP loss on enemy 1");
+        AutoTestAssert.Equal(e2Hp - 6, enemy2.CurrentHp, "IronFang dealt 6 dmg to enemy 2");
+        AutoTestAssert.Equal(1, enemy1.GetPowerAmount<WeakPower>(), "IronFang applied 1 Weak to enemy 1");
+        AutoTestAssert.Equal(1, enemy2.GetPowerAmount<WeakPower>(), "IronFang applied 1 Weak to enemy 2");
+
+        // Negative Strength debuff from player triggers Venom; self-debuff does NOT!
+        e1Hp = enemy1.CurrentHp;
+        await PowerCmd.Apply<StrengthPower>(ctx, enemy1, -1m, player.Creature, null);
+        AutoTestAssert.Equal(e1Hp - 2, enemy1.CurrentHp, "Negative Strength from player triggered Venom (2 HP loss)");
+        e1Hp = enemy1.CurrentHp;
+        await PowerCmd.Apply<WeakPower>(ctx, enemy1, 1m, enemy1, null);
+        AutoTestAssert.Equal(e1Hp, enemy1.CurrentHp, "Enemy self-debuff did NOT trigger Venom");
+        await PowerCmd.Remove<VenomPower>(enemy1);
+
+        // 6. LaserEyes (3-cost: 15 dmg + 1 Energy) triggers LilGuardian in Hand (auto-plays for 7 Block)!
+        await ClearHandAndRefillEnergy(player, pcs);
+        var laserEyes = combatState.CreateCard<LaserEyes>(player);
+        var lilGuardian = combatState.CreateCard<LilGuardian>(player);
+        await CardPileCmd.Add(laserEyes, PileType.Hand);
+        await CardPileCmd.Add(lilGuardian, PileType.Hand);
+        int energyBefore = pcs.Energy;
+        blockBefore = player.Creature.Block;
+        e1Hp = enemy1.CurrentHp;
+        AutoTestAssert.True(laserEyes.TryManualPlay(enemy1), "Play LaserEyes (3-cost)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(e1Hp - 15, enemy1.CurrentHp, "LaserEyes dealt 15 damage");
+        AutoTestAssert.Equal(energyBefore - 3 + 1, pcs.Energy, "LaserEyes cost 3 and refunded 1 Energy");
+        AutoTestAssert.Equal(blockBefore + 7, player.Creature.Block, "LilGuardian auto-played from Hand on 3-cost card for 7 Block");
+        AutoTestAssert.True(pcs.DiscardPile.Cards.Contains(lilGuardian), "LilGuardian moved to Discard after auto-play");
+
+        // 7. Nope (5 Block + Exhaust offclass Ironclad Bash -> adds random Ironclad card to Hand)!
+        await ClearHandAndRefillEnergy(player, pcs);
+        var nope = combatState.CreateCard<Nope>(player);
+        var ironcladCard = combatState.CreateCard<Bash>(player);
+        await CardPileCmd.Add(nope, PileType.Hand);
+        await CardPileCmd.Add(ironcladCard, PileType.Hand);
+        blockBefore = player.Creature.Block;
+        using (DownfallAutoTestRunner.PreferCards(c => ReferenceEquals(c, ironcladCard)))
+        {
+            AutoTestAssert.True(nope.TryManualPlay(null), "Play Nope exhausting Bash");
+            await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        }
+        AutoTestAssert.Equal(blockBefore + 5, player.Creature.Block, "Nope gained 5 Block");
+        AutoTestAssert.True(pcs.ExhaustPile.Cards.Contains(ironcladCard), "Nope exhausted Bash");
+        AutoTestAssert.Equal(1, pcs.Hand.Cards.Count, "Nope added 1 replacement card to Hand");
+        AutoTestAssert.Equal(ironcladCard.Pool, pcs.Hand.Cards[0].Pool, "Nope replacement card is from same class pool");
+
+        // 8. OtherworldlySlash (1 hit before offclass played, 2 hits + gold glow after offclass played)!
+        await ClearHandAndRefillEnergy(player, pcs);
+        var slash1 = combatState.CreateCard<OtherworldlySlash>(player);
+        var offPlay = combatState.CreateCard<Neutralize>(player);
+        var slash2 = combatState.CreateCard<OtherworldlySlash>(player);
+        await CardPileCmd.Add(slash1, PileType.Hand);
+        await CardPileCmd.Add(offPlay, PileType.Hand);
+        await CardPileCmd.Add(slash2, PileType.Hand);
+        AutoTestAssert.True(!slash1.ShouldGlowGold, "OtherworldlySlash does NOT glow gold before offclass played");
+        e1Hp = enemy1.CurrentHp;
+        AutoTestAssert.True(slash1.TryManualPlay(enemy1), "Play OtherworldlySlash #1");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(e1Hp - 7, enemy1.CurrentHp, "OtherworldlySlash #1 dealt 7 damage (1 hit)");
+
+        AutoTestAssert.True(offPlay.TryManualPlay(enemy1), "Play Neutralize (Offclass)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.True(slash2.ShouldGlowGold, "OtherworldlySlash glows gold after offclass played");
+        e1Hp = enemy1.CurrentHp;
+        AutoTestAssert.True(slash2.TryManualPlay(enemy1), "Play OtherworldlySlash #2");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(e1Hp - 14, enemy1.CurrentHp, "OtherworldlySlash #2 dealt 14 damage (2 hits)");
+
+        // 9. PowerShot (0-cost 5 dmg; returns from Discard when Power played), QuickBite (7 dmg + draw 1 & muddle), SaveForLater (8 dmg + CoalescencePower), WideSting (7 dmg ALL + upgrades offclass in Hand)!
+        await ClearHandAndRefillEnergy(player, pcs);
+        var powerShot = combatState.CreateCard<PowerShot>(player);
+        var inflame = combatState.CreateCard<Inflame>(player);
+        await CardPileCmd.Add(powerShot, PileType.Hand);
+        await CardPileCmd.Add(inflame, PileType.Hand);
+        e1Hp = enemy1.CurrentHp;
+        AutoTestAssert.True(powerShot.TryManualPlay(enemy1), "Play PowerShot");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(e1Hp - 5, enemy1.CurrentHp, "PowerShot dealt 5 damage");
+        AutoTestAssert.True(pcs.DiscardPile.Cards.Contains(powerShot), "PowerShot in Discard");
+        AutoTestAssert.True(inflame.TryManualPlay(null), "Play Inflame (Power)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.True(pcs.Hand.Cards.Contains(powerShot), "PowerShot returned to Hand on Power play");
+        await PowerCmd.Remove<StrengthPower>(player.Creature);
+
+        var topDraw = combatState.CreateCard<SneckoDefend>(player);
+        await CardPileCmd.Add(topDraw, PileType.Draw, CardPilePosition.Top);
+        var quickBite = combatState.CreateCard<QuickBite>(player);
+        await CardPileCmd.Add(quickBite, PileType.Hand);
+        e1Hp = enemy1.CurrentHp;
+        AutoTestAssert.True(quickBite.TryManualPlay(enemy1), "Play QuickBite");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(e1Hp - 7, enemy1.CurrentHp, "QuickBite dealt 7 damage");
+        AutoTestAssert.True(pcs.Hand.Cards.Contains(topDraw), "QuickBite drew top card");
+        AutoTestAssert.True(topDraw.EnergyCost.GetWithModifiers(CostModifiers.All) != 1, "QuickBite muddled drawn card");
+
+        var saveForLater = combatState.CreateCard<SaveForLater>(player);
+        await CardPileCmd.Add(saveForLater, PileType.Hand);
+        e1Hp = enemy1.CurrentHp;
+        AutoTestAssert.True(saveForLater.TryManualPlay(enemy1), "Play SaveForLater");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(e1Hp - 8, enemy1.CurrentHp, "SaveForLater dealt 8 damage");
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<CoalescencePower>(), "SaveForLater applied 1 CoalescencePower");
+
+        await ClearHandAndRefillEnergy(player, pcs);
+        var wideSting = combatState.CreateCard<WideSting>(player);
+        var offToUpg = combatState.CreateCard<Bash>(player);
+        var ownNoUpg = combatState.CreateCard<SneckoStrike>(player);
+        await CardPileCmd.Add(wideSting, PileType.Hand);
+        await CardPileCmd.Add(offToUpg, PileType.Hand);
+        await CardPileCmd.Add(ownNoUpg, PileType.Hand);
+        e1Hp = enemy1.CurrentHp;
+        e2Hp = enemy2.CurrentHp;
+        AutoTestAssert.True(wideSting.TryManualPlay(null), "Play WideSting");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(e1Hp - 7, enemy1.CurrentHp, "WideSting dealt 7 damage to enemy 1");
+        AutoTestAssert.Equal(e2Hp - 7, enemy2.CurrentHp, "WideSting dealt 7 damage to enemy 2");
+        AutoTestAssert.True(offToUpg.IsUpgraded, "WideSting upgraded Offclass card in Hand");
+        AutoTestAssert.True(!ownNoUpg.IsUpgraded, "WideSting did NOT upgrade Snecko card in Hand");
     }
 
     internal static async Task ClearHandAndRefillEnergy(MegaCrit.Sts2.Core.Entities.Players.Player player, MegaCrit.Sts2.Core.Entities.Players.PlayerCombatState pcs)
