@@ -18,7 +18,6 @@ public sealed class AttackSlime : SlimeOrb
         if (!Owner.Creature.IsAlive || CombatManager.Instance.IsOverOrEnding)
             return;
 
-        ActivatePassive();
         decimal dmg = PassiveVal;
         for (int i = 0; i < 2; i++)
         {
@@ -29,6 +28,7 @@ public sealed class AttackSlime : SlimeOrb
             if (hitTarget is null)
                 break;
 
+            ActivatePassive();
             await DealUnpoweredDamageAsync(choiceContext, hitTarget, dmg);
         }
     }

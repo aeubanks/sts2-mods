@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using Godot;
 using HarmonyLib;
 using MegaCrit.Sts2.addons.mega_text;
@@ -11,7 +12,8 @@ namespace Downfall.Core;
 
 /// <summary>
 /// Allows non-Spine Sprite2D DownfallOrb visuals inside native NOrb slots without crashing on
-/// NOrb.UpdateVisuals's unconditional SpineSkeleton lookup, while updating Passive/Evoke labels cleanly.
+/// NOrb.UpdateVisuals's unconditional SpineSkeleton lookup, while updating Passive/Evoke labels
+/// and playing custom passive trigger animations cleanly.
 /// </summary>
 [HarmonyPatch(typeof(NOrb), nameof(NOrb.UpdateVisuals))]
 internal static class DownfallOrbPatch
@@ -24,6 +26,7 @@ internal static class DownfallOrbPatch
     private static readonly FieldInfo PassiveLabelField = AccessTools.Field(typeof(NOrb), "_passiveLabel");
     private static readonly FieldInfo EvokeLabelField = AccessTools.Field(typeof(NOrb), "_evokeLabel");
     private static readonly FieldInfo IsLocalField = AccessTools.Field(typeof(NOrb), "_isLocal");
+    private static readonly ConditionalWeakTable<Sprite2D, Tween> PassiveTweens = new();
 
     [HarmonyPrefix]
     private static bool Prefix(NOrb __instance, bool isEvoking)
@@ -49,6 +52,38 @@ internal static class DownfallOrbPatch
             sprite.Position = Vector2.Zero;
             SpriteField.SetValue(__instance, sprite);
 
+            if (sprite is Sprite2D s2d)
+            {
+                Action onPassive = () =>
+                {
+                    if (!GodotObject.IsInstanceValid(s2d) || !s2d.IsInsideTree())
+                        return;
+
+                    if (GodotObject.IsInstanceValid(__instance))
+                    {
+                        var spawnTween = (Tween?)CurTweenField.GetValue(__instance);
+                        if (spawnTween is not null && GodotObject.IsInstanceValid(spawnTween) && spawnTween.IsRunning())
+                            spawnTween.Kill();
+                    }
+
+                    if (PassiveTweens.TryGetValue(s2d, out var prev) && GodotObject.IsInstanceValid(prev) && prev.IsRunning())
+                        prev.Kill();
+
+                    var activeTween = orb.PlayPassiveAnimation(s2d);
+                    if (activeTween is not null)
+                        PassiveTweens.AddOrUpdate(s2d, activeTween);
+                };
+
+                orb.PassiveActivated += onPassive;
+                s2d.TreeExiting += () =>
+                {
+                    orb.PassiveActivated -= onPassive;
+                    if (PassiveTweens.TryGetValue(s2d, out var prev) && GodotObject.IsInstanceValid(prev) && prev.IsRunning())
+                        prev.Kill();
+                    PassiveTweens.Remove(s2d);
+                };
+            }
+
             var curTween = (Tween?)CurTweenField.GetValue(__instance);
             curTween?.Kill();
             var tween = __instance.CreateTween();
@@ -67,7 +102,14 @@ internal static class DownfallOrbPatch
             __instance.Modulate = orb.DarkenedColor;
         if (sprite is not null)
         {
-            sprite.Modulate = orb.SpriteTint;
+            bool passiveAnimating = sprite is Sprite2D animSprite
+                && PassiveTweens.TryGetValue(animSprite, out var pTween)
+                && GodotObject.IsInstanceValid(pTween)
+                && pTween.IsRunning();
+
+            if (!passiveAnimating)
+                sprite.Modulate = orb.SpriteTint;
+
             if (sprite is Sprite2D sprite2D)
             {
                 var desiredTex = PreloadManager.Cache.GetCompressedTexture2D(orb.SpriteTexturePath);
@@ -75,7 +117,7 @@ internal static class DownfallOrbPatch
                     sprite2D.Texture = desiredTex;
             }
             var curTween = (Tween?)CurTweenField.GetValue(__instance);
-            if (curTween is null || !curTween.IsRunning())
+            if (!passiveAnimating && (curTween is null || !curTween.IsRunning()))
                 sprite.Scale = orb.SpriteScale;
         }
 

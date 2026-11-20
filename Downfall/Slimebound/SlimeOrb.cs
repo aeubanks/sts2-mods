@@ -1,11 +1,15 @@
 using Downfall.Core;
 using Downfall.Slimebound.Powers;
+using Godot;
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Commands;
 using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.GameActions.Multiplayer;
+using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.HoverTips;
 using MegaCrit.Sts2.Core.Models.Powers;
+using MegaCrit.Sts2.Core.Saves;
+using MegaCrit.Sts2.Core.Settings;
 using MegaCrit.Sts2.Core.ValueProps;
 
 namespace Downfall.Slimebound;
@@ -82,9 +86,73 @@ public abstract class SlimeOrb : DownfallOrb
         return enemies[Owner.RunState.Rng.CombatTargets.NextInt(enemies.Count)];
     }
 
+    public override Tween? PlayPassiveAnimation(Sprite2D sprite)
+    {
+        if (NonInteractiveMode.IsActive)
+            return null;
+
+        float speed = SaveManager.Instance?.PrefsSave.FastMode == FastModeType.Fast ? 0.65f : 1.0f;
+        Vector2 baseScale = SpriteScale;
+
+        sprite.Position = Vector2.Zero;
+        sprite.Rotation = 0f;
+        sprite.Scale = baseScale;
+
+        var tween = sprite.CreateTween();
+
+        // 1. Brief squash-and-coil anticipation
+        tween.SetParallel(true);
+        tween.TweenProperty(sprite, "position", new Vector2(-8f, 4f), 0.045 * speed)
+            .SetTrans(Tween.TransitionType.Quad).SetEase(Tween.EaseType.Out);
+        tween.TweenProperty(sprite, "scale", new Vector2(baseScale.X * 1.18f, baseScale.Y * 0.80f), 0.045 * speed)
+            .SetTrans(Tween.TransitionType.Quad).SetEase(Tween.EaseType.Out);
+        tween.TweenProperty(sprite, "rotation", -0.08f, 0.045 * speed);
+
+        // 2. Forward hop-lunge toward enemies + bright highlight (echoing StS 1 SpawnedSlime.useFastAttackAnimation)
+        tween.Chain().SetParallel(true);
+        tween.TweenProperty(sprite, "position", new Vector2(56f, -14f), 0.14 * speed)
+            .SetTrans(Tween.TransitionType.Expo).SetEase(Tween.EaseType.Out);
+        tween.TweenProperty(sprite, "scale", new Vector2(baseScale.X * 1.24f, baseScale.Y * 0.90f), 0.14 * speed)
+            .SetTrans(Tween.TransitionType.Expo).SetEase(Tween.EaseType.Out);
+        tween.TweenProperty(sprite, "rotation", 0.14f, 0.14 * speed)
+            .SetTrans(Tween.TransitionType.Expo).SetEase(Tween.EaseType.Out);
+        tween.TweenProperty(sprite, "modulate", new Color(1.55f, 1.55f, 1.40f, 1f), 0.08 * speed);
+
+        // 3. Glide back to orb slot with soft landing squash
+        tween.Chain().SetParallel(true);
+        tween.TweenProperty(sprite, "position", Vector2.Zero, 0.17 * speed)
+            .SetTrans(Tween.TransitionType.Sine).SetEase(Tween.EaseType.Out);
+        tween.TweenProperty(sprite, "rotation", 0f, 0.17 * speed)
+            .SetTrans(Tween.TransitionType.Sine).SetEase(Tween.EaseType.Out);
+        tween.TweenProperty(sprite, "scale", new Vector2(baseScale.X * 1.08f, baseScale.Y * 0.92f), 0.17 * speed)
+            .SetTrans(Tween.TransitionType.Sine).SetEase(Tween.EaseType.Out);
+        tween.TweenProperty(sprite, "modulate", SpriteTint, 0.17 * speed);
+
+        // 4. Final settle to exact rest transform & live tint (e.g. Bronze Slime's stunned dim)
+        tween.Chain();
+        tween.TweenProperty(sprite, "scale", baseScale, 0.06 * speed)
+            .SetTrans(Tween.TransitionType.Sine).SetEase(Tween.EaseType.Out);
+        tween.TweenCallback(Callable.From(() =>
+        {
+            if (GodotObject.IsInstanceValid(sprite))
+            {
+                sprite.Position = Vector2.Zero;
+                sprite.Rotation = 0f;
+                sprite.Scale = SpriteScale;
+                sprite.Modulate = SpriteTint;
+            }
+        }));
+
+        return tween;
+    }
+
     protected async Task DealUnpoweredDamageAsync(PlayerChoiceContext choiceContext, Creature target, decimal amount)
     {
         if (amount <= 0m || !target.IsAlive || CombatManager.Instance.IsOverOrEnding)
+            return;
+
+        await Cmd.CustomScaledWait(0.08f, 0.16f);
+        if (!target.IsAlive || CombatManager.Instance.IsOverOrEnding)
             return;
 
         await CreatureCmd.Damage(choiceContext, target, amount, ValueProp.Unpowered, Owner.Creature);
@@ -93,6 +161,10 @@ public abstract class SlimeOrb : DownfallOrb
     protected async Task DealUnpoweredAoeDamageAsync(PlayerChoiceContext choiceContext, decimal amount)
     {
         if (amount <= 0m || CombatManager.Instance.IsOverOrEnding || Owner?.Creature.CombatState is not { } combatState)
+            return;
+
+        await Cmd.CustomScaledWait(0.08f, 0.16f);
+        if (CombatManager.Instance.IsOverOrEnding)
             return;
 
         var targets = combatState.HittableEnemies.Where(e => e.IsAlive).ToList();

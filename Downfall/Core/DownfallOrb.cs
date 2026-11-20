@@ -50,6 +50,12 @@ public abstract class DownfallOrb : CustomOrbModel
     /// </summary>
     public virtual Vector2 SpriteScale => Vector2.One;
 
+    /// <summary>
+    /// Optional animation played on the live orb Sprite2D whenever ActivatePassive() fires.
+    /// Return the active Tween (if any) so DownfallOrbPatch does not overwrite scale/modulate mid-animation.
+    /// </summary>
+    public virtual Tween? PlayPassiveAnimation(Sprite2D sprite) => null;
+
     public override Node2D CreateCustomSprite()
     {
         var tex = PreloadManager.Cache.GetCompressedTexture2D(SpriteTexturePath);

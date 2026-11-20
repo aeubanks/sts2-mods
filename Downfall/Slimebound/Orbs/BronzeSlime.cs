@@ -34,8 +34,8 @@ public sealed class BronzeSlime : SlimeOrb
             return;
         }
 
-        ActivatePassive();
         IsStunned = true;
+        ActivatePassive();
         RefreshVisuals();
         await DealUnpoweredAoeDamageAsync(choiceContext, PassiveVal);
     }
