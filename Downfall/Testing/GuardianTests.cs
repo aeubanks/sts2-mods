@@ -1167,6 +1167,314 @@ internal static class GuardianTests
         AutoTestAssert.Equal(PileType.Hand, orbBCard.Pile?.Type, "TimeSifter ran AFTER natural orb ticks and evoked Orb B too on Round 2");
     }
 
+    internal static async Task TestRareCardsInCombat()
+    {
+        var (player, runState, combatState) = await DownfallAutoTestRunner.StartCombatAsync<TheGuardian>("GUARDIAN_RARE");
+        var pcs = AutoTestAssert.NotNull(player.PlayerCombatState, "PlayerCombatState");
+        var enemy1 = AutoTestAssert.NotNull(combatState.HittableEnemies.FirstOrDefault(), "Enemy 1");
+        var enemy2 = await CreatureCmd.Add<MegaCrit.Sts2.Core.Models.Monsters.Nibbit>(combatState);
+        var ctx = new ThrowingPlayerChoiceContext();
+        await CreatureCmd.GainMaxHp(enemy1, 1500m);
+        await CreatureCmd.GainMaxHp(enemy2, 1500m);
+
+        // 1. BaubleBeam+ (2 sockets, 10 dmg + triggers Gem 3x) & ExploitGems+ (3 sockets, draw 1 + triggers Gems)
+        await ClearHandAndRefillEnergy(player, pcs);
+        var bauble = combatState.CreateCard<BaubleBeam>(player);
+        AutoTestAssert.Equal(1, bauble.MaxSockets, "Unupgraded BaubleBeam has 1 socket");
+        CardCmd.Upgrade(bauble);
+        AutoTestAssert.Equal(2, bauble.MaxSockets, "Upgraded BaubleBeam+ has 2 sockets");
+        AutoTestAssert.True(bauble.TrySocketGem(GemType.Orange), "Socket Citrine #1 into BaubleBeam+");
+        AutoTestAssert.True(bauble.TrySocketGem(GemType.Orange), "Socket Citrine #2 into BaubleBeam+");
+        await CardPileCmd.Add(bauble, PileType.Hand);
+        int e1Hp = enemy1.CurrentHp;
+        int energyBefore = pcs.Energy;
+        AutoTestAssert.True(bauble.TryManualPlay(enemy1), "Play BaubleBeam+ (10 dmg + 2 Citrines x 3 = +6 energy)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(e1Hp - 10, enemy1.CurrentHp, "BaubleBeam+ dealt 10 damage");
+        AutoTestAssert.Equal(energyBefore - 2 + 6, pcs.Energy, "BaubleBeam+ triggered both Citrines 3 times (+6 energy)");
+
+        var exploit = combatState.CreateCard<ExploitGems>(player);
+        AutoTestAssert.Equal(2, exploit.MaxSockets, "Unupgraded ExploitGems has 2 sockets");
+        CardCmd.Upgrade(exploit);
+        AutoTestAssert.Equal(3, exploit.MaxSockets, "Upgraded ExploitGems+ has 3 sockets");
+        AutoTestAssert.True(exploit.TrySocketGem(GemType.Orange), "Socket Citrine into ExploitGems+");
+        await CardPileCmd.Add(exploit, PileType.Hand);
+        energyBefore = pcs.Energy;
+        AutoTestAssert.True(exploit.TryManualPlay(null), "Play ExploitGems+");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(energyBefore + 1, pcs.Energy, "ExploitGems+ triggered socketed Citrine");
+
+        // 2. BodyCrash (10 existing Block + 5 gained Block -> 15 dmg)
+        await ClearHandAndRefillEnergy(player, pcs);
+        await CreatureCmd.LoseBlock(ctx, player.Creature, player.Creature.Block, null);
+        await CreatureCmd.GainBlock(player.Creature, 10m, ValueProp.Unpowered, null);
+        var bodyCrash = combatState.CreateCard<BodyCrash>(player);
+        await CardPileCmd.Add(bodyCrash, PileType.Hand);
+        e1Hp = enemy1.CurrentHp;
+        AutoTestAssert.True(bodyCrash.TryManualPlay(enemy1), "Play BodyCrash at 10 Block (gain 5 -> deal 15)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(15, player.Creature.Block, "BodyCrash gained 5 Block (10 -> 15)");
+        AutoTestAssert.Equal(e1Hp - 15, enemy1.CurrentHp, "BodyCrash dealt 15 damage equal to Block");
+
+        // 3. CompilePackage+ -> places upgraded Package into Stasis -> FastForward accelerates it into Hand -> play Package!
+        await ClearHandAndRefillEnergy(player, pcs);
+        var compile = combatState.CreateCard<CompilePackage>(player);
+        CardCmd.Upgrade(compile);
+        var fastForward = combatState.CreateCard<FastForward>(player);
+        await CardPileCmd.Add(compile, PileType.Hand);
+        await CardPileCmd.Add(fastForward, PileType.Hand);
+        AutoTestAssert.True(compile.TryManualPlay(null), "Play CompilePackage+");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(PileType.Exhaust, compile.Pile?.Type, "CompilePackage+ Exhausted");
+        var pkgOrb = GuardianMechanics.GetStasisOrbs(player).FirstOrDefault(o => o.StasisCard is GuardianPackageCard);
+        AutoTestAssert.NotNull(pkgOrb, "CompilePackage+ placed a Package into Stasis");
+        var pkg = (GuardianPackageCard)pkgOrb!.StasisCard!;
+        AutoTestAssert.True(pkg.IsUpgraded, "CompilePackage+ spawned an upgraded Package+");
+
+        // FastForward Accelerates oldest orb 3x (max Package cost is 2 -> 3 turns, so 3 Accelerates ALWAYS evokes it into Hand!)
+        AutoTestAssert.True(fastForward.TryManualPlay(null), "Play FastForward (Accelerate 3x)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(PileType.Hand, pkg.Pile?.Type, "FastForward evoked Package+ into Hand");
+        int handBeforePkg = pcs.Hand.Cards.Count;
+        AutoTestAssert.True(pkg.TryManualPlay(null), "Play upgraded Package+");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(PileType.Exhaust, pkg.Pile?.Type, "Package+ Exhausted");
+        AutoTestAssert.True(pcs.Hand.Cards.Count >= handBeforePkg + 2, "Package+ added 3 cards to Hand");
+        AutoTestAssert.True(pcs.Hand.Cards.Any(c => c.IsUpgraded), "Package+ added upgraded cards");
+
+        // 4. FierceBash (SelfStasis + Tick +2 dmg), GatlingBeam (SelfStasis 4 turns + Tick random enemy dmg), StasisField (6 Block + SelfStasis)
+        await ClearHandAndRefillEnergy(player, pcs);
+        await CreatureCmd.LoseBlock(ctx, player.Creature, player.Creature.Block, null);
+        var fierce = combatState.CreateCard<FierceBash>(player);
+        var gatling = combatState.CreateCard<GatlingBeam>(player);
+        var sField = combatState.CreateCard<StasisField>(player);
+        await CardPileCmd.Add(fierce, PileType.Hand);
+        await CardPileCmd.Add(gatling, PileType.Hand);
+        await CardPileCmd.Add(sField, PileType.Hand);
+
+        AutoTestAssert.True(fierce.TryManualPlay(enemy1), "Play FierceBash");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        var fierceOrb = GuardianMechanics.GetStasisOrbs(player).FirstOrDefault(o => ReferenceEquals(o.StasisCard, fierce));
+        AutoTestAssert.NotNull(fierceOrb, "FierceBash entered Stasis");
+
+        AutoTestAssert.True(gatling.TryManualPlay(enemy1), "Play GatlingBeam");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        var gatlingOrb = GuardianMechanics.GetStasisOrbs(player).FirstOrDefault(o => ReferenceEquals(o.StasisCard, gatling));
+        AutoTestAssert.NotNull(gatlingOrb, "GatlingBeam entered Stasis");
+        AutoTestAssert.Equal(4, gatlingOrb!.TurnsRemaining, "GatlingBeam Stasis lasts 4 turns");
+
+        AutoTestAssert.True(sField.TryManualPlay(null), "Play StasisField");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(6, player.Creature.Block, "StasisField granted 6 Block");
+        AutoTestAssert.True(GuardianMechanics.GetStasisOrbs(player).Any(o => ReferenceEquals(o.StasisCard, sField)), "StasisField entered Stasis");
+
+        // AccelerateAll 1x -> FierceBash +2 dmg (18->20), GatlingBeam fires 5 dmg at a random enemy (4->3 turns)!
+        // Also verify CompilePackage is unplayable when all 3 Stasis slots are full!
+        AutoTestAssert.Equal(3, GuardianMechanics.GetStasisOrbs(player).Count, "All 3 Stasis slots full before CompilePackage playability check");
+        var blockedCompile = combatState.CreateCard<CompilePackage>(player);
+        await CardPileCmd.Add(blockedCompile, PileType.Hand);
+        AutoTestAssert.True(!blockedCompile.CanPlay(), "CompilePackage cannot be played when Stasis slots are full");
+
+        int totalHp = enemy1.CurrentHp + enemy2.CurrentHp;
+        await GuardianMechanics.AccelerateAllAsync(ctx, player, 1);
+        AutoTestAssert.Equal(20m, fierce.DynamicVars.Damage.BaseValue, "FierceBash Tick increased damage 18 -> 20");
+        AutoTestAssert.Equal(3, gatlingOrb.TurnsRemaining, "GatlingBeam ticked 4 -> 3 turns");
+        AutoTestAssert.Equal(totalHp - 5, enemy1.CurrentHp + enemy2.CurrentHp, "GatlingBeam Tick dealt 5 damage to a random enemy");
+
+        // 5. GemFire (collects loose + socketed Gems across Hand/Draw/Discard/Stasis; non-Synthetic before Synthetic!)
+        await ClearHandAndRefillEnergy(player, pcs);
+        foreach (var orb in GuardianMechanics.GetStasisOrbs(player))
+            await GuardianMechanics.EvokeSpecificOrbAsync(ctx, player, orb);
+        await ClearHandAndRefillEnergy(player, pcs);
+
+        // Place Synthetic (Onyx) in Hand, Ruby in Discard & Citrine in Stasis + WeakPower(2) on player!
+        await PowerCmd.Apply<WeakPower>(ctx, player.Creature, 2m, enemy1, null);
+        var looseOnyx = combatState.CreateCard<Downfall.Guardian.Cards.GemSynthetic>(player);
+        var discardHolder = combatState.CreateCard<TwinSlam>(player);
+        AutoTestAssert.True(discardHolder.TrySocketGem(GemType.Red), "Socket Ruby into discard TwinSlam");
+        var stasisHolder = combatState.CreateCard<TwinSlam>(player);
+        AutoTestAssert.True(stasisHolder.TrySocketGem(GemType.Orange), "Socket Citrine into Stasis TwinSlam");
+        await CardPileCmd.Add(looseOnyx, PileType.Hand);
+        await CardPileCmd.Add(discardHolder, PileType.Discard);
+        await GuardianMechanics.PlaceInStasisAsync(ctx, player, stasisHolder);
+
+        var gemFire = combatState.CreateCard<GemFire>(player);
+        await CardPileCmd.Add(gemFire, PileType.Hand);
+        energyBefore = pcs.Energy;
+        e1Hp = enemy1.CurrentHp;
+        AutoTestAssert.True(gemFire.TryManualPlay(enemy1), "Play GemFire");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        // With WeakPower(2) active during the attack (before Gems run), 12 * 0.75 = 9 damage!
+        AutoTestAssert.Equal(e1Hp - 9, enemy1.CurrentHp, "GemFire dealt 9 damage (12 with Weak)");
+        AutoTestAssert.Equal(PileType.Exhaust, gemFire.Pile?.Type, "GemFire Exhausted");
+        // 4 Citrines total across piles: 2 on BaubleBeam+ (Discard) + 1 on ExploitGems+ (Discard) + 1 on stasisHolder (Stasis) = +4 energy!
+        AutoTestAssert.Equal(energyBefore - 2 + 4, pcs.Energy, "GemFire activated all 4 Citrines across Discard + Stasis (+4 energy)");
+        AutoTestAssert.Equal(2, player.Creature.GetPowerAmount<StrengthPower>(), "GemFire activated Ruby in Discard (+2 Str)");
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<WeakPower>(), "GemFire activated loose Onyx in Hand (reduced WeakPower 2 -> 1)");
+        await PowerCmd.Remove<WeakPower>(player.Creature);
+
+        // 6. SphericShield -> procures DefensiveModePotion -> drinking it enters Defensive Mode + triggers RevengePower!
+        await ClearHandAndRefillEnergy(player, pcs);
+        await PowerCmd.Remove<StrengthPower>(player.Creature);
+        await PowerCmd.Remove<FlexPotionPower>(player.Creature);
+        await PowerCmd.Remove<DefensiveModePower>(player.Creature);
+        await PowerCmd.Remove<ThornsPower>(player.Creature);
+        foreach (var pot in player.Potions.ToList())
+            await PotionCmd.Discard(pot);
+
+        var revenge = combatState.CreateCard<RevengeProtocol>(player);
+        var spheric = combatState.CreateCard<SphericShield>(player);
+        await CardPileCmd.Add(revenge, PileType.Hand);
+        await CardPileCmd.Add(spheric, PileType.Hand);
+        AutoTestAssert.True(revenge.TryManualPlay(null), "Play RevengeProtocol");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(2, player.Creature.GetPowerAmount<RevengePower>(), "RevengeProtocol applied RevengePower(2)");
+        AutoTestAssert.Equal(4, player.Creature.GetPowerAmount<BracePerTurnPower>(), "RevengeProtocol applied BracePerTurnPower(4)");
+
+        AutoTestAssert.True(spheric.TryManualPlay(null), "Play SphericShield");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        var defPot = player.Potions.OfType<Downfall.Guardian.Potions.DefensiveModePotion>().FirstOrDefault();
+        AutoTestAssert.NotNull(defPot, "SphericShield procured DefensiveModePotion");
+        await CreatureCmd.LoseBlock(ctx, player.Creature, player.Creature.Block, null);
+        defPot!.EnqueueManualUse(null);
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(16, player.Creature.Block, "DefensiveModePotion granted 16 Block");
+        AutoTestAssert.True(player.Creature.HasPower<DefensiveModePower>(), "DefensiveModePotion entered Defensive Mode");
+        AutoTestAssert.Equal(2, player.Creature.GetPowerAmount<StrengthPower>(), "DefensiveModePotion triggered RevengePower (+2 Str)");
+
+        // Play a second RevengeProtocol while ALREADY in Defensive Mode -> grants +2 Strength immediately!
+        var revenge2 = combatState.CreateCard<RevengeProtocol>(player);
+        await CardPileCmd.Add(revenge2, PileType.Hand);
+        AutoTestAssert.True(revenge2.TryManualPlay(null), "Play RevengeProtocol #2 while already in Defensive Mode");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(4, player.Creature.GetPowerAmount<StrengthPower>(), "RevengeProtocol #2 granted +2 Strength immediately while in Defensive Mode (2 -> 4)");
+        AutoTestAssert.Equal(8, player.Creature.GetPowerAmount<BracePerTurnPower>(), "BracePerTurnPower stacked to 8");
+
+        // 7. StasisEngine (0-cost StasisEngine does NOT self-count; 3rd 0-cost card in turn grants +1 Energy & +1 Draw once)
+        await ClearHandAndRefillEnergy(player, pcs);
+        var engine = combatState.CreateCard<StasisEngine>(player);
+        engine.EnergyCost.SetThisTurnOrUntilPlayed(0, reduceOnly: true);
+        var z1 = combatState.CreateCard<CrystalShiv>(player);
+        var z2 = combatState.CreateCard<CrystalShiv>(player);
+        var z3 = combatState.CreateCard<CrystalShiv>(player);
+        var z4 = combatState.CreateCard<CrystalShiv>(player);
+        await CardPileCmd.Add(engine, PileType.Hand);
+        await CardPileCmd.Add(z1, PileType.Hand);
+        await CardPileCmd.Add(z2, PileType.Hand);
+        await CardPileCmd.Add(z3, PileType.Hand);
+        await CardPileCmd.Add(z4, PileType.Hand);
+
+        AutoTestAssert.True(engine.TryManualPlay(null), "Play 0-cost StasisEngine");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        energyBefore = pcs.Energy;
+        AutoTestAssert.True(z1.TryManualPlay(enemy1), "Play 0-cost #1");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.True(z2.TryManualPlay(enemy1), "Play 0-cost #2");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(energyBefore, pcs.Energy, "StasisEngine did not trigger on 2nd 0-cost play (did not self-count)");
+        AutoTestAssert.True(z3.TryManualPlay(enemy1), "Play 0-cost #3 -> triggers StasisEngine!");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(energyBefore + 1, pcs.Energy, "StasisEngine granted +1 Energy on 3rd 0-cost play");
+        AutoTestAssert.True(z4.TryManualPlay(enemy1), "Play 0-cost #4 -> does not re-trigger");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(energyBefore + 1, pcs.Energy, "StasisEngine only triggers once per turn");
+
+        // 8. AncientConstruct, ConstructionForm, FuturePlans, GemFinder, and GigaBeam (Strength x2 AoE + skips Round 2 -> jumps to Round 3!)
+        await ClearHandAndRefillEnergy(player, pcs);
+        foreach (var orb in GuardianMechanics.GetStasisOrbs(player))
+            await GuardianMechanics.EvokeSpecificOrbAsync(ctx, player, orb);
+        await ClearHandAndRefillEnergy(player, pcs);
+        await PowerCmd.Remove<StrengthPower>(player.Creature);
+        await PowerCmd.Apply<StrengthPower>(ctx, player.Creature, 5m, player.Creature, null);
+
+        var construct = combatState.CreateCard<AncientConstruct>(player);
+        var cForm = combatState.CreateCard<ConstructionForm>(player);
+        var fPlans = combatState.CreateCard<FuturePlans>(player);
+        var gFinder = combatState.CreateCard<GemFinder>(player);
+        var giga = combatState.CreateCard<GigaBeam>(player);
+        var futureTarget = combatState.CreateCard<GuardianStrike>(player);
+        await CardPileCmd.Add(construct, PileType.Hand);
+        await CardPileCmd.Add(cForm, PileType.Hand);
+        await CardPileCmd.Add(fPlans, PileType.Hand);
+        await CardPileCmd.Add(gFinder, PileType.Hand);
+        await CardPileCmd.Add(giga, PileType.Hand);
+        await CardPileCmd.Add(futureTarget, PileType.Hand);
+
+        AutoTestAssert.True(construct.TryManualPlay(null), "Play AncientConstruct");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<ArtifactPower>(), "AncientConstruct granted 1 Artifact");
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<ConstructPower>(), "AncientConstruct applied ConstructPower(1)");
+        // Remove Artifact so ConstructPower regenerates it at start of next turn!
+        await PowerCmd.Remove<ArtifactPower>(player.Creature);
+
+        AutoTestAssert.True(cForm.TryManualPlay(null), "Play ConstructionForm");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(2, player.Creature.GetPowerAmount<BufferPower>(), "ConstructionForm granted 2 Buffer");
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<ConstructModePower>(), "ConstructionForm applied ConstructModePower(1)");
+
+        AutoTestAssert.True(fPlans.TryManualPlay(null), "Play FuturePlans");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<FuturePlansPower>(), "FuturePlans applied FuturePlansPower(1)");
+
+        AutoTestAssert.True(gFinder.TryManualPlay(null), "Play GemFinder");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<GemFinderPower>(), "GemFinder applied GemFinderPower(1)");
+
+        // Also test GigaBeam+ with negative Strength (-3 * 4 = -12 -> 40 - 12 = 28 AoE = 56 total!) before our Round 1->3 skip test
+        await PowerCmd.Remove<StrengthPower>(player.Creature);
+        await PowerCmd.Apply<StrengthPower>(ctx, player.Creature, -3m, enemy1, null);
+        var gigaNeg = combatState.CreateCard<GigaBeam>(player);
+        CardCmd.Upgrade(gigaNeg);
+        await CardPileCmd.Add(gigaNeg, PileType.Hand);
+        await PlayerCmd.GainEnergy(5, player);
+        totalHp = enemy1.CurrentHp + enemy2.CurrentHp;
+        AutoTestAssert.True(gigaNeg.TryManualPlay(null), "Play GigaBeam+ at -3 Strength (40 - 12 = 28 AoE = 56 total)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(totalHp - 56, enemy1.CurrentHp + enemy2.CurrentHp, "GigaBeam+ scaled negative Strength 4x (28 per enemy, 56 total)");
+        await PowerCmd.Remove<GuardianStunnedPower>(player.Creature);
+        await PowerCmd.Remove<StrengthPower>(player.Creature);
+        await PowerCmd.Apply<StrengthPower>(ctx, player.Creature, 5m, player.Creature, null);
+
+        // Play GigaBeam at 5 Strength: 36 + 2*5 = 46 damage to BOTH enemies (92 total) + applies GuardianStunnedPower(1)!
+        await PlayerCmd.GainEnergy(5, player);
+        totalHp = enemy1.CurrentHp + enemy2.CurrentHp;
+        AutoTestAssert.True(giga.TryManualPlay(null), "Play GigaBeam (36 + 5*2 = 46 AoE + Stunned)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(totalHp - 92, enemy1.CurrentHp + enemy2.CurrentHp, "GigaBeam dealt 46 AoE (92 total) with 2x Strength scaling");
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<GuardianStunnedPower>(), "GigaBeam applied GuardianStunnedPower(1)");
+
+        // Set ModeShiftPower to 25 before Round 1 end so we can verify BracePerTurnPower(8) reduced it on Round 2 + Round 3!
+        var msBraceCheck = player.Creature.GetPower<ModeShiftPower>()!;
+        if (msBraceCheck.Amount != 25)
+            await PowerCmd.ModifyAmount(ctx, msBraceCheck, 25 - msBraceCheck.Amount, player.Creature, null);
+
+        // End Round 1:
+        // - FuturePlansPower BeforeFlush places futureTarget into Stasis!
+        // - Round 2 starts: ConstructPower restores 1 Artifact, ConstructModePower grants +1 Str (Buffer >= 1), BracePerTurnPower Braces 8 (25 -> 17), GuardianStunnedPower skips Round 2 -> advances straight to Round 3 (BracePerTurnPower Braces 8 again: 17 -> 9)!
+        await CreatureCmd.GainBlock(player.Creature, 200m, ValueProp.Unpowered, null);
+        using (DownfallAutoTestRunner.PreferCards(c => ReferenceEquals(c, futureTarget)))
+        {
+            await DownfallAutoTestRunner.EndTurnAndWaitForRoundAsync(player, 3);
+        }
+        AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<GuardianStunnedPower>(), "GuardianStunnedPower skipped Round 2 and decremented to 0 by Round 3");
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<ArtifactPower>(), "ConstructPower regenerated 1 Artifact when player had none");
+        AutoTestAssert.True(player.Creature.GetPowerAmount<StrengthPower>() >= 7, "ConstructModePower granted Strength on Buffer turns");
+        AutoTestAssert.Equal(9, player.Creature.GetPowerAmount<ModeShiftPower>(), "BracePerTurnPower(8) Braced on Round 2 (25->17) and Round 3 (17->9)");
+        // futureTarget entered Stasis at end of Round 1 (1-cost -> 2 turns): Round 2 tick (2->1), Round 3 tick (1->0 -> evoked to Hand!)
+        AutoTestAssert.Equal(PileType.Hand, futureTarget.Pile?.Type, "FuturePlans placed Strike into Stasis at Round 1 end and it evoked by Round 3");
+
+        // Verify GemFinderPower adds extra 1-card Gem CardReward on CombatVictory!
+        var room = AutoTestAssert.NotNull(runState.CurrentRoom as CombatRoom, "CurrentRoom is CombatRoom");
+        int rewardsBefore = room.ExtraRewards.TryGetValue(player, out var existing) ? existing.Count : 0;
+        await player.Creature.GetPower<GemFinderPower>()!.AfterCombatVictory(room);
+        int rewardsAfter = room.ExtraRewards.TryGetValue(player, out var updated) ? updated.Count : 0;
+        AutoTestAssert.Equal(rewardsBefore + 1, rewardsAfter, "GemFinderPower added 1 extra Gem CardReward on victory");
+        var addedGemReward = AutoTestAssert.NotNull(updated!.LastOrDefault() as MegaCrit.Sts2.Core.Rewards.CardReward, "Extra reward is a CardReward");
+        var rewardCards = addedGemReward.Cards.ToList();
+        AutoTestAssert.Equal(1, rewardCards.Count, "GemFinder CardReward offers exactly 1 random Gem");
+        AutoTestAssert.True(rewardCards[0] is GuardianCard { IsGem: true }, "GemFinder reward card is a Gem");
+    }
+
     internal static async Task ClearHandAndRefillEnergy(Player player, PlayerCombatState pcs)
     {
         foreach (var c in pcs.Hand.Cards.ToList())

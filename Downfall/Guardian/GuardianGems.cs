@@ -9,6 +9,8 @@ using MegaCrit.Sts2.Core.HoverTips;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Models.Powers;
 using MegaCrit.Sts2.Core.Random;
+using MegaCrit.Sts2.Core.Rewards;
+using MegaCrit.Sts2.Core.Runs;
 
 namespace Downfall.Guardian;
 
@@ -140,6 +142,16 @@ internal static class GuardianGems
             pool.RemoveAt(idx);
         }
         return result;
+    }
+
+    internal static CardReward CreateGemCardReward(Player owner, int choiceCount = 3)
+    {
+        var cards = CreateDistinctGemChoicesForDeck(owner, choiceCount, onlyCommon: false, owner.RunState.Rng.CombatCardGeneration);
+        var rerollOptions = new CardCreationOptions(
+            [ModelDb.CardPool<GuardianCardPool>()],
+            CardCreationSource.Encounter,
+            CardRarityOddsType.RegularEncounter);
+        return new CardReward(cards, CardCreationSource.Encounter, owner, rerollOptions);
     }
 
     internal static async Task TriggerGemAsync(
