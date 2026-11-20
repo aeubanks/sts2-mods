@@ -374,7 +374,13 @@ internal static class PackmasterAutoTestRunner
 
         // Validate relics.
         var relics = relicPool.AllRelics.ToList();
-        AutoTestAssert.True(relics.Count >= 1, $"Expected at least 1 Packmaster relic, got {relics.Count}");
+        AutoTestAssert.Equal(5, relics.Count, $"Expected 5 Packmaster relics (2 Starter/Orobas + 3 pool), got {relics.Count}");
+        AutoTestAssert.Equal(RelicRarity.Starter, ModelDb.Relic<BagOfHolding>().Rarity, "BagOfHolding is Starter rarity (Orobas-only)");
+        AutoTestAssert.Equal(
+            ModelDb.Relic<BagOfHolding>(),
+            ModelDb.Relic<HandyHaversack>().GetUpgradeReplacement(),
+            "HandyHaversack upgrades to BagOfHolding via TouchOfOrobas");
+        AutoTestAssert.True(new LocString("relics", $"SEA_GLASS.{character.Id.Entry}.title").Exists(), "Missing Sea Glass title loc for Packmaster");
         foreach (var relic in relics)
         {
             AutoTestAssert.True(ResourceLoader.Exists(relic.PackedIconPath), $"Missing relic icon for {relic.Id}: {relic.PackedIconPath}");
@@ -631,6 +637,7 @@ internal static class PackmasterAutoTestRunner
 
         var pcs = AutoTestAssert.NotNull(player.PlayerCombatState, "PlayerCombatState");
         var enemy = AutoTestAssert.NotNull(combatState.HittableEnemies.FirstOrDefault(), "First hittable enemy");
+        await CreatureCmd.GainMaxHp(enemy, 100m);
 
         AutoTestAssert.Equal(6, pcs.Hand.Cards.Count, "Turn-1 hand size with HandyHaversack");
         AutoTestAssert.Equal(4, pcs.Energy, "Turn-1 energy with HandyHaversack");
@@ -1936,7 +1943,22 @@ internal static class PackmasterAutoTestRunner
     {
         var (player, _, combatState) = await StartCombatAsync("PMBATT01");
         var pcs = AutoTestAssert.NotNull(player.PlayerCombatState, "PlayerCombatState");
-        var enemy = AutoTestAssert.NotNull(combatState.HittableEnemies.FirstOrDefault(), "First hittable enemy");
+        var enemy = combatState.HittableEnemies.FirstOrDefault(e => e.Monster?.IntendsToAttack == true);
+        int round = combatState.RoundNumber;
+        while (enemy is null && round < 5)
+        {
+            await CreatureCmd.GainBlock(player.Creature, 100m, ValueProp.Unpowered, null);
+            round++;
+            await EndTurnAndWaitForRoundAsync(player, round);
+            enemy = combatState.HittableEnemies.FirstOrDefault(e => e.Monster?.IntendsToAttack == true);
+        }
+        enemy = AutoTestAssert.NotNull(enemy, "Hittable enemy intending to attack");
+        foreach (var p in player.Creature.Powers.ToList())
+            await PowerCmd.Remove(p);
+        foreach (var p in enemy.Powers.ToList())
+            await PowerCmd.Remove(p);
+        if (enemy.Block > 0)
+            await CreatureCmd.LoseBlock(new ThrowingPlayerChoiceContext(), enemy, enemy.Block, null);
 
         await CreatureCmd.GainMaxHp(enemy, 800m);
 
@@ -2020,8 +2042,8 @@ internal static class PackmasterAutoTestRunner
         await CreatureCmd.LoseBlock(new ThrowingPlayerChoiceContext(), enemy, enemy.Block, null);
         await PowerCmd.Remove<VulnerablePower>(enemy);
 
-        // 6. BatterUp against attacking enemy (Nibbit Turn 1 BUTT_MOVE): exact 1.5x crit (15 dmg) -> triggers OptimizedBlur (+2 Block), HardCaramel (1 Vuln), AvatarBeat (+2 Str, +1 draw, threshold 10 -> 15)!
-        AutoTestAssert.True(enemy.Monster?.IntendsToAttack == true, "Seed PMBATT01 Turn-1 enemy intends to attack so BatterUp crit is exercised");
+        // 6. BatterUp against attacking enemy: exact 1.5x crit (15 dmg) -> triggers OptimizedBlur (+2 Block), HardCaramel (1 Vuln), AvatarBeat (+2 Str, +1 draw, threshold 10 -> 15)!
+        AutoTestAssert.True(enemy.Monster?.IntendsToAttack == true, "Selected enemy intends to attack so BatterUp crit is exercised");
         var batterUp = combatState.CreateCard<BatterUp>(player);
         await CardPileCmd.Add(batterUp, PileType.Hand);
         hpBefore = enemy.CurrentHp;
@@ -2120,7 +2142,7 @@ internal static class PackmasterAutoTestRunner
         AutoTestAssert.True(allowedStrike.TryManualPlay(enemy), "Play Attack under OpenBracketPower");
         await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
 
-        await EndTurnAndWaitForRoundAsync(player, 2);
+        await EndTurnAndWaitForRoundAsync(player, combatState.RoundNumber + 1);
         AutoTestAssert.True(!player.Creature.HasPower<OpenBracketPower>(), "OpenBracketPower expired on Turn 2");
 
         // 10. Non-crit Homerun on Turn 2 (0 prior cards played this turn -> no 1.5x crit)!
@@ -2450,11 +2472,14 @@ internal static class PackmasterAutoTestRunner
             var collectionPack = AutoTestAssert.NotNull(PackRegistry.GetForCard(addedByCollection[0]), "PmCollection card 1 has pack");
             AutoTestAssert.Equal(collectionPack, PackRegistry.GetForCard(addedByCollection[1]), "PmCollection cards come from the same pack");
 
-            // 3. BagOfHolding: allowed when HandyHaversack is owned, removes HandyHaversack, then IsAllowed becomes false!
-            AutoTestAssert.True(ModelDb.Relic<BagOfHolding>().IsAllowed(runState), "BagOfHolding allowed while player owns HandyHaversack");
-            var bag = await RelicCmd.Obtain<BagOfHolding>(player);
-            AutoTestAssert.True(!player.Relics.Any(r => r is HandyHaversack), "BagOfHolding removed HandyHaversack");
-            AutoTestAssert.True(!ModelDb.Relic<BagOfHolding>().IsAllowed(runState), "BagOfHolding no longer allowed after HandyHaversack removed");
+            // 3. Touch of Orobas upgrades HandyHaversack -> BagOfHolding (Starter rarity, Orobas-only).
+            AutoTestAssert.Equal(RelicRarity.Starter, ModelDb.Relic<BagOfHolding>().Rarity, "BagOfHolding is Starter rarity (Orobas-only)");
+            var orobas = (MegaCrit.Sts2.Core.Models.Relics.TouchOfOrobas)ModelDb.Relic<MegaCrit.Sts2.Core.Models.Relics.TouchOfOrobas>().ToMutable();
+            AutoTestAssert.True(orobas.SetupForPlayer(player), "TouchOfOrobas found Packmaster starter HandyHaversack");
+            AutoTestAssert.Equal(ModelDb.Relic<BagOfHolding>().Id, orobas.UpgradedRelic, "TouchOfOrobas upgrades HandyHaversack -> BagOfHolding");
+            await RelicCmd.Obtain(orobas, player);
+            var bag = AutoTestAssert.NotNull(player.Relics.OfType<BagOfHolding>().FirstOrDefault(), "TouchOfOrobas granted BagOfHolding");
+            AutoTestAssert.True(!player.Relics.Any(r => r is HandyHaversack), "TouchOfOrobas replaced HandyHaversack");
 
             // 4. GemOfUnity IsAllowed check: true when !AllPacksMode, false when AllPacksMode == true.
             AutoTestAssert.True(ModelDb.Relic<GemOfUnity>().IsAllowed(runState), "GemOfUnity allowed in normal mode");
@@ -2462,7 +2487,6 @@ internal static class PackmasterAutoTestRunner
             AutoTestAssert.True(!ModelDb.Relic<GemOfUnity>().IsAllowed(runState), "GemOfUnity disallowed in AllPacksMode");
             PackmasterConfig.AllPacksMode = false;
 
-            var badge = await RelicCmd.Obtain<CollectorBadge>(player);
             var gem = await RelicCmd.Obtain<GemOfUnity>(player);
 
             // Enter combat: Deck has 13 cards -> BagOfHolding gives 13 / 5 = 2 turns of +1 Energy!
@@ -2483,7 +2507,6 @@ internal static class PackmasterAutoTestRunner
             AutoTestAssert.Equal(4, pcs.Energy, "Turn-1 Energy = 3 base + 1 BagOfHolding");
             AutoTestAssert.Equal(1, bag.DisplayAmount, "BagOfHolding counter decremented 2 -> 1");
             AutoTestAssert.Equal(3, gem.DisplayAmount, "GemOfUnity counter starts at 3 active packs");
-            AutoTestAssert.Equal(0, badge.DisplayAmount, "CollectorBadge counter starts at 0");
 
             // Take 10 HP damage so GemOfUnity's +5 Heal is observable.
             await CreatureCmd.Damage(new ThrowingPlayerChoiceContext(), player.Creature, 10m, ValueProp.Unblockable | ValueProp.Unpowered, null, null);
@@ -2493,7 +2516,7 @@ internal static class PackmasterAutoTestRunner
                 await CardPileCmd.Add(c, PileType.Discard);
             await PlayerCmd.GainEnergy(6, player);
 
-            // Play non-pack Strike (must NOT affect badge or gem!), CoreSet #1, duplicate CoreSet #2, Quiet #1, Batter #1, and inactive Warlock #1 (4th pack -> badge stays capped at 3, gem does NOT re-trigger!).
+            // Play non-pack Strike (must NOT affect gem!), CoreSet #1, duplicate CoreSet #2, Quiet #1, Batter #1, and inactive Warlock #1 (gem does NOT re-trigger!).
             var nonPackStrike = combatState.CreateCard<PackmasterStrike>(player);
             var core1 = combatState.CreateCard<Showoff>(player);
             var core2 = combatState.CreateCard<Sideboard>(player);
@@ -2509,32 +2532,23 @@ internal static class PackmasterAutoTestRunner
 
             AutoTestAssert.True(nonPackStrike.TryManualPlay(enemy), "Play non-pack Strike");
             await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
-            AutoTestAssert.Equal(0, badge.DisplayAmount, "Non-pack card did not increment CollectorBadge");
             AutoTestAssert.Equal(3, gem.DisplayAmount, "Non-pack card did not decrement GemOfUnity");
 
             AutoTestAssert.True(core1.TryManualPlay(null), "Play CoreSet #1");
             await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
-            AutoTestAssert.Equal(1, badge.DisplayAmount, "CollectorBadge count = 1 after CoreSet");
             AutoTestAssert.Equal(2, gem.DisplayAmount, "GemOfUnity remaining = 2 after CoreSet");
 
             AutoTestAssert.True(core2.TryManualPlay(null), "Play CoreSet #2 (duplicate pack)");
             await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
-            AutoTestAssert.Equal(1, badge.DisplayAmount, "Duplicate pack did not increment CollectorBadge");
             AutoTestAssert.Equal(2, gem.DisplayAmount, "Duplicate pack did not decrement GemOfUnity");
 
             AutoTestAssert.True(quiet1.TryManualPlay(null), "Play Quiet #1");
             await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
-            AutoTestAssert.Equal(2, badge.DisplayAmount, "CollectorBadge count = 2 after Quiet");
             AutoTestAssert.Equal(1, gem.DisplayAmount, "GemOfUnity remaining = 1 after Quiet");
-            AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<EnergyNextTurnPower>(), "CollectorBadge has not triggered at 2 packs");
 
             int blockBeforeThird = player.Creature.Block;
-            AutoTestAssert.True(batter1.TryManualPlay(enemy), "Play Batter #1 (3rd pack -> triggers BOTH CollectorBadge & GemOfUnity!)");
+            AutoTestAssert.True(batter1.TryManualPlay(enemy), "Play Batter #1 (3rd pack -> triggers GemOfUnity!)");
             await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
-
-            AutoTestAssert.Equal(3, badge.DisplayAmount, "CollectorBadge reached 3 packs");
-            AutoTestAssert.Equal(RelicStatus.Disabled, badge.Status, "CollectorBadge disabled for rest of turn");
-            AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<EnergyNextTurnPower>(), "CollectorBadge applied EnergyNextTurnPower(1)");
 
             AutoTestAssert.Equal(RelicStatus.Disabled, gem.Status, "GemOfUnity disabled after triggering once");
             AutoTestAssert.True(!gem.ShowCounter, "GemOfUnity hides counter after triggering");
@@ -2543,23 +2557,19 @@ internal static class PackmasterAutoTestRunner
             AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<DexterityPower>(), "GemOfUnity granted +1 Dexterity");
             AutoTestAssert.Equal(hpBeforeGem + 5, player.Creature.CurrentHp, "GemOfUnity healed +5 HP");
 
-            // 4th distinct pack card (inactive Warlock): CollectorBadge stays capped at 3 (no 2nd EnergyNextTurnPower), GemOfUnity does not re-trigger!
+            // 4th distinct pack card (inactive Warlock): GemOfUnity does not re-trigger!
             AutoTestAssert.True(inactiveWarlock.TryManualPlay(null), "Play 4th pack card (Warlock)");
             await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
-            AutoTestAssert.Equal(3, badge.DisplayAmount, "CollectorBadge stayed capped at 3 after 4th pack");
-            AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<EnergyNextTurnPower>(), "CollectorBadge did not grant extra EnergyNextTurnPower");
             AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<StrengthPower>(), "GemOfUnity did not re-trigger");
 
-            // Turn 2: Energy = 3 base + 1 BagOfHolding (last turn!) + 1 CollectorBadge = 5 Energy; CollectorBadge reset to 0!
+            // Turn 2: Energy = 3 base + 1 BagOfHolding (last turn!) = 4 Energy!
             await EndTurnAndWaitForRoundAsync(player, 2);
-            AutoTestAssert.Equal(5, pcs.Energy, "Turn-2 Energy = 3 base + 1 BagOfHolding + 1 CollectorBadge");
+            AutoTestAssert.Equal(4, pcs.Energy, "Turn-2 Energy = 3 base + 1 BagOfHolding");
             AutoTestAssert.Equal(0, bag.DisplayAmount, "BagOfHolding counter reached 0 on Turn 2");
             AutoTestAssert.True(!bag.ShowCounter, "BagOfHolding hides counter once exhausted");
             AutoTestAssert.Equal(RelicStatus.Disabled, bag.Status, "BagOfHolding disabled after 2 turns");
-            AutoTestAssert.Equal(0, badge.DisplayAmount, "CollectorBadge reset to 0 on Turn 2");
-            AutoTestAssert.Equal(RelicStatus.Normal, badge.Status, "CollectorBadge re-enabled on Turn 2");
 
-            // Turn 3: BagOfHolding exhausted, no CollectorBadge -> 3 base Energy!
+            // Turn 3: BagOfHolding exhausted -> 3 base Energy!
             await EndTurnAndWaitForRoundAsync(player, 3);
             AutoTestAssert.Equal(3, pcs.Energy, "Turn-3 Energy = 3 base (BagOfHolding exhausted after 2 turns)");
         }
@@ -3706,6 +3716,7 @@ internal static class PackmasterAutoTestRunner
         // End Turn 1 WITH >0 Energy -> OverwhelmingPowerPower must NOT deal HP loss! Weak decays 1 -> 0 without triggering Determination!
         // Turn 2 hand size = 5 base - 1 DrawLessNextTurnPower = 4 cards!
         await CreatureCmd.GainBlock(player.Creature, 50m, ValueProp.Unpowered, null);
+        await PowerCmd.Apply<ArtifactPower>(new ThrowingPlayerChoiceContext(), player.Creature, 5m, player.Creature, null);
         int hpBeforeTurn2 = player.Creature.CurrentHp;
         await EndTurnAndWaitForRoundAsync(player, 2);
         AutoTestAssert.Equal(hpBeforeTurn2, player.Creature.CurrentHp, "OverwhelmingPowerPower did NOT deal HP loss when ending turn with >0 Energy");

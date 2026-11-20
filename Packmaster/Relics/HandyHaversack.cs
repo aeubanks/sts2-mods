@@ -5,6 +5,7 @@ using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Entities.Relics;
 using MegaCrit.Sts2.Core.HoverTips;
 using MegaCrit.Sts2.Core.Localization.DynamicVars;
+using MegaCrit.Sts2.Core.Models;
 
 namespace Packmaster.Relics;
 
@@ -13,6 +14,8 @@ public sealed class HandyHaversack : PackmasterRelic
     protected override string IconKey => "handy_haversack";
 
     public override RelicRarity Rarity => RelicRarity.Starter;
+
+    public override RelicModel GetUpgradeReplacement() => ModelDb.Relic<BagOfHolding>();
 
     protected override IEnumerable<DynamicVar> CanonicalVars =>
     [
