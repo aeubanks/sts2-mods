@@ -192,6 +192,7 @@ internal static class DownfallAutoTestRunner
                 ("SlimeboundStarterCombat", SlimeboundTests.TestStarterCombat),
                 ("SlimeboundCommonCardsInCombat", SlimeboundTests.TestCommonCardsInCombat),
                 ("SlimeboundUncommonBatch1InCombat", SlimeboundTests.TestUncommonBatch1AndSpecialistsInCombat),
+                ("SlimeboundUncommonBatch2InCombat", SlimeboundTests.TestUncommonBatch2InCombat),
             ];
 
             int matchedIndex = 0;
@@ -441,6 +442,34 @@ internal static class DownfallAutoTestRunner
         var characters = ModelDb.AllCharacters.OfType<DownfallCharacter>().ToList();
         AutoTestAssert.True(characters.Count >= 1, "At least 1 Downfall character registered");
 
+        static void ValidateCard(CardModel card)
+        {
+            AutoTestAssert.True(ResourceLoader.Exists(card.PortraitPath), $"Missing portrait for {card.Id}: {card.PortraitPath}");
+            if (card is DownfallCard dfCard)
+                AutoTestAssert.True(ResourceLoader.Exists(dfCard.CustomPortraitPath), $"Missing big portrait for {card.Id}: {dfCard.CustomPortraitPath}");
+
+            AutoTestAssert.True(new LocString("cards", $"{card.Id.Entry}.title").Exists(), $"Missing title loc for {card.Id}");
+            AutoTestAssert.True(card.Description.Exists(), $"Missing description loc for {card.Id}");
+
+            var desc = card.GetDescriptionForPile(PileType.None);
+            AutoTestAssert.True(!string.IsNullOrWhiteSpace(desc) && !desc.Contains('{') && !desc.Contains('}'),
+                $"Invalid description for {card.Id}: {desc}");
+
+            var upgDesc = card.GetDescriptionForUpgradePreview();
+            AutoTestAssert.True(!string.IsNullOrWhiteSpace(upgDesc) && !upgDesc.Contains('{') && !upgDesc.Contains('}'),
+                $"Invalid upgrade description for {card.Id}+: {upgDesc}");
+
+            // Materialize HoverTips (base + upgraded) to catch broken or cyclic card/power tips.
+            _ = card.HoverTips.ToList();
+            if (card.IsUpgradable)
+            {
+                var upgClone = (CardModel)card.MutableClone();
+                upgClone.UpgradeInternal();
+                upgClone.FinalizeUpgradeInternal();
+                _ = upgClone.HoverTips.ToList();
+            }
+        }
+
         foreach (var character in characters)
         {
             AutoTestAssert.True(character.Title.Exists(), $"Missing title loc for {character.Id}");
@@ -479,32 +508,7 @@ internal static class DownfallAutoTestRunner
             }
 
             foreach (var card in cardPool.AllCards)
-            {
-                AutoTestAssert.True(ResourceLoader.Exists(card.PortraitPath), $"Missing portrait for {card.Id}: {card.PortraitPath}");
-                if (card is DownfallCard dfCard)
-                    AutoTestAssert.True(ResourceLoader.Exists(dfCard.CustomPortraitPath), $"Missing big portrait for {card.Id}: {dfCard.CustomPortraitPath}");
-
-                AutoTestAssert.True(new LocString("cards", $"{card.Id.Entry}.title").Exists(), $"Missing title loc for {card.Id}");
-                AutoTestAssert.True(card.Description.Exists(), $"Missing description loc for {card.Id}");
-
-                var desc = card.GetDescriptionForPile(PileType.None);
-                AutoTestAssert.True(!string.IsNullOrWhiteSpace(desc) && !desc.Contains('{') && !desc.Contains('}'),
-                    $"Invalid description for {card.Id}: {desc}");
-
-                var upgDesc = card.GetDescriptionForUpgradePreview();
-                AutoTestAssert.True(!string.IsNullOrWhiteSpace(upgDesc) && !upgDesc.Contains('{') && !upgDesc.Contains('}'),
-                    $"Invalid upgrade description for {card.Id}+: {upgDesc}");
-
-                // Materialize HoverTips (base + upgraded) to catch broken or cyclic card/power tips.
-                _ = card.HoverTips.ToList();
-                if (card.IsUpgradable)
-                {
-                    var upgClone = (CardModel)card.MutableClone();
-                    upgClone.UpgradeInternal();
-                    upgClone.FinalizeUpgradeInternal();
-                    _ = upgClone.HoverTips.ToList();
-                }
-            }
+                ValidateCard(card);
 
             // Validate relic pool + relics
             foreach (var relic in character.RelicPool.AllRelics)
@@ -534,6 +538,15 @@ internal static class DownfallAutoTestRunner
                     $"Invalid potion description for {potion.Id}: {pDesc}");
             }
         }
+
+        // Validate all Downfall custom TokenCardPool cards (Lick, SpecialistChoiceCards, etc.).
+        var tokenCards = ModelDb.CardPool<MegaCrit.Sts2.Core.Models.CardPools.TokenCardPool>()
+            .AllCards
+            .OfType<DownfallCard>()
+            .ToList();
+        AutoTestAssert.True(tokenCards.Count >= 1, "At least 1 Downfall token card registered");
+        foreach (var tokenCard in tokenCards)
+            ValidateCard(tokenCard);
 
         // Validate all Downfall custom powers.
         var customPowers = ModelDb.AllPowers.OfType<DownfallPower>().ToList();
@@ -681,6 +694,7 @@ internal static class DownfallAutoTestRunner
         AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-CONSUME_KEYWORD.description").Exists(), "Missing Consume desc loc");
         AutoTestAssert.True(new LocString("cards", "DOWNFALL-SELF_FORMING_GOO.selectionScreenPrompt").Exists(), "Missing SelfFormingGoo prompt loc");
         AutoTestAssert.True(new LocString("cards", "DOWNFALL-SLIMEBOUND_DISSOLVE.selectionScreenPrompt").Exists(), "Missing SlimeboundDissolve prompt loc");
+        AutoTestAssert.True(new LocString("cards", "DOWNFALL-REPLICATION.selectionScreenPrompt").Exists(), "Missing Replication prompt loc");
 
         return Task.CompletedTask;
     }

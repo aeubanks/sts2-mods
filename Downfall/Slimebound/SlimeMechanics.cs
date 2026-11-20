@@ -183,6 +183,36 @@ internal static class SlimeMechanics
         }
     }
 
+    internal static async Task CommandAllSlimesAsync(
+        PlayerChoiceContext choiceContext,
+        Player player,
+        int times = 1,
+        bool applyMinionMaster = true)
+    {
+        if (times <= 0 || !player.Creature.IsAlive || CombatManager.Instance.IsOverOrEnding)
+            return;
+
+        for (int t = 0; t < times; t++)
+        {
+            foreach (var slime in GetSlimes(player))
+            {
+                if (!player.Creature.IsAlive || CombatManager.Instance.IsOverOrEnding)
+                    return;
+                if (player.PlayerCombatState?.OrbQueue.Orbs.Contains(slime) != true)
+                    continue;
+
+                await OrbCmd.Passive(choiceContext, slime, null, countAffectedByHooks: false);
+            }
+        }
+
+        if (applyMinionMaster)
+        {
+            int extra = player.Creature.Powers.OfType<IMinionMasterProvider>().Sum(p => p.ExtraCommands);
+            if (extra > 0)
+                await CommandAsync(choiceContext, player, extra, applyMinionMaster: false);
+        }
+    }
+
     /// <summary>
     /// Absorbs (evokes) a specific SlimeOrb without ever touching non-Slime Defect orbs.
     /// Mirrors OrbCmd.Evoke's exact order: Remove -> EvokeOrbAnim -> Evoke -> AfterOrbEvoked -> RemoveInternal.

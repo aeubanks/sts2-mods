@@ -385,5 +385,8 @@
   "DOWNFALL-GOOP_ARMOR_POWER.smartDescription": "Whenever you [gold]Consume[/gold], gain [blue]{Amount}[/blue] [gold]Block[/gold].",
   "DOWNFALL-COMBO_ATTACK_POWER.title": "Lead By Example",
   "DOWNFALL-COMBO_ATTACK_POWER.description": "The first enemy-targeting card you play each turn also [gold]Commands[/gold].",
-  "DOWNFALL-COMBO_ATTACK_POWER.smartDescription": "The first {Amount:plural:enemy-targeting card|[blue]{}[/blue] enemy-targeting cards} you play each turn also {Amount:plural:[gold]Commands[/gold]|[gold]Command[/gold]}."
+  "DOWNFALL-COMBO_ATTACK_POWER.smartDescription": "The first {Amount:plural:enemy-targeting card|[blue]{}[/blue] enemy-targeting cards} you play each turn also {Amount:plural:[gold]Commands[/gold]|[gold]Command[/gold]}.",
+  "DOWNFALL-SLIME_SACRIFICE_POWER.title": "Protect the Boss",
+  "DOWNFALL-SLIME_SACRIFICE_POWER.description": "Prevent the next enemy attack damage by [gold]Absorbing[/gold] your leading Slime instead.",
+  "DOWNFALL-SLIME_SACRIFICE_POWER.smartDescription": "Prevent the next {Amount:plural:time|[blue]{}[/blue] times} you would be damaged by an enemy attack, [gold]Absorbing[/gold] your leading Slime instead."
 }
