@@ -6,6 +6,7 @@ using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Entities.Relics;
 using MegaCrit.Sts2.Core.GameActions.Multiplayer;
 using MegaCrit.Sts2.Core.HoverTips;
+using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Rooms;
 
 namespace Downfall.Champ.Relics;
@@ -15,6 +16,8 @@ public sealed class ChampionCrown : ChampRelic
     private bool _triggeredThisCombat;
 
     public override RelicRarity Rarity => RelicRarity.Starter;
+
+    public override RelicModel? GetUpgradeReplacement() => ModelDb.Relic<ChampionCrownUpgraded>();
 
     protected override IEnumerable<IHoverTip> ExtraHoverTips =>
     [

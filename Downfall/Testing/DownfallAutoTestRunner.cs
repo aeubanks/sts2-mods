@@ -12,6 +12,7 @@ using MegaCrit.Sts2.Core.Commands;
 using MegaCrit.Sts2.Core.Entities.CardRewardAlternatives;
 using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Entities.Players;
+using MegaCrit.Sts2.Core.Entities.Relics;
 using MegaCrit.Sts2.Core.Factories;
 using MegaCrit.Sts2.Core.GameActions;
 using MegaCrit.Sts2.Core.GameActions.Multiplayer;
@@ -602,6 +603,15 @@ internal static class DownfallAutoTestRunner
         AutoTestAssert.True(new LocString("relics", "DOWNFALL-GREMLIN_MOB_STATUS.title").Exists(), "Missing Gremlin Mob Status title loc");
         AutoTestAssert.True(new LocString("static_hover_tips", "HIT_POINTS.title").Exists(), "Missing static HIT_POINTS.title loc");
         AutoTestAssert.True(new LocString("static_hover_tips", "HIT_POINTS.description").Exists(), "Missing static HIT_POINTS.description loc");
+        foreach (var ch in characters)
+        {
+            AutoTestAssert.True(new LocString("relics", $"SEA_GLASS.{ch.Id.Entry}.title").Exists(), $"Missing Sea Glass title loc for {ch.Id.Entry}");
+            foreach (var starter in ch.StartingRelics.OfType<CustomRelicModel>())
+            {
+                var upg = AutoTestAssert.NotNull(starter.GetUpgradeReplacement(), $"{starter.Id} defines Orobas GetUpgradeReplacement()");
+                AutoTestAssert.Equal(RelicRarity.Starter, upg.Rarity, $"{upg.Id} uses RelicRarity.Starter so it is excluded from normal relic pools");
+            }
+        }
         AutoTestAssert.True(new LocString("relics", "DOWNFALL-GREMLIN_KNOB.additionalRestSiteHealText").Exists(), "Missing GremlinKnob additionalRestSiteHealText loc");
         AutoTestAssert.True(new LocString("relics", "DOWNFALL-GREMLIN_KNOB_UPGRADE.additionalRestSiteHealText").Exists(), "Missing GremlinKnobUpgrade additionalRestSiteHealText loc");
         AutoTestAssert.True(ResourceLoader.Exists("res://Downfall/images/champ/ui/stance_charge_on.png"), "Missing Champ stance_charge_on.png");

@@ -1326,12 +1326,16 @@ internal static class HermitTests
                 await PlayerCmd.GainEnergy(10 - pcs.Energy, player);
         }
 
-        // 1. ClaspedLocket + StraightRazor (both Remove AND Transform!):
-        //    ClaspedLocket replaces OldLocket and adds 2 Injuries to Deck; StraightRazor heals 15 HP on Remove and 15 HP on Transform!
-        AutoTestAssert.True(ModelDb.Relic<ClaspedLocket>().IsAllowed(player.RunState), "ClaspedLocket allowed while owning OldLocket");
+        // 1. Touch of Orobas -> ClaspedLocket + StraightRazor (both Remove AND Transform!):
+        //    TouchOfOrobas replaces OldLocket with ClaspedLocket (Starter rarity, not in normal drop pools) and adds 2 Injuries to Deck; StraightRazor heals 15 HP on Remove and 15 HP on Transform!
+        AutoTestAssert.Equal(RelicRarity.Starter, ModelDb.Relic<ClaspedLocket>().Rarity, "ClaspedLocket is Starter rarity (Orobas-only)");
         int injuriesBefore = player.Deck.Cards.Count(c => c is StsCards.Injury);
-        var clasped = await RelicCmd.Obtain<ClaspedLocket>(player);
-        AutoTestAssert.True(!player.Relics.OfType<OldLocket>().Any(), "ClaspedLocket replaced OldLocket");
+        var orobasHermit = (MegaCrit.Sts2.Core.Models.Relics.TouchOfOrobas)ModelDb.Relic<MegaCrit.Sts2.Core.Models.Relics.TouchOfOrobas>().ToMutable();
+        AutoTestAssert.True(orobasHermit.SetupForPlayer(player), "TouchOfOrobas found Hermit starter OldLocket");
+        AutoTestAssert.Equal(ModelDb.Relic<ClaspedLocket>().Id, orobasHermit.UpgradedRelic, "TouchOfOrobas upgrades OldLocket -> ClaspedLocket");
+        await RelicCmd.Obtain(orobasHermit, player);
+        var clasped = AutoTestAssert.NotNull(player.Relics.OfType<ClaspedLocket>().FirstOrDefault(), "TouchOfOrobas granted ClaspedLocket");
+        AutoTestAssert.True(!player.Relics.OfType<OldLocket>().Any(), "TouchOfOrobas replaced OldLocket");
         AutoTestAssert.Equal(injuriesBefore + 2, player.Deck.Cards.Count(c => c is StsCards.Injury), "ClaspedLocket added 2 Injuries to deck");
 
         await RelicCmd.Obtain<StraightRazor>(player);
@@ -1450,10 +1454,7 @@ internal static class HermitTests
         // Restore HP for remaining tests.
         await CreatureCmd.Heal(player.Creature, player.Creature.MaxHp - player.Creature.CurrentHp);
 
-        // 7. BartenderGlass (Shotglass) + all 3 Hermit Potions (Tonic, BlackBile, Eclipse)!
-        //    Mid-combat obtain auto-initializes counter to 2 without manual BeforeCombatStart(); 3rd potion grants 0 potions!
-        var shotglass = await RelicCmd.Obtain<BartenderGlass>(player);
-        AutoTestAssert.Equal(2, shotglass.DisplayAmount, "Shotglass mid-combat obtain initialized counter to 2");
+        // 7. All 3 Hermit Potions (Tonic, BlackBile, Eclipse)!
         foreach (var existing in player.Potions.ToList())
             await PotionCmd.Discard(existing);
 
@@ -1461,8 +1462,6 @@ internal static class HermitTests
         await PotionCmd.TryToProcure(tonic, player);
         await tonic.OnUseWrapper(ctx, player.Creature);
         AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<RuggedPower>(), "Tonic granted 1 Rugged");
-        AutoTestAssert.Equal(1, player.Potions.Count(), "Shotglass granted 1st random potion");
-        AutoTestAssert.Equal(1, shotglass.DisplayAmount, "Shotglass counter decremented 2 -> 1");
         await PowerCmd.Remove<RuggedPower>(player.Creature);
         foreach (var existing in player.Potions.ToList())
             await PotionCmd.Discard(existing);
@@ -1471,8 +1470,6 @@ internal static class HermitTests
         await PotionCmd.TryToProcure(blackBile, player);
         await blackBile.OnUseWrapper(ctx, enemy1);
         AutoTestAssert.Equal(6, enemy1.GetPowerAmount<BruisePower>(), "BlackBile applied 6 Bruise");
-        AutoTestAssert.Equal(1, player.Potions.Count(), "Shotglass granted 2nd random potion");
-        AutoTestAssert.Equal(RelicStatus.Disabled, shotglass.Status, "Shotglass disabled after 2 triggers");
         await PowerCmd.Remove<BruisePower>(enemy1);
         foreach (var existing in player.Potions.ToList())
             await PotionCmd.Discard(existing);
@@ -1488,13 +1485,11 @@ internal static class HermitTests
         }
         AutoTestAssert.True(pcs.Hand.Cards.Contains(exhaustedMalice), "Eclipse returned exhausted card to hand");
         AutoTestAssert.Equal(0, exhaustedMalice.EnergyCost.GetWithModifiers(CostModifiers.All), "Eclipse set returned card cost to 0");
-        AutoTestAssert.Equal(0, player.Potions.Count(), "Disabled Shotglass did NOT grant a 3rd potion");
 
-        // 8. BrassTacks + Spyglass + DentedPlate + RyeStalk across turn transition!
+        // 8. BrassTacks + Spyglass + RyeStalk across turn transition!
         await ResetHandAndEnergy();
         var brassTacks = await RelicCmd.Obtain<BrassTacks>(player);
         await RelicCmd.Obtain<Spyglass>(player);
-        await RelicCmd.Obtain<DentedPlate>(player);
         await RelicCmd.Obtain<RyeStalk>(player);
 
         // Player-turn HP loss must NOT trigger RyeStalk!
@@ -1502,12 +1497,6 @@ internal static class HermitTests
         await CreatureCmd.Damage(ctx, player.Creature, 2m, ValueProp.Unblockable | ValueProp.Unpowered, null, null, null);
         AutoTestAssert.Equal(handBeforeSelfDamage, pcs.Hand.Cards.Count, "RyeStalk did NOT trigger on player-turn HP loss");
 
-        // Drop player HP to <= 50% for DentedPlate (with plenty of HP left to survive enemy attacks!)
-        int targetHp = player.Creature.MaxHp / 2;
-        if (player.Creature.CurrentHp > targetHp)
-        {
-            await CreatureCmd.Damage(ctx, player.Creature, player.Creature.CurrentHp - targetHp, ValueProp.Unblockable | ValueProp.Unpowered, null, null, null);
-        }
         await PowerCmd.Apply<ConcentratedPower>(ctx, player.Creature, 1m, player.Creature, null);
         if (player.Creature.Block > 0)
             await CreatureCmd.LoseBlock(ctx, player.Creature, player.Creature.Block, null);
@@ -1517,11 +1506,11 @@ internal static class HermitTests
         int hpBeforeTurnEnd = player.Creature.CurrentHp;
         await DownfallAutoTestRunner.EndTurnAndWaitForRoundAsync(player, 2);
 
-        // Spyglass (+1 EnergyNextTurnPower) + DentedPlate (+1 Energy) -> MaxEnergy + 2!
-        AutoTestAssert.Equal(player.MaxEnergy + 2, pcs.Energy, "Spyglass + DentedPlate granted +2 Energy on Round 2");
-        // Enemy attacks broke through BrassTacks's 2 Block -> RyeStalk drew on enemy turn + DentedPlate drew on Round 2 start!
+        // Spyglass (+1 EnergyNextTurnPower) -> MaxEnergy + 1!
+        AutoTestAssert.Equal(player.MaxEnergy + 1, pcs.Energy, "Spyglass granted +1 Energy on Round 2");
+        // Enemy attacks broke through BrassTacks's 2 Block -> RyeStalk drew on enemy turn!
         AutoTestAssert.True(player.Creature.CurrentHp < hpBeforeTurnEnd, "Enemy dealt unblocked damage during enemy turn");
-        AutoTestAssert.True(pcs.Hand.Cards.Count >= 7, $"DentedPlate (+1) + RyeStalk (>=1) drew extra cards (hand={pcs.Hand.Cards.Count})");
+        AutoTestAssert.True(pcs.Hand.Cards.Count >= 6, $"RyeStalk drew extra card(s) (hand={pcs.Hand.Cards.Count})");
 
         // Verify BrassTacks gained 2 Block directly via BeforeSideTurnEnd!
         if (player.Creature.Block > 0)

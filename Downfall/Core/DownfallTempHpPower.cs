@@ -17,7 +17,7 @@ public interface ITempHpDepletedListener
 /// <summary>
 /// Reusable Temporary HP buff shared across Downfall characters (Gremlins, Guardian, Slime Boss, etc.).
 /// Absorbs unblocked HP loss in ModifyHpLostBeforeOsty so it layers deterministically before
-/// AfterOsty (ScatterPower) and AfterOstyLate (ShortStature / PetGhost / Rebirth).
+/// AfterOsty (ScatterPower) and AfterOstyLate (PetGhost / Rebirth).
 /// </summary>
 public sealed class DownfallTempHpPower : DownfallPower
 {

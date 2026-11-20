@@ -1845,7 +1845,7 @@ internal static class GremlinTests
     }
 
     /// <summary>
-    /// End-to-end combat verification of all 15 Phase 3E Gremlin Relics and all 4 Gremlin Potions.
+    /// End-to-end combat verification of Gremlin Relics (including Touch of Orobas upgrade) and all 4 Gremlin Potions.
     /// </summary>
     public static async Task TestRelicsAndPotionsInCombat()
     {
@@ -1883,15 +1883,22 @@ internal static class GremlinTests
 
         await GremlinMob.SwapToSpecificAsync(player, combatState, GremlinKind.Mad, ctx);
 
-        // 1. GremlinKnobUpgrade: replaces GremlinKnob on pickup AND preserves MobStateEncoded; 1st shuffle per turn -> +1 Energy, Draw 1, Swap; 2nd shuffle does not!
+        // 1. Touch of Orobas -> GremlinKnobUpgrade: replaces GremlinKnob AND preserves MobStateEncoded (even with cold cache!); 1st shuffle per turn -> +1 Energy, Draw 1, Swap; 2nd shuffle does not!
+        AutoTestAssert.Equal(RelicRarity.Starter, ModelDb.Relic<GremlinKnobUpgrade>().Rarity, "GremlinKnobUpgrade is Starter rarity (Orobas-only)");
         var starterKnob = AutoTestAssert.NotNull(player.Relics.OfType<GremlinKnob>().FirstOrDefault(), "Starts with GremlinKnob");
         await CreatureCmd.Damage(ctx, player.Creature, 4m, ValueProp.Unblockable | ValueProp.Unpowered, enemy1, null, null); // Mad 16 -> 12
         await GremlinMob.SwapNextAsync(player, combatState, ctx); // persists Mad=12 to starterKnob.MobStateEncoded
         string? preUpgradeEncoded = starterKnob.MobStateEncoded;
         AutoTestAssert.True(!string.IsNullOrEmpty(preUpgradeEncoded), "GremlinKnob encoded mob state before upgrade");
-        var crown = await RelicCmd.Obtain<GremlinKnobUpgrade>(player);
-        AutoTestAssert.True(!player.Relics.OfType<GremlinKnob>().Any(), "GremlinKnobUpgrade replaced GremlinKnob");
-        AutoTestAssert.Equal(preUpgradeEncoded, crown.MobStateEncoded, "GremlinKnobUpgrade preserved MobStateEncoded across replacement");
+        // Invalidate in-memory cache before TouchOfOrobas to verify AfterRemoved() -> AfterObtained() handoff survives Save/Reload!
+        GremlinMob.InvalidateCache(player);
+        var orobasGremlin = (MegaCrit.Sts2.Core.Models.Relics.TouchOfOrobas)ModelDb.Relic<MegaCrit.Sts2.Core.Models.Relics.TouchOfOrobas>().ToMutable();
+        AutoTestAssert.True(orobasGremlin.SetupForPlayer(player), "TouchOfOrobas found Gremlins starter GremlinKnob");
+        AutoTestAssert.Equal(ModelDb.Relic<GremlinKnobUpgrade>().Id, orobasGremlin.UpgradedRelic, "TouchOfOrobas upgrades GremlinKnob -> GremlinKnobUpgrade");
+        await RelicCmd.Obtain(orobasGremlin, player);
+        var crown = AutoTestAssert.NotNull(player.Relics.OfType<GremlinKnobUpgrade>().FirstOrDefault(), "TouchOfOrobas granted GremlinKnobUpgrade");
+        AutoTestAssert.True(!player.Relics.OfType<GremlinKnob>().Any(), "TouchOfOrobas replaced GremlinKnob");
+        AutoTestAssert.Equal(preUpgradeEncoded, crown.MobStateEncoded, "GremlinKnobUpgrade preserved MobStateEncoded across TouchOfOrobas replacement");
         AutoTestAssert.Equal(RelicStatus.Normal, crown.Status, "GremlinKnobUpgrade active before first shuffle");
         // Restore Mad to full HP so subsequent assertions have clean 16/16 HP.
         await GremlinMob.SwapToSpecificAsync(player, combatState, GremlinKind.Mad, ctx);
@@ -2003,17 +2010,8 @@ internal static class GremlinTests
         await CardPileCmd.Draw(ctx, 1, player);
         AutoTestAssert.Equal(2, pcs.Hand.Cards.Count, "Drawing TagTeam triggered TagTeamwork to draw +1 card");
 
-        // 8. LeaderVoucher: permanently sacrifices a random Gremlin (immediately evicting from active combat!) and adds +1 Max Energy!
-        var voucher = await RelicCmd.Obtain<LeaderVoucher>(player);
-        AutoTestAssert.True(voucher.SacrificedGremlin.HasValue, "LeaderVoucher sacrificed a Gremlin on pickup");
-        AutoTestAssert.Equal(4, GremlinMob.GetLivingCount(combatState, player), "LeaderVoucher reduced living Gremlin count from 5 to 4");
-        AutoTestAssert.True(!await GremlinMob.SwapToSpecificAsync(player, combatState, voucher.SacrificedGremlin!.Value, ctx),
-            "Cannot swap to the Gremlin sacrificed by LeaderVoucher");
-        AutoTestAssert.Equal(4m, voucher.ModifyMaxEnergy(player, 3m), "LeaderVoucher grants +1 Max Energy");
-
-        // 9. GremlinBomb (<= 50% HP on unblocked dmg -> 30 AOE once) + ShortStature (layers after ScatterPower -> prevent lethal + heal 75% Max HP) + GremlinGravestone + RestSiteHeal:
+        // 8. GremlinBomb (<= 50% HP on unblocked dmg -> 30 AOE once, including one-shot 16->0 lethal hit) + ScatterPower + GremlinGravestone + RestSiteHeal:
         await CleanPlayerBuffs();
-        var statue = await RelicCmd.Obtain<ShortStature>(player);
         var grave = await RelicCmd.Obtain<GremlinGravestone>(player);
 
         // Ensure active Gremlin starts at 16/16 HP, then drop to 8/16 (<= 50%) BEFORE obtaining GremlinBomb!
@@ -2043,7 +2041,6 @@ internal static class GremlinTests
 
         // Re-arm GremlinBomb cleanly via BeforeCombatStart and verify a 16 -> 0 one-shot lethal hit triggers GremlinBomb + death-swap!
         await bomb.BeforeCombatStart();
-        await RelicCmd.Remove(statue); // temporarily remove ShortStature so lethal hit triggers death-swap directly
         await CreatureCmd.SetCurrentHp(player.Creature, 16m);
         GremlinKind oneShotKind = GremlinMob.GetActiveKind(combatState, player);
         e1Hp = enemy1.CurrentHp;
@@ -2053,39 +2050,30 @@ internal static class GremlinTests
         AutoTestAssert.Equal(e2Hp - 30, enemy2.CurrentHp, "One-shot 16->0 lethal hit triggered GremlinBomb on enemy2");
         AutoTestAssert.Equal(RelicStatus.Disabled, bomb.Status, "GremlinBomb disabled after one-shot trigger");
         AutoTestAssert.Equal(0, GremlinMob.GetGremlinHp(player, oneShotKind), "One-shot Gremlin died and auto-swapped");
-        GremlinMob.ResurrectRandom(player, 16); // restore living count to 4
-        statue = await RelicCmd.Obtain<ShortStature>(player);
+        GremlinMob.ResurrectRandom(player, 16); // restore living count to 5
         await CreatureCmd.SetCurrentHp(player.Creature, 6m);
 
-        // ScatterPower (AfterOsty) prevents lethal BEFORE ShortStature (AfterOstyLate) and swaps to a healthy standby Gremlin!
+        // ScatterPower (AfterOsty) prevents lethal and swaps to a healthy standby Gremlin!
         GremlinKind preScatterKind = GremlinMob.GetActiveKind(combatState, player);
         await PowerCmd.Apply<ScatterPower>(ctx, player.Creature, 1m, player.Creature, null);
         await CreatureCmd.Damage(ctx, player.Creature, 500m, ValueProp.Unblockable | ValueProp.Unpowered, enemy1, null, null);
-        AutoTestAssert.Equal(6, GremlinMob.GetGremlinHp(player, preScatterKind), "ScatterPower saved the 6-HP Gremlin before ShortStature");
+        AutoTestAssert.Equal(6, GremlinMob.GetGremlinHp(player, preScatterKind), "ScatterPower saved the 6-HP Gremlin");
         AutoTestAssert.True(GremlinMob.GetActiveKind(combatState, player) != preScatterKind, "ScatterPower swapped to a standby Gremlin");
         AutoTestAssert.Equal(16, player.Creature.CurrentHp, "Swapped-in standby Gremlin has 16/16 HP");
         AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<ScatterPower>(), "ScatterPower consumed");
-        AutoTestAssert.Equal(RelicStatus.Normal, statue.Status, "ShortStature stayed armed when ScatterPower prevented lethal");
 
-        // Drop active Gremlin to 2 HP, then take lethal hit -> ShortStature prevents lethal AND heals 75% of 16 = +12 HP (2 -> 14)!
-        await CreatureCmd.SetCurrentHp(player.Creature, 2m);
-        await CreatureCmd.Damage(ctx, player.Creature, 500m, ValueProp.Unblockable | ValueProp.Unpowered, enemy1, null, null);
-        AutoTestAssert.True(player.Creature.IsAlive, "ShortStature prevented lethal damage");
-        AutoTestAssert.Equal(14, player.Creature.CurrentHp, "ShortStature healed 75% of 16 Max HP (+12: 2 -> 14)");
-        AutoTestAssert.Equal(RelicStatus.Disabled, statue.Status, "ShortStature disabled after triggering once");
-
-        // Kill active Gremlin now that ShortStature is spent -> living count 4 -> 3!
+        // Kill active Gremlin -> living count 5 -> 4!
         GremlinKind deadForGrave = GremlinMob.GetActiveKind(combatState, player);
         await CreatureCmd.Damage(ctx, player.Creature, 50m, ValueProp.Unblockable | ValueProp.Unpowered, enemy1, null, null);
-        AutoTestAssert.Equal(0, GremlinMob.GetGremlinHp(player, deadForGrave), "Active Gremlin died once ShortStature was spent");
-        AutoTestAssert.Equal(3, GremlinMob.GetLivingCount(combatState, player), "Living count dropped 4 -> 3 (1 sacrificed + 1 dead)");
+        AutoTestAssert.Equal(0, GremlinMob.GetGremlinHp(player, deadForGrave), "Active Gremlin died");
+        AutoTestAssert.Equal(4, GremlinMob.GetLivingCount(combatState, player), "Living count dropped 5 -> 4");
 
         // GremlinGravestone revives fallen Gremlin at full HP (16) on entering RestSiteRoom!
         await grave.AfterRoomEntered(new RestSiteRoom());
-        AutoTestAssert.Equal(4, GremlinMob.GetLivingCount(combatState, player), "GremlinGravestone revived fallen Gremlin on RestSiteRoom entry (3 -> 4)");
+        AutoTestAssert.Equal(5, GremlinMob.GetLivingCount(combatState, player), "GremlinGravestone revived fallen Gremlin on RestSiteRoom entry (4 -> 5)");
         AutoTestAssert.Equal(16, GremlinMob.GetGremlinHp(player, deadForGrave), "GremlinGravestone revived at full 16/16 HP");
 
-        // When all non-sacrificed Gremlins are alive, GremlinGravestone heals ALL living Gremlins by +5 HP!
+        // When all Gremlins are alive, GremlinGravestone heals ALL living Gremlins by +5 HP!
         await CreatureCmd.SetCurrentHp(player.Creature, 9m);
         GremlinKind injuredStandby = GremlinMob.GetActiveKind(combatState, player);
         await GremlinMob.SwapNextAsync(player, combatState, ctx); // injuredStandby now in standby at 9/16
@@ -2097,13 +2085,13 @@ internal static class GremlinTests
         // Kill active Gremlin -> test GremlinKnobBase.AfterRestSiteHeal revives fallen Gremlin at 50% Max HP (8) AND heals standby Gremlins!
         GremlinKind deadForRest = GremlinMob.GetActiveKind(combatState, player);
         await CreatureCmd.Damage(ctx, player.Creature, 50m, ValueProp.Unblockable | ValueProp.Unpowered, enemy1, null, null);
-        AutoTestAssert.Equal(3, GremlinMob.GetLivingCount(combatState, player), "Living count dropped 4 -> 3 before Rest");
+        AutoTestAssert.Equal(4, GremlinMob.GetLivingCount(combatState, player), "Living count dropped 5 -> 4 before Rest");
         await crown.AfterRestSiteHeal(player, isMimicked: false);
-        AutoTestAssert.Equal(4, GremlinMob.GetLivingCount(combatState, player), "Rest healed standby & revived fallen Gremlin (3 -> 4)");
+        AutoTestAssert.Equal(5, GremlinMob.GetLivingCount(combatState, player), "Rest healed standby & revived fallen Gremlin (4 -> 5)");
         AutoTestAssert.Equal(8, GremlinMob.GetGremlinHp(player, deadForRest), "Rest revived fallen Gremlin at 50% Max HP (8/16)");
         AutoTestAssert.Equal(16, GremlinMob.GetGremlinHp(player, injuredStandby), "Rest healed injured standby Gremlin to full (14 -> 16)");
 
-        // 10. All 4 Gremlin Potions (EauDeGremPotion, NecromancyPotion, SwapPotion, WizPotion):
+        // 9. All 4 Gremlin Potions (EauDeGremPotion, NecromancyPotion, SwapPotion, WizPotion):
         foreach (var existing in player.Potions.ToList())
             await PotionCmd.Discard(existing);
         // Remove ImpeccablePecs / PricklyShields / FragmentationGrenade / StolenMerchandise so potion numbers are crisp!
@@ -2132,14 +2120,14 @@ internal static class GremlinTests
         // (b) NecromancyPotion: revives a fallen Gremlin at 50% Max HP (8), or heals active Gremlin 50% (8) when all alive!
         GremlinKind deadForPot = GremlinMob.GetActiveKind(combatState, player);
         await CreatureCmd.Damage(ctx, player.Creature, 50m, ValueProp.Unblockable | ValueProp.Unpowered, enemy1, null, null);
-        AutoTestAssert.Equal(3, GremlinMob.GetLivingCount(combatState, player), "Living count 3 before NecromancyPotion");
+        AutoTestAssert.Equal(4, GremlinMob.GetLivingCount(combatState, player), "Living count 4 before NecromancyPotion");
         var necroPot = ModelDb.Potion<NecromancyPotion>().ToMutable();
         await PotionCmd.TryToProcure(necroPot, player);
         await necroPot.OnUseWrapper(ctx, player.Creature);
-        AutoTestAssert.Equal(4, GremlinMob.GetLivingCount(combatState, player), "NecromancyPotion revived fallen Gremlin (3 -> 4)");
+        AutoTestAssert.Equal(5, GremlinMob.GetLivingCount(combatState, player), "NecromancyPotion revived fallen Gremlin (4 -> 5)");
         AutoTestAssert.Equal(8, GremlinMob.GetGremlinHp(player, deadForPot), "NecromancyPotion revived fallen Gremlin with 50% Max HP (8/16)");
 
-        // When all non-sacrificed Gremlins are alive, NecromancyPotion heals active Gremlin by 50% Max HP (+8: 6 -> 14)!
+        // When all Gremlins are alive, NecromancyPotion heals active Gremlin by 50% Max HP (+8: 6 -> 14)!
         await CreatureCmd.SetCurrentHp(player.Creature, 6m);
         var necroPot2 = ModelDb.Potion<NecromancyPotion>().ToMutable();
         await PotionCmd.TryToProcure(necroPot2, player);
@@ -2159,7 +2147,7 @@ internal static class GremlinTests
         await wizPot.OnUseWrapper(ctx, player.Creature);
         AutoTestAssert.Equal(10, player.Creature.GetPowerAmount<VigorPower>(), "WizPotion granted 10 VigorPower");
 
-        // 11. WoundPoker (end of turn -> 4 dmg to Weak enemies) + SupplyScroll (Turn 3 start -> +2 Energy, +2 Draw):
+        // 10. WoundPoker (end of turn -> 4 dmg to Weak enemies) + SupplyScroll (Turn 3 start -> +2 Energy, +2 Draw):
         await RelicCmd.Obtain<WoundPoker>(player);
         await RelicCmd.Obtain<SupplyScroll>(player);
         await RelicCmd.Remove(player.Relics.OfType<TagTeamwork>().First());
@@ -2175,13 +2163,13 @@ internal static class GremlinTests
         AutoTestAssert.Equal(3, mallet.DisplayAmount, "MagicalMallet reset to 3 triggers remaining on Turn 2 start");
         AutoTestAssert.Equal(RelicStatus.Normal, mallet.Status, "MagicalMallet re-enabled on Turn 2 start");
 
-        // End Turn 2 -> Turn 3: LeaderVoucher (+1 Energy -> base 4) + SupplyScroll (+2 Energy -> 6, +2 Draw -> 7 cards)!
+        // End Turn 2 -> Turn 3: SupplyScroll (+2 Energy -> 5, +2 Draw -> 7 cards)!
         // Ensure plenty of cards in Draw Pile so Turn 3 draws all 5 + 2 = 7 cleanly!
         for (int i = 0; i < 10; i++)
             await CardPileCmd.Add(combatState.CreateCard<GremlinDefend>(player), PileType.Draw, CardPilePosition.Top);
         await CreatureCmd.GainBlock(player.Creature, 80m, ValueProp.Unpowered, null);
         await DownfallAutoTestRunner.EndTurnAndWaitForRoundAsync(player, 3);
-        AutoTestAssert.Equal(6, pcs.Energy, "Turn 3 Energy = 3 base + 1 LeaderVoucher + 2 SupplyScroll = 6");
+        AutoTestAssert.Equal(5, pcs.Energy, "Turn 3 Energy = 3 base + 2 SupplyScroll = 5");
         AutoTestAssert.Equal(7, pcs.Hand.Cards.Count, "Turn 3 Hand = 5 base draw + 2 SupplyScroll = 7");
     }
 }

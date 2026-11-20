@@ -54,6 +54,15 @@ public abstract class GremlinKnobBase : GremlinRelic
         await GremlinMob.HandleActiveGremlinDeathAsync(Owner);
     }
 
+    public override Task AfterRemoved()
+    {
+        if (Owner.Character is TheGremlins)
+        {
+            GremlinMob.CacheEncodedStateIfMissing(Owner, MobStateEncoded);
+        }
+        return Task.CompletedTask;
+    }
+
     public override async Task BeforeCombatStart()
     {
         if (Owner.Creature.CombatState is { } combatState && Owner.Character is TheGremlins)

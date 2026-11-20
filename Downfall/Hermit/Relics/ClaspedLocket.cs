@@ -8,7 +8,6 @@ using MegaCrit.Sts2.Core.HoverTips;
 using MegaCrit.Sts2.Core.Localization.DynamicVars;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Rooms;
-using MegaCrit.Sts2.Core.Runs;
 using StsCards = MegaCrit.Sts2.Core.Models.Cards;
 
 namespace Downfall.Hermit.Relics;
@@ -19,7 +18,7 @@ public sealed class ClaspedLocket : HermitRelic
 
     protected override string IconKey => "clasped_locket";
 
-    public override RelicRarity Rarity => RelicRarity.Rare;
+    public override RelicRarity Rarity => RelicRarity.Starter;
     public override bool HasUponPickupEffect => true;
 
     protected override IEnumerable<DynamicVar> CanonicalVars =>
@@ -33,9 +32,6 @@ public sealed class ClaspedLocket : HermitRelic
         HoverTipFactory.FromKeyword(CardKeyword.Exhaust),
         HoverTipFactory.FromCard<StsCards.Injury>()
     ];
-
-    protected override bool IsAllowedInternal(IRunState runState) =>
-        runState.Players.Any(p => p.Relics.OfType<OldLocket>().Any());
 
     public override async Task AfterObtained()
     {

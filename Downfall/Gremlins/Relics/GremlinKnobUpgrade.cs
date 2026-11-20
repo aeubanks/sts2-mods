@@ -7,7 +7,6 @@ using MegaCrit.Sts2.Core.GameActions.Multiplayer;
 using MegaCrit.Sts2.Core.HoverTips;
 using MegaCrit.Sts2.Core.Localization.DynamicVars;
 using MegaCrit.Sts2.Core.Rooms;
-using MegaCrit.Sts2.Core.Runs;
 
 namespace Downfall.Gremlins.Relics;
 
@@ -15,11 +14,7 @@ public sealed class GremlinKnobUpgrade : GremlinKnobBase
 {
     private bool _triggeredThisTurn;
 
-    public override RelicRarity Rarity => RelicRarity.Rare;
-    public override bool HasUponPickupEffect => true;
-
-    protected override bool IsAllowedInternal(IRunState runState) =>
-        runState.Players.Any(p => p.Relics.OfType<GremlinKnob>().Any());
+    public override RelicRarity Rarity => RelicRarity.Starter;
 
     protected override IEnumerable<DynamicVar> CanonicalVars =>
     [

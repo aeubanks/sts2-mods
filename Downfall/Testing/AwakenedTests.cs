@@ -1961,13 +1961,15 @@ internal static class AwakenedTests
         // 2. ZenerDeck obtained BEFORE ShreddedDoll (exercises Must-Fix #1: no duplicate ESP in Cycle 1)!
         await RelicCmd.Obtain<ZenerDeck>(player);
 
-        // 3. ShreddedDoll: IsAllowed true with RippedDoll, replaces RippedDoll, then IsAllowed false!
-        AutoTestAssert.True(ModelDb.Relic<ShreddedDoll>().IsAllowed(runState), "ShreddedDoll.IsAllowed is true while owning RippedDoll");
-        AutoTestAssert.True(player.Relics.OfType<RippedDoll>().Any(), "Starter RippedDoll present before ShreddedDoll");
-        await RelicCmd.Obtain<ShreddedDoll>(player);
-        AutoTestAssert.True(!player.Relics.OfType<RippedDoll>().Any(), "ShreddedDoll replaced RippedDoll");
-        AutoTestAssert.True(player.Relics.OfType<ShreddedDoll>().Any(), "ShreddedDoll obtained");
-        AutoTestAssert.True(!ModelDb.Relic<ShreddedDoll>().IsAllowed(runState), "ShreddedDoll.IsAllowed is false once RippedDoll is gone");
+        // 3. Touch of Orobas upgrades RippedDoll -> ShreddedDoll (Starter rarity, excluded from normal pools)!
+        AutoTestAssert.Equal(RelicRarity.Starter, ModelDb.Relic<ShreddedDoll>().Rarity, "ShreddedDoll is Starter rarity (Orobas-only)");
+        AutoTestAssert.True(player.Relics.OfType<RippedDoll>().Any(), "Starter RippedDoll present before TouchOfOrobas");
+        var orobasAwakened = (MegaCrit.Sts2.Core.Models.Relics.TouchOfOrobas)ModelDb.Relic<MegaCrit.Sts2.Core.Models.Relics.TouchOfOrobas>().ToMutable();
+        AutoTestAssert.True(orobasAwakened.SetupForPlayer(player), "TouchOfOrobas found Awakened starter RippedDoll");
+        AutoTestAssert.Equal(ModelDb.Relic<ShreddedDoll>().Id, orobasAwakened.UpgradedRelic, "TouchOfOrobas upgrades RippedDoll -> ShreddedDoll");
+        await RelicCmd.Obtain(orobasAwakened, player);
+        AutoTestAssert.True(!player.Relics.OfType<RippedDoll>().Any(), "TouchOfOrobas replaced RippedDoll");
+        AutoTestAssert.True(player.Relics.OfType<ShreddedDoll>().Any(), "TouchOfOrobas granted ShreddedDoll");
 
         // 4. ShardOfNowak (+3 Strength at combat start)!
         await RelicCmd.Obtain<ShardOfNowak>(player);
@@ -2062,11 +2064,9 @@ internal static class AwakenedTests
         AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<RitualPower>(), "ShreddedDoll did NOT grant Ritual on 2nd Spellbook refresh");
         if (player.Creature.GetPower<RitualPower>() is { } ritClean1) await PowerCmd.Remove(ritClean1);
 
-        // 7. WhiteRibbon + CursedBlessing:
-        //    - Inactive Chant (Victuals after non-Power) grants 4 Block from WhiteRibbon, does NOT advance CursedBlessing!
-        //    - Non-Chant card (AwakenedStrike) does NOT trigger WhiteRibbon!
+        // 7. CursedBlessing:
+        //    - Inactive Chant (Victuals after non-Power) does NOT advance CursedBlessing!
         //    - 3 ACTIVE Chants (Ceremony -> Victuals x3) trigger CursedBlessing (+1 Ritual) once; 4th active Chant does NOT!
-        await RelicCmd.Obtain<WhiteRibbon>(player);
         var cursedBlessing = await RelicCmd.Obtain<CursedBlessing>(player);
 
         await ResetHandAndEnergy();
@@ -2074,13 +2074,11 @@ internal static class AwakenedTests
         await CardPileCmd.Add(nonChantStrike, PileType.Hand);
         AutoTestAssert.True(nonChantStrike.TryManualPlay(enemy1), "Play non-Chant Strike");
         await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
-        AutoTestAssert.Equal(0, player.Creature.Block, "WhiteRibbon did NOT trigger on non-Chant Strike");
 
         var inactiveVictuals = combatState.CreateCard<Victuals>(player);
         await CardPileCmd.Add(inactiveVictuals, PileType.Hand);
         AutoTestAssert.True(inactiveVictuals.TryManualPlay(null), "Play Victuals with Chant inactive");
         await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
-        AutoTestAssert.Equal(4, player.Creature.Block, "WhiteRibbon granted 4 Block even when Chant was inactive");
         AutoTestAssert.Equal(0, cursedBlessing.DisplayAmount, "CursedBlessing ignored inactive Chant play");
 
         for (int i = 1; i <= 4; i++)
@@ -2158,31 +2156,17 @@ internal static class AwakenedTests
         AutoTestAssert.Equal(8, enemy1.GetPowerAmount<ManaburnPower>(), "Enemy-created Void did NOT trigger TomeOfPortalmancy");
         if (player.Creature.GetPower<StrengthPower>() is { } strClean2) await PowerCmd.Remove(strClean2);
 
-        // 11. StrengthBooster (+25% Manaburn damage) + AbyssBlade (1st Void drain per turn refunds +1 Energy & draws 1):
+        // 11. StrengthBooster (+25% Manaburn damage):
         await RelicCmd.Obtain<StrengthBooster>(player);
-        var abyssBlade = await RelicCmd.Obtain<AbyssBlade>(player);
         await PowerCmd.Apply<ManaburnPower>(ctx, enemy1, 4m, player.Creature, null); // enemy1 now has 12 Manaburn -> 12 + 3 = 15 dmg!
 
         await ResetHandAndEnergy(energy: 5);
-        await CardPileCmd.Add(combatState.CreateCard<AwakenedDefend>(player), PileType.Draw, CardPilePosition.Top);
         var drainVoid1 = combatState.CreateCard<StsCards.Void>(player);
         await CardPileCmd.Add(drainVoid1, PileType.Draw, CardPilePosition.Top);
         e1Hp = enemy1.CurrentHp;
         await CardPileCmd.Draw(ctx, 1m, player);
         await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
         AutoTestAssert.Equal(e1Hp - 15, enemy1.CurrentHp, "StrengthBooster boosted 12 Manaburn by +25% to 15 damage");
-        AutoTestAssert.Equal(5, pcs.Energy, "AbyssBlade refunded 1 Energy on 1st Drain this turn (5 - 1 + 1 = 5)");
-        AutoTestAssert.Equal(2, pcs.Hand.Cards.Count, "AbyssBlade drew 1 extra card on 1st Drain (Void + Defend = 2)");
-        AutoTestAssert.Equal(RelicStatus.Disabled, abyssBlade.Status, "AbyssBlade disabled after 1st Drain this turn");
-
-        // 2nd Drain on the same turn must NOT trigger AbyssBlade again!
-        var drainVoid2 = combatState.CreateCard<StsCards.Void>(player);
-        await CardPileCmd.Add(drainVoid2, PileType.Draw, CardPilePosition.Top);
-        int handBefore2ndDrain = pcs.Hand.Cards.Count;
-        await CardPileCmd.Draw(ctx, 1m, player);
-        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
-        AutoTestAssert.Equal(4, pcs.Energy, "AbyssBlade did NOT refund Energy on 2nd Drain this turn (5 -> 4)");
-        AutoTestAssert.Equal(handBefore2ndDrain + 1, pcs.Hand.Cards.Count, "AbyssBlade did NOT draw extra card on 2nd Drain");
 
         // 12. HexxBomb (Manabomb): when an enemy with Manaburn dies, transfer its Manaburn to a random living enemy!
         await RelicCmd.Obtain<HexxBomb>(player);
@@ -2264,7 +2248,7 @@ internal static class AwakenedTests
         if (enemy1.GetPower<ManaburnPower>() is { } mbClean1) await PowerCmd.Remove(mbClean1);
         if (enemy2.GetPower<ManaburnPower>() is { } mbClean2) await PowerCmd.Remove(mbClean2);
 
-        // 14. Cross-turn tests: DeadBird + MiniBlackHole + VioletPlumage + AbyssBlade reset!
+        // 14. Cross-turn tests: DeadBird + MiniBlackHole + VioletPlumage!
         await RelicCmd.Obtain<DeadBird>(player);
         await RelicCmd.Obtain<MiniBlackHole>(player);
         var violetPlumage = await RelicCmd.Obtain<VioletPlumage>(player);
@@ -2291,16 +2275,13 @@ internal static class AwakenedTests
         AutoTestAssert.Equal(e1Hp, enemy1.CurrentHp, "DeadBird ignored higher-HP enemy1");
         AutoTestAssert.Equal(e2Hp - 4, enemy2.CurrentHp, "DeadBird dealt floor 4 damage to lowest-HP enemy2 even at -10 Strength");
         AutoTestAssert.Equal(RelicStatus.Disabled, violetPlumage.Status, "VioletPlumage disabled after firing once");
-        AutoTestAssert.Equal(RelicStatus.Normal, abyssBlade.Status, "AbyssBlade reset to Normal on Turn 2");
         AutoTestAssert.Equal(conjBeforeR2 + 1, AwakenedSpellbook.GetConjuresThisCombat(combatState, player), "ShreddedDoll Conjured on Turn 2 start");
         // Hand should have 5 (normal draw) + 3 (VioletPlumage) + 1 (ShreddedDoll Conjure) = 9 cards (0 from MiniBlackHole)!
         AutoTestAssert.Equal(9, pcs.Hand.Cards.Count, "Turn 2 Hand = 5 base + 3 VioletPlumage + 1 ShreddedDoll Conjure (MiniBlackHole did NOT fire after Turn 1 Powers)");
 
-        // Turn 2: +5 Strength (DeadBird deals 4+5=9!), play NO Powers (MiniBlackHole fires!), keep 2 excess Energy (VioletPlumage must NOT fire again!),
-        // AND apply HermitDrainedPower(1) to verify AbyssBlade resets in BeforeSideTurnStart BEFORE AfterEnergyReset on Round 3!
+        // Turn 2: +5 Strength (DeadBird deals 4+5=9!), play NO Powers (MiniBlackHole fires!), keep 2 excess Energy (VioletPlumage must NOT fire again!)
         if (player.Creature.GetPower<StrengthPower>() is { } negStr) await PowerCmd.Remove(negStr);
         await PowerCmd.Apply<StrengthPower>(ctx, player.Creature, 5m, player.Creature, null);
-        await PowerCmd.Apply<HermitDrainedPower>(ctx, player.Creature, 1m, player.Creature, null);
         await ResetHandAndEnergy(energy: 2);
         for (int i = 0; i < 10; i++)
             await CardPileCmd.Add(combatState.CreateCard<AwakenedDefend>(player), PileType.Draw, CardPilePosition.Top);
@@ -2310,9 +2291,7 @@ internal static class AwakenedTests
 
         AutoTestAssert.Equal(e1Hp, enemy1.CurrentHp, "DeadBird still targeted lowest-HP enemy2 on Turn 2");
         AutoTestAssert.Equal(e2Hp - 9, enemy2.CurrentHp, "DeadBird dealt 4 + 5 Strength = 9 damage on Turn 2");
-        AutoTestAssert.Equal(player.MaxEnergy, pcs.Energy, "AbyssBlade refunded HermitDrainedPower Energy drain at Round 3 start");
-        AutoTestAssert.Equal(RelicStatus.Disabled, abyssBlade.Status, "AbyssBlade disabled after refunding Round 3 HermitDrainedPower");
-        // Hand should have 5 (normal draw) + 1 (MiniBlackHole) + 1 (ShreddedDoll Conjure) + 1 (AbyssBlade draw) = 8 cards (VioletPlumage did NOT fire twice)!
-        AutoTestAssert.Equal(8, pcs.Hand.Cards.Count, "Turn 3 Hand = 5 base + 1 MiniBlackHole + 1 ShreddedDoll Conjure + 1 AbyssBlade draw (VioletPlumage did NOT fire a 2nd time)");
+        // Hand should have 5 (normal draw) + 1 (MiniBlackHole) + 1 (ShreddedDoll Conjure) = 7 cards (VioletPlumage did NOT fire twice)!
+        AutoTestAssert.Equal(7, pcs.Hand.Cards.Count, "Turn 3 Hand = 5 base + 1 MiniBlackHole + 1 ShreddedDoll Conjure (VioletPlumage did NOT fire a 2nd time)");
     }
 }

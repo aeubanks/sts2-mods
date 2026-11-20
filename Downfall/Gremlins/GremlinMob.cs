@@ -52,14 +52,8 @@ public interface IRandomDamageBonusProvider
     decimal BonusRandomEnemyDamage { get; }
 }
 
-public interface IGremlinSacrificeProvider
-{
-    GremlinKind? SacrificedGremlin { get; }
-}
-
 internal static class GremlinMob
 {
-    public const int SacrificedHp = -1;
     public const string StandbyRowNodeName = "GremlinStandbyRow";
     public const string StandbyHoverLayerNodeName = "GremlinStandbyHoverLayer";
 
@@ -162,12 +156,9 @@ internal static class GremlinMob
                 ? Math.Clamp(player.Creature.CurrentHp, 0, maxHp)
                 : (state.Hp[(int)kind] > 0 ? Math.Min(state.Hp[(int)kind], maxHp) : state.Hp[(int)kind]));
 
-        string hpLine = hp switch
-        {
-            SacrificedHp => "[red]Lost[/red]",
-            0 => "[red]Dead[/red]",
-            _ => $"HP: [blue]{hp}/{maxHp}[/blue]"
-        };
+        string hpLine = hp <= 0
+            ? "[red]Dead[/red]"
+            : $"HP: [blue]{hp}/{maxHp}[/blue]";
 
         (string powerKey, int baseAmount) = PowerLocInfoFor(kind);
         var powerDesc = new LocString("powers", $"{powerKey}.smartDescription");
@@ -220,9 +211,9 @@ internal static class GremlinMob
             seen[kindIdx] = true;
             parsed.Order[i] = (GremlinKind)kindIdx;
 
-            if (!int.TryParse(hpParts[i], out int hp) || hp < SacrificedHp)
+            if (!int.TryParse(hpParts[i], out int hp) || hp < 0)
                 return false;
-            parsed.Hp[i] = hp > 0 ? Math.Min(hp, Math.Max(1, maxHp)) : hp;
+            parsed.Hp[i] = hp > 0 ? Math.Min(hp, Math.Max(1, maxHp)) : 0;
         }
 
         state = parsed;
@@ -237,6 +228,19 @@ internal static class GremlinMob
         }
     }
 
+    internal static void CacheEncodedStateIfMissing(Player player, string? encoded)
+    {
+        if (RunStates.TryGetValue(player, out _))
+            return;
+
+        int maxHp = Math.Max(1, player.Creature.MaxHp);
+        if (TryDecodeState(encoded, maxHp, out var decoded) && decoded is not null)
+        {
+            EnsureFrontIsLiving(decoded);
+            RunStates.AddOrUpdate(player, decoded);
+        }
+    }
+
     private static RunMobState GetOrCreateState(Player player)
     {
         if (RunStates.TryGetValue(player, out var existing))
@@ -246,7 +250,6 @@ internal static class GremlinMob
         string? saved = player.Relics.OfType<GremlinKnobBase>().FirstOrDefault()?.MobStateEncoded;
         if (TryDecodeState(saved, maxHp, out var decoded) && decoded is not null)
         {
-            ApplySacrificeProviders(player, decoded);
             EnsureFrontIsLiving(decoded);
             RunStates.AddOrUpdate(player, decoded);
             return decoded;
@@ -267,10 +270,7 @@ internal static class GremlinMob
             state.Hp[i] = maxHp;
         }
 
-        ApplySacrificeProviders(player, state);
-        EnsureFrontIsLiving(state);
-
-        if (player.Creature.CurrentHp > 0 && state.Hp[(int)state.Order[0]] > 0)
+        if (player.Creature.CurrentHp > 0)
         {
             state.Hp[(int)state.Order[0]] = Math.Clamp(player.Creature.CurrentHp, 1, maxHp);
         }
@@ -278,17 +278,6 @@ internal static class GremlinMob
         RunStates.AddOrUpdate(player, state);
         SyncToRelic(player, state);
         return state;
-    }
-
-    private static void ApplySacrificeProviders(Player player, RunMobState state)
-    {
-        foreach (var relic in player.Relics.OfType<IGremlinSacrificeProvider>())
-        {
-            if (relic.SacrificedGremlin is { } kind)
-            {
-                state.Hp[(int)kind] = SacrificedHp;
-            }
-        }
     }
 
     private static void EnsureFrontIsLiving(RunMobState state)
@@ -372,10 +361,7 @@ internal static class GremlinMob
     {
         var state = GetOrCreateState(player);
         int maxHp = Math.Max(1, player.Creature.MaxHp);
-        if (state.Hp[(int)state.Order[0]] >= 0)
-        {
-            state.Hp[(int)state.Order[0]] = Math.Clamp(player.Creature.CurrentHp, 0, maxHp);
-        }
+        state.Hp[(int)state.Order[0]] = Math.Clamp(player.Creature.CurrentHp, 0, maxHp);
         SyncToRelic(player, state);
     }
 
@@ -389,26 +375,13 @@ internal static class GremlinMob
         var sb = new StringBuilder();
         if (state is null)
         {
-            var sacrificed = player.Relics
-                .OfType<IGremlinSacrificeProvider>()
-                .Where(r => r.SacrificedGremlin is not null)
-                .Select(r => r.SacrificedGremlin!.Value)
-                .ToHashSet();
             int frontHp = Math.Clamp(player.Creature.CurrentHp, 0, maxHp);
             for (int i = 0; i < AllKinds.Length; i++)
             {
                 GremlinKind kind = AllKinds[i];
                 if (i > 0)
                     sb.Append('\n');
-                string name = DisplayNameFor(kind);
-                if (sacrificed.Contains(kind))
-                {
-                    sb.Append($"{name}: [red]Lost[/red]");
-                }
-                else
-                {
-                    sb.Append($"{name}: [blue]{frontHp}/{maxHp}[/blue] HP");
-                }
+                sb.Append($"{DisplayNameFor(kind)}: [blue]{frontHp}/{maxHp}[/blue] HP");
             }
         }
         else
@@ -418,16 +391,12 @@ internal static class GremlinMob
                 GremlinKind kind = state.Order[i];
                 int rawHp = i == 0 && state.Hp[(int)kind] > 0 && player.Creature.CurrentHp > 0
                     ? Math.Clamp(player.Creature.CurrentHp, 0, maxHp)
-                    : (state.Hp[(int)kind] > 0 ? Math.Min(state.Hp[(int)kind], maxHp) : state.Hp[(int)kind]);
+                    : (state.Hp[(int)kind] > 0 ? Math.Min(state.Hp[(int)kind], maxHp) : 0);
                 if (i > 0)
                     sb.Append('\n');
 
                 string name = DisplayNameFor(kind);
-                if (rawHp == SacrificedHp)
-                {
-                    sb.Append($"{name}: [red]Lost[/red]");
-                }
-                else if (rawHp == 0)
+                if (rawHp <= 0)
                 {
                     sb.Append($"{name}: [red]Dead[/red]");
                 }
@@ -460,7 +429,6 @@ internal static class GremlinMob
         {
             state.InCombat = true;
             state.IsNob = false;
-            ApplySacrificeProviders(player, state);
 
             for (int i = 0; i < 5; i++)
             {
@@ -497,10 +465,7 @@ internal static class GremlinMob
     {
         var state = GetOrCreateState(player);
         int maxHp = Math.Max(1, player.Creature.MaxHp);
-        if (state.Hp[(int)state.Order[0]] >= 0)
-        {
-            state.Hp[(int)state.Order[0]] = Math.Clamp(player.Creature.CurrentHp, 0, maxHp);
-        }
+        state.Hp[(int)state.Order[0]] = Math.Clamp(player.Creature.CurrentHp, 0, maxHp);
         state.InCombat = false;
         state.IsNob = false;
         SyncToRelic(player, state);
@@ -741,10 +706,7 @@ internal static class GremlinMob
         int maxHp = Math.Max(1, player.Creature.MaxHp);
         for (int i = 0; i < 5; i++)
         {
-            if (state.Hp[i] >= 0)
-            {
-                state.Hp[i] = maxHp;
-            }
+            state.Hp[i] = maxHp;
         }
         SyncToRelic(player, state);
         if (player.Creature.IsAlive && player.Creature.CurrentHp < maxHp)
@@ -768,54 +730,6 @@ internal static class GremlinMob
         SyncToRelic(player, state);
         UpdateCombatVisuals(player);
         return picked;
-    }
-
-    public static async Task SacrificeAsync(
-        Player player,
-        GremlinKind kind,
-        PlayerChoiceContext choiceContext)
-    {
-        var state = GetOrCreateState(player);
-        if (state.Hp[(int)kind] == SacrificedHp)
-            return;
-
-        int livingCount = state.Order.Count(k => state.Hp[(int)k] > 0);
-        if (state.Hp[(int)kind] > 0 && livingCount <= 1)
-            return;
-
-        if (state.Order[0] == kind)
-        {
-            GremlinKind? next = null;
-            for (int i = 1; i < 5; i++)
-            {
-                if (state.Hp[(int)state.Order[i]] > 0)
-                {
-                    next = state.Order[i];
-                    break;
-                }
-            }
-
-            if (next is null)
-                return;
-
-            if (player.Creature.CombatState is not null && !state.IsNob && player.Creature.IsAlive && !CombatManager.Instance.IsOverOrEnding)
-            {
-                await SwapInternalAsync(player, state, next.Value, choiceContext);
-            }
-            else
-            {
-                RotateToFront(state, next.Value);
-                if (!state.IsNob && player.Creature.IsAlive)
-                {
-                    int nextHp = Math.Clamp(state.Hp[(int)next.Value], 1, Math.Max(1, player.Creature.MaxHp));
-                    await CreatureCmd.SetCurrentHp(player.Creature, nextHp);
-                }
-            }
-        }
-
-        state.Hp[(int)kind] = SacrificedHp;
-        SyncToRelic(player, state);
-        UpdateCombatVisuals(player);
     }
 
     public static async Task EnterNobAsync(Player player, ICombatState combatState, PlayerChoiceContext choiceContext)

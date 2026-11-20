@@ -1470,11 +1470,16 @@ internal static class ChampTests
             }
         }
 
-        // 1. ChampionCrownUpgraded replaces ChampionCrown; first Finisher draws 2 & enters random Stance (once/turn).
+        // 1. Touch of Orobas -> ChampionCrownUpgraded replaces ChampionCrown (Starter rarity, Orobas-only); first Finisher draws 2 & enters random Stance (once/turn).
         await ResetCombatState();
+        AutoTestAssert.Equal(RelicRarity.Starter, ModelDb.Relic<ChampionCrownUpgraded>().Rarity, "ChampionCrownUpgraded is Starter rarity (Orobas-only)");
         AutoTestAssert.True(player.Relics.OfType<ChampionCrown>().Any(), "Starts with ChampionCrown");
-        var crownUp = await RelicCmd.Obtain<ChampionCrownUpgraded>(player);
-        AutoTestAssert.True(!player.Relics.OfType<ChampionCrown>().Any(), "ChampionCrownUpgraded replaced ChampionCrown");
+        var orobasChamp = (MegaCrit.Sts2.Core.Models.Relics.TouchOfOrobas)ModelDb.Relic<MegaCrit.Sts2.Core.Models.Relics.TouchOfOrobas>().ToMutable();
+        AutoTestAssert.True(orobasChamp.SetupForPlayer(player), "TouchOfOrobas found Champ starter ChampionCrown");
+        AutoTestAssert.Equal(ModelDb.Relic<ChampionCrownUpgraded>().Id, orobasChamp.UpgradedRelic, "TouchOfOrobas upgrades ChampionCrown -> ChampionCrownUpgraded");
+        await RelicCmd.Obtain(orobasChamp, player);
+        var crownUp = AutoTestAssert.NotNull(player.Relics.OfType<ChampionCrownUpgraded>().FirstOrDefault(), "TouchOfOrobas granted ChampionCrownUpgraded");
+        AutoTestAssert.True(!player.Relics.OfType<ChampionCrown>().Any(), "TouchOfOrobas replaced ChampionCrown");
 
         for (int i = 0; i < 6; i++)
             await CardPileCmd.Add(combatState.CreateCard<ChampStrike>(player), PileType.Draw);
@@ -1599,30 +1604,7 @@ internal static class ChampTests
         await RelicCmd.Remove(book);
         await RelicCmd.Remove(specter);
 
-        // 8. RageAmulet: every 8 Vigor spent -> +1 Strength (CrookedStrike ignored!).
-        await ResetCombatState();
-        var amulet = await RelicCmd.Obtain<RageAmulet>(player);
-        await PowerCmd.Apply<VigorPower>(ctx, player.Creature, 10m, player.Creature, null);
-        await ChampStances.EnterStanceAsync(player, ChampStanceKind.Berserker, ctx);
-        var crookedTest = combatState.CreateCard<CrookedStrike>(player);
-        await CardPileCmd.Add(crookedTest, PileType.Hand);
-        AutoTestAssert.True(crookedTest.TryManualPlay(enemy), "Play CrookedStrike with RageAmulet");
-        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
-        // Only Berserker Finisher gave +1 Strength; RageAmulet should still have 0 remainder!
-        AutoTestAssert.Equal(0, amulet.DisplayAmount, "RageAmulet ignored CrookedStrike (didn't spend Vigor)");
-
-        int strBeforeAmulet = player.Creature.GetPowerAmount<StrengthPower>();
-        int enemyHpBeforeAmulet = enemy.CurrentHp;
-        var spendStrike = combatState.CreateCard<ChampStrike>(player);
-        await CardPileCmd.Add(spendStrike, PileType.Hand);
-        AutoTestAssert.True(spendStrike.TryManualPlay(enemy), "Spend 10 Vigor with ChampStrike");
-        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
-        AutoTestAssert.Equal(enemyHpBeforeAmulet - (6 + strBeforeAmulet + 10), enemy.CurrentHp, "RageAmulet Strength did NOT buff the triggering hit");
-        AutoTestAssert.Equal(strBeforeAmulet + 1, player.Creature.GetPowerAmount<StrengthPower>(), "RageAmulet granted +1 Strength after hit for 10 Vigor spent");
-        AutoTestAssert.Equal(2, amulet.DisplayAmount, "RageAmulet remainder tracked (10 % 8 = 2)");
-        await RelicCmd.Remove(amulet);
-
-        // 9. Barbells: tracks upgradable deck count (10) & upgrades 1 card at RestSiteRoom!
+        // 8. Barbells: tracks upgradable deck count (10) & upgrades 1 card at RestSiteRoom!
         var barbells = await RelicCmd.Obtain<Barbells>(player);
         int upgradablesBefore = PileType.Deck.GetPile(player).Cards.Count(c => c.IsUpgradable);
         AutoTestAssert.Equal(upgradablesBefore, barbells.DisplayAmount, "Barbells counter matches upgradable deck cards");
@@ -1631,7 +1613,7 @@ internal static class ChampTests
         AutoTestAssert.Equal(upgradablesBefore - 1, PileType.Deck.GetPile(player).Cards.Count(c => c.IsUpgradable), "Barbells upgraded 1 random card on entering RestSiteRoom");
         await RelicCmd.Remove(barbells);
 
-        // 10. All 4 Champ Potions!
+        // 9. All 4 Champ Potions!
         await ResetCombatState();
         // (a) CounterstrikePotion: +25 Counter!
         var counterPot = ModelDb.Potion<CounterstrikePotion>().ToMutable();
@@ -1664,24 +1646,13 @@ internal static class ChampTests
         AutoTestAssert.Equal(ChampStanceKind.Ultimate, ChampStances.GetCurrentStance(player.Creature), "UltimateStancePotion entered Ultimate Stance");
         AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<UltimateFormPower>(), "UltimateStancePotion applied UltimateFormPower(1)");
 
-        // 11. PowerArmor (+1 Max Energy + caps Vigor/Counter at 10) + BerserkersGuideToSlaughter (+3 Vigor/turn) + DeflectingBracers (expired Block/2 -> Counter) + FightingForDummies (Neutral end-of-turn -> +1 Draw next turn)!
+        // 10. BerserkersGuideToSlaughter (+3 Vigor/turn) + DeflectingBracers (expired Block/2 -> Counter) + FightingForDummies (Neutral end-of-turn -> +1 Draw next turn)!
         await ResetCombatState();
-        await RelicCmd.Obtain<PowerArmor>(player);
         await RelicCmd.Obtain<BerserkersGuideToSlaughter>(player);
         await RelicCmd.Obtain<DeflectingBracers>(player);
         await RelicCmd.Obtain<FightingForDummies>(player);
 
-        // Verify PowerArmor caps Vigor & Counter at 10 (including when already at 10)!
-        await PowerCmd.Apply<VigorPower>(ctx, player.Creature, 15m, player.Creature, null);
-        await PowerCmd.Apply<VigorPower>(ctx, player.Creature, 5m, player.Creature, null);
-        AutoTestAssert.Equal(10, player.Creature.GetPowerAmount<VigorPower>(), "PowerArmor capped Vigor at 10");
-        await PowerCmd.Apply<CounterPower>(ctx, player.Creature, 15m, player.Creature, null);
-        await PowerCmd.Apply<CounterPower>(ctx, player.Creature, 5m, player.Creature, null);
-        AutoTestAssert.Equal(10, player.Creature.GetPowerAmount<CounterPower>(), "PowerArmor capped Counter at 10");
-
-        // Clear Vigor/Counter, Stun enemies so all 10 Block expires cleanly into Turn 2!
-        if (player.Creature.GetPower<VigorPower>() is { } vc) await PowerCmd.Remove(vc);
-        if (player.Creature.GetPower<CounterPower>() is { } cc) await PowerCmd.Remove(cc);
+        // Stun enemies so all 10 Block expires cleanly into Turn 2!
         foreach (var e in combatState.HittableEnemies.ToList())
             await CreatureCmd.Stun(e);
         for (int i = 0; i < 8; i++)
@@ -1690,7 +1661,6 @@ internal static class ChampTests
         await CreatureCmd.GainBlock(player.Creature, 10m, ValueProp.Unpowered, null);
         await DownfallAutoTestRunner.EndTurnAndWaitForRoundAsync(player, 2);
 
-        AutoTestAssert.Equal(4, pcs.Energy, "PowerArmor granted +1 Max Energy (3 -> 4)");
         AutoTestAssert.Equal(3, player.Creature.GetPowerAmount<VigorPower>(), "BerserkersGuideToSlaughter granted 3 Vigor at Turn 2 start");
         AutoTestAssert.Equal(5, player.Creature.GetPowerAmount<CounterPower>(), "DeflectingBracers granted 10 / 2 = 5 Counter from expired Block");
         AutoTestAssert.Equal(6, pcs.Hand.Cards.Count, "FightingForDummies drew +1 card on Turn 2 (5 -> 6) after ending Turn 1 in Neutral");

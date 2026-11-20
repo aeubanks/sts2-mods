@@ -6,6 +6,7 @@ using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Entities.Relics;
 using MegaCrit.Sts2.Core.GameActions.Multiplayer;
 using MegaCrit.Sts2.Core.HoverTips;
+using MegaCrit.Sts2.Core.Models;
 
 namespace Downfall.Hermit.Relics;
 
@@ -14,6 +15,8 @@ public sealed class OldLocket : HermitRelic
     protected override string IconKey => "old_locket";
 
     public override RelicRarity Rarity => RelicRarity.Starter;
+
+    public override RelicModel? GetUpgradeReplacement() => ModelDb.Relic<ClaspedLocket>();
 
     protected override IEnumerable<IHoverTip> ExtraHoverTips =>
     [
