@@ -227,6 +227,9 @@ internal static class SneckoMechanics
             || (power.Type == PowerType.Buff && power.AllowNegative && amount < 0m);
     }
 
+    internal static int CountDebuffs(Creature target) =>
+        target.Powers.Count(p => p.TypeForCurrentAmount == PowerType.Debuff);
+
     private static async Task NotifyMuddleListenersAsync(
         PlayerChoiceContext choiceContext,
         Player player,

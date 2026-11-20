@@ -394,6 +394,245 @@ internal static class SneckoTests
         AutoTestAssert.True(!ownNoUpg.IsUpgraded, "WideSting did NOT upgrade Snecko card in Hand");
     }
 
+    internal static async Task TestUncommonBatch1InCombat()
+    {
+        var (player, _, combatState) = await DownfallAutoTestRunner.StartCombatAsync<TheSnecko>("SNECKO_UNC1");
+        var pcs = AutoTestAssert.NotNull(player.PlayerCombatState, "Snecko PlayerCombatState");
+        var enemy1 = AutoTestAssert.NotNull(combatState.HittableEnemies.FirstOrDefault(), "Enemy 1");
+        var enemy2 = await CreatureCmd.Add<MegaCrit.Sts2.Core.Models.Monsters.Nibbit>(combatState);
+        await CreatureCmd.GainMaxHp(enemy1, 800m);
+        await CreatureCmd.GainMaxHp(enemy2, 800m);
+        var ctx = new ThrowingPlayerChoiceContext();
+
+        // 0. Validate TokenCardPool ViperEssence portrait/loc/hovertips explicitly.
+        var canonicalViper = ModelDb.Card<ViperEssence>();
+        AutoTestAssert.True(Godot.ResourceLoader.Exists(canonicalViper.PortraitPath), "ViperEssence portrait exists");
+        AutoTestAssert.True(Godot.ResourceLoader.Exists(canonicalViper.CustomPortraitPath), "ViperEssence big portrait exists");
+        AutoTestAssert.True(canonicalViper.Description.Exists(), "ViperEssence description exists");
+        var viperDesc = canonicalViper.GetDescriptionForPile(PileType.None);
+        var viperUpgDesc = canonicalViper.GetDescriptionForUpgradePreview();
+        AutoTestAssert.True(!string.IsNullOrWhiteSpace(viperDesc) && !viperDesc.Contains('{') && !viperDesc.Contains('}'), $"Valid ViperEssence desc: {viperDesc}");
+        AutoTestAssert.True(!string.IsNullOrWhiteSpace(viperUpgDesc) && !viperUpgDesc.Contains('{') && !viperUpgDesc.Contains('}'), $"Valid ViperEssence+ desc: {viperUpgDesc}");
+        _ = canonicalViper.HoverTips.ToList();
+
+        // 1. BlunderGuard (base + upgraded stack -> 14 Block + 5 Strength on 3+ cost card) + DragonsHoard (3 Str + 3 Dex, 3-cost triggers BlunderGuard!).
+        await ClearHandAndRefillEnergy(player, pcs);
+        var bg1 = combatState.CreateCard<BlunderGuard>(player);
+        var bg2 = combatState.CreateCard<BlunderGuard>(player);
+        CardCmd.Upgrade(bg2);
+        var hoard = combatState.CreateCard<DragonsHoard>(player);
+        await CardPileCmd.Add(bg1, PileType.Hand);
+        await CardPileCmd.Add(bg2, PileType.Hand);
+        await CardPileCmd.Add(hoard, PileType.Hand);
+        AutoTestAssert.True(bg1.TryManualPlay(null), "Play BlunderGuard");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.True(bg2.TryManualPlay(null), "Play BlunderGuard+");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(14, player.Creature.GetPowerAmount<BigGunsBlockPower>(), "BigGunsBlockPower stacked 6+8=14");
+        AutoTestAssert.Equal(5, player.Creature.GetPowerAmount<BigGunsStrengthPower>(), "BigGunsStrengthPower stacked 2+3=5");
+
+        int blockBefore = player.Creature.Block;
+        AutoTestAssert.True(hoard.TryManualPlay(null), "Play DragonsHoard (3-cost)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(blockBefore + 14, player.Creature.Block, "BlunderGuard triggered on 3-cost DragonsHoard (+14 Block)");
+        AutoTestAssert.Equal(8, player.Creature.GetPowerAmount<StrengthPower>(), "DragonsHoard (+3) + BigGunsStrength (+5) = 8 Strength");
+        AutoTestAssert.Equal(3, player.Creature.GetPowerAmount<DexterityPower>(), "DragonsHoard granted +3 Dexterity");
+        foreach (var p in player.Creature.Powers.ToList())
+            await PowerCmd.Remove(p);
+
+        // 2. Belittle (9 HP loss per debuff, including negative Strength!) + MakeshiftBlade (9 dmg + draw 3 if >= 3 debuffs)!
+        await ClearHandAndRefillEnergy(player, pcs);
+        await PowerCmd.Apply<WeakPower>(ctx, enemy1, 2m, player.Creature, null);
+        await PowerCmd.Apply<VulnerablePower>(ctx, enemy1, 2m, player.Creature, null);
+        await PowerCmd.Apply<StrengthPower>(ctx, enemy1, -2m, player.Creature, null);
+        var belittle = combatState.CreateCard<Belittle>(player);
+        await CardPileCmd.Add(belittle, PileType.Hand);
+        int e1Hp = enemy1.CurrentHp;
+        AutoTestAssert.True(belittle.TryManualPlay(enemy1), "Play Belittle against 3 debuffs");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(e1Hp - 27, enemy1.CurrentHp, "Belittle dealt 9*3=27 HP loss");
+
+        for (int i = 0; i < 3; i++)
+            await CardPileCmd.Add(combatState.CreateCard<SneckoDefend>(player), PileType.Draw, CardPilePosition.Top);
+        var makeshift = combatState.CreateCard<MakeshiftBlade>(player);
+        await CardPileCmd.Add(makeshift, PileType.Hand);
+        int handBefore = pcs.Hand.Cards.Count;
+        AutoTestAssert.True(makeshift.TryManualPlay(enemy1), "Play MakeshiftBlade with 3 debuffs");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(handBefore - 1 + 3, pcs.Hand.Cards.Count, "MakeshiftBlade drew 3 cards at >= 3 debuffs");
+        foreach (var p in enemy1.Powers.ToList())
+            await PowerCmd.Remove(p);
+
+        // 3. LatchOn (7 dmg ALL + adds ViperEssence Offclass Token) -> ViperEssence (+1 Str, counts as Offclass!) -> ComboString (hits once for ViperEssence) + DefensiveFlair (8 + 2*offclass in Hand)!
+        await ClearHandAndRefillEnergy(player, pcs);
+        var latchOn = combatState.CreateCard<LatchOn>(player);
+        await CardPileCmd.Add(latchOn, PileType.Hand);
+        e1Hp = enemy1.CurrentHp;
+        int e2Hp = enemy2.CurrentHp;
+        AutoTestAssert.True(latchOn.TryManualPlay(null), "Play LatchOn");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(e1Hp - 7, enemy1.CurrentHp, "LatchOn dealt 7 to enemy 1");
+        AutoTestAssert.Equal(e2Hp - 7, enemy2.CurrentHp, "LatchOn dealt 7 to enemy 2");
+        var viper = AutoTestAssert.NotNull(pcs.Hand.Cards.OfType<ViperEssence>().FirstOrDefault(), "LatchOn added ViperEssence");
+        AutoTestAssert.True(SneckoOffclass.IsOffclass(viper, player), "ViperEssence counts as Offclass");
+        AutoTestAssert.True(viper.TryManualPlay(null), "Play ViperEssence");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<StrengthPower>(), "ViperEssence granted 1 Strength");
+        await PowerCmd.Remove<StrengthPower>(player.Creature);
+
+        var offBash = combatState.CreateCard<Bash>(player);
+        var comboString = combatState.CreateCard<ComboString>(player);
+        var defFlair = combatState.CreateCard<DefensiveFlair>(player);
+        await CardPileCmd.Add(offBash, PileType.Hand);
+        await CardPileCmd.Add(comboString, PileType.Hand);
+        await CardPileCmd.Add(defFlair, PileType.Hand);
+        blockBefore = player.Creature.Block;
+        AutoTestAssert.True(defFlair.TryManualPlay(null), "Play DefensiveFlair with 1 Offclass card in Hand");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(blockBefore + 10, player.Creature.Block, "DefensiveFlair gained 8 + 2*1 = 10 Block");
+
+        // Now play Bash (2nd offclass this turn -> ViperEssence + Bash = 2 offclass played, plus Bash applies 2 Vuln!)
+        AutoTestAssert.True(offBash.TryManualPlay(enemy1), "Play Bash (2nd offclass)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        await PowerCmd.Remove<VulnerablePower>(enemy1);
+        var comboHandDesc = comboString.GetDescriptionForPile(PileType.Hand);
+        AutoTestAssert.True(!string.IsNullOrWhiteSpace(comboHandDesc) && !comboHandDesc.Contains('{') && !comboHandDesc.Contains('}'), $"Valid ComboString InCombat desc: {comboHandDesc}");
+        e1Hp = enemy1.CurrentHp;
+        AutoTestAssert.True(comboString.TryManualPlay(enemy1), "Play ComboString (2 offclass played this turn)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(e1Hp - 14, enemy1.CurrentHp, "ComboString hit twice for 7*2=14 damage");
+
+        // 4. Deception (11 Block + Shockwave + Exhaust), DiceBoulder (0->1 cost, 7->11 Block), GildedShield (8 Block, muddles self & returns to Hand), Jackpot+ (Retain, Exhaust, +3 Energy)!
+        await ClearHandAndRefillEnergy(player, pcs);
+        var deception = combatState.CreateCard<Deception>(player);
+        await CardPileCmd.Add(deception, PileType.Hand);
+        blockBefore = player.Creature.Block;
+        AutoTestAssert.True(deception.TryManualPlay(null), "Play Deception");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(blockBefore + 11, player.Creature.Block, "Deception gained 11 Block");
+        AutoTestAssert.True(pcs.ExhaustPile.Cards.Contains(deception), "Deception exhausted");
+        AutoTestAssert.True(pcs.Hand.Cards.OfType<Shockwave>().Any(), "Deception added Shockwave to Hand");
+
+        var boulder = combatState.CreateCard<DiceBoulder>(player);
+        await CardPileCmd.Add(boulder, PileType.Hand);
+        blockBefore = player.Creature.Block;
+        AutoTestAssert.True(boulder.TryManualPlay(null), "Play DiceBoulder #1");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(blockBefore + 7, player.Creature.Block, "DiceBoulder #1 gained 7 Block");
+        AutoTestAssert.Equal(11m, boulder.DynamicVars.Block.BaseValue, "DiceBoulder Block increased 7 -> 11");
+        AutoTestAssert.Equal(1, boulder.EnergyCost.GetWithModifiers(CostModifiers.All), "DiceBoulder cost increased 0 -> 1");
+
+        var gilded = combatState.CreateCard<GildedShield>(player);
+        await CardPileCmd.Add(gilded, PileType.Hand);
+        blockBefore = player.Creature.Block;
+        AutoTestAssert.True(gilded.TryManualPlay(null), "Play GildedShield");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(blockBefore + 8, player.Creature.Block, "GildedShield gained 8 Block");
+        AutoTestAssert.True(pcs.Hand.Cards.Contains(gilded), "GildedShield returned to Hand");
+        AutoTestAssert.True(gilded.EnergyCost.GetWithModifiers(CostModifiers.All) != 1, "GildedShield muddled its own cost");
+
+        var jackpot = combatState.CreateCard<Downfall.Snecko.Cards.Jackpot>(player);
+        CardCmd.Upgrade(jackpot);
+        await CardPileCmd.Add(jackpot, PileType.Hand);
+        int energyBefore = pcs.Energy;
+        AutoTestAssert.True(jackpot.TryManualPlay(null), "Play Jackpot+");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(energyBefore - 3 + 3, pcs.Energy, "Jackpot+ spent 3 and gained 3 Energy");
+        AutoTestAssert.True(pcs.ExhaustPile.Cards.Contains(jackpot), "Jackpot+ exhausted");
+
+        // 5. Lacerate+ (4 Venom ALL + Haze+ + Exhaust), Mesmerize (-2 Str ALL + Muddle 1 + Exhaust), MarkedCard (muddle 3-cost card strictly cheaper -> 0..2)!
+        await ClearHandAndRefillEnergy(player, pcs);
+        var lacerate = combatState.CreateCard<Lacerate>(player);
+        CardCmd.Upgrade(lacerate);
+        await CardPileCmd.Add(lacerate, PileType.Hand);
+        AutoTestAssert.True(lacerate.TryManualPlay(null), "Play Lacerate+");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(4, enemy1.GetPowerAmount<VenomPower>(), "Lacerate+ applied 4 Venom to enemy 1");
+        AutoTestAssert.Equal(4, enemy2.GetPowerAmount<VenomPower>(), "Lacerate+ applied 4 Venom to enemy 2");
+        var haze = AutoTestAssert.NotNull(pcs.Hand.Cards.OfType<Haze>().FirstOrDefault(), "Lacerate+ added Haze");
+        AutoTestAssert.True(haze.IsUpgraded, "Lacerate+ added Upgraded Haze+");
+        await PowerCmd.Remove<VenomPower>(enemy1);
+        await PowerCmd.Remove<VenomPower>(enemy2);
+
+        var mesmerize = combatState.CreateCard<Mesmerize>(player);
+        var cost3Card = combatState.CreateCard<LaserEyes>(player);
+        await CardPileCmd.Add(mesmerize, PileType.Hand);
+        await CardPileCmd.Add(cost3Card, PileType.Hand);
+        using (DownfallAutoTestRunner.PreferCards(c => ReferenceEquals(c, cost3Card)))
+        {
+            AutoTestAssert.True(mesmerize.TryManualPlay(null), "Play Mesmerize");
+            await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        }
+        AutoTestAssert.Equal(-2, enemy1.GetPowerAmount<StrengthPower>(), "Mesmerize reduced enemy 1 Strength by 2");
+        AutoTestAssert.Equal(-2, enemy2.GetPowerAmount<StrengthPower>(), "Mesmerize reduced enemy 2 Strength by 2");
+        AutoTestAssert.True(cost3Card.EnergyCost.GetWithModifiers(CostModifiers.All) != 3, "Mesmerize muddled LaserEyes");
+
+        var marked = combatState.CreateCard<MarkedCard>(player);
+        var expensive = combatState.CreateCard<LaserEyes>(player);
+        await CardPileCmd.Add(marked, PileType.Hand);
+        await CardPileCmd.Add(expensive, PileType.Hand);
+        using (DownfallAutoTestRunner.PreferCards(c => ReferenceEquals(c, expensive)))
+        {
+            AutoTestAssert.True(marked.TryManualPlay(null), "Play MarkedCard on 3-cost LaserEyes");
+            await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        }
+        int cheaperCost = expensive.EnergyCost.GetWithModifiers(CostModifiers.All);
+        AutoTestAssert.True(cheaperCost is >= 0 and <= 2, $"MarkedCard muddled 3-cost strictly cheaper (got {cheaperCost})");
+
+        // 6. LuckyBreak (8 Block + draw 1 per 2+ cost card in Hand) + MintCondition (Overflow -> +3 Strength) + FlashInThePan (13 Block, discard Hand, draw that many next turn) + CheapStock (start of turn muddles highest cost card)!
+        await ClearHandAndRefillEnergy(player, pcs);
+        var luckyBreak = combatState.CreateCard<LuckyBreak>(player);
+        var twoCost1 = combatState.CreateCard<TailWhip>(player);
+        var twoCost2 = combatState.CreateCard<DiceCrush>(player);
+        await CardPileCmd.Add(luckyBreak, PileType.Hand);
+        await CardPileCmd.Add(twoCost1, PileType.Hand);
+        await CardPileCmd.Add(twoCost2, PileType.Hand);
+        await CardPileCmd.Add(combatState.CreateCard<SneckoDefend>(player), PileType.Draw, CardPilePosition.Top);
+        await CardPileCmd.Add(combatState.CreateCard<SneckoDefend>(player), PileType.Draw, CardPilePosition.Top);
+        blockBefore = player.Creature.Block;
+        int handBeforeLucky = pcs.Hand.Cards.Count;
+        AutoTestAssert.True(luckyBreak.TryManualPlay(null), "Play LuckyBreak with two 2-cost cards in Hand");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(blockBefore + 8, player.Creature.Block, "LuckyBreak gained 8 Block");
+        AutoTestAssert.Equal(handBeforeLucky - 1 + 2, pcs.Hand.Cards.Count, "LuckyBreak drew 2 cards");
+
+        await ClearHandAndRefillEnergy(player, pcs);
+        var mint = combatState.CreateCard<MintCondition>(player);
+        await CardPileCmd.Add(mint, PileType.Hand);
+        for (int i = 0; i < 5; i++)
+            await CardPileCmd.Add(combatState.CreateCard<SneckoDefend>(player), PileType.Hand);
+        AutoTestAssert.True(mint.TryManualPlay(null), "Play MintCondition with Overflow (6 cards)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(3, player.Creature.GetPowerAmount<StrengthPower>(), "MintCondition Overflow granted 3 Strength");
+
+        var cheapStock = combatState.CreateCard<CheapStock>(player);
+        await CardPileCmd.Add(cheapStock, PileType.Hand);
+        AutoTestAssert.True(cheapStock.TryManualPlay(null), "Play CheapStock");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<CheapStockPower>(), "CheapStock applied CheapStockPower(1)");
+
+        // FlashInThePan with 2 other cards in Hand -> 13 Block, discards 2, applies DrawCardsNextTurnPower(2)!
+        await ClearHandAndRefillEnergy(player, pcs);
+        var flash = combatState.CreateCard<FlashInThePan>(player);
+        await CardPileCmd.Add(flash, PileType.Hand);
+        await CardPileCmd.Add(combatState.CreateCard<SneckoDefend>(player), PileType.Hand);
+        await CardPileCmd.Add(combatState.CreateCard<SneckoDefend>(player), PileType.Hand);
+        blockBefore = player.Creature.Block;
+        AutoTestAssert.True(flash.TryManualPlay(null), "Play FlashInThePan");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(blockBefore + 13, player.Creature.Block, "FlashInThePan gained 13 Block");
+        AutoTestAssert.Equal(0, pcs.Hand.Cards.Count, "FlashInThePan discarded remaining Hand");
+        AutoTestAssert.Equal(2, player.Creature.GetPowerAmount<DrawCardsNextTurnPower>(), "FlashInThePan applied DrawCardsNextTurnPower(2)");
+
+        // End Turn 1 -> Round 2 draws 5+2=7 cards AND CheapStock muddles the highest-cost card!
+        var highCard = combatState.CreateCard<LaserEyes>(player);
+        await CardPileCmd.Add(highCard, PileType.Draw, CardPilePosition.Top);
+        await CreatureCmd.GainBlock(player.Creature, 80m, ValueProp.Unpowered, null);
+        await DownfallAutoTestRunner.EndTurnAndWaitForRoundAsync(player, 2);
+        AutoTestAssert.Equal(7, pcs.Hand.Cards.Count, "Round 2 drew 5 + 2 (FlashInThePan) = 7 cards");
+        AutoTestAssert.True(highCard.EnergyCost.GetWithModifiers(CostModifiers.All) != 3, "CheapStock muddled the 3-cost LaserEyes at start of Round 2");
+    }
+
     internal static async Task ClearHandAndRefillEnergy(MegaCrit.Sts2.Core.Entities.Players.Player player, MegaCrit.Sts2.Core.Entities.Players.PlayerCombatState pcs)
     {
         foreach (var c in pcs.Hand.Cards.ToList())

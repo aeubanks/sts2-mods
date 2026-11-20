@@ -184,6 +184,7 @@ internal static class DownfallAutoTestRunner
                 ("SneckoVisualsRuntime", SneckoTests.TestVisualsRuntime),
                 ("SneckoStarterCombat", SneckoTests.TestStarterCombat),
                 ("SneckoCommonCardsInCombat", SneckoTests.TestCommonCardsInCombat),
+                ("SneckoUncommonBatch1InCombat", SneckoTests.TestUncommonBatch1InCombat),
             ];
 
             int matchedIndex = 0;
