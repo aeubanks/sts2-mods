@@ -210,6 +210,20 @@ public abstract class BronzeCard(
     }
 
     /// <summary>
+    /// Resolves a living single-enemy target, falling back to a random living enemy if null/dead.
+    /// </summary>
+    protected static Creature? ResolveTarget(Player owner, Creature? target)
+    {
+        if (target is { IsAlive: true })
+            return target;
+
+        if (owner.Creature.CombatState is not { } combatState)
+            return null;
+
+        return owner.RunState.Rng.CombatTargets.NextItem(combatState.HittableEnemies.Where(e => e.IsAlive).ToList());
+    }
+
+    /// <summary>
     /// Helper to deal single-target damage cleanly whether invoked from a card play (this or FunctionCard)
     /// or from FullReleasePower (isFromPower == true, cardPlay == null -> Unpowered damage).
     /// </summary>
@@ -223,7 +237,7 @@ public abstract class BronzeCard(
         decimal baseDamage,
         int hitCount = 1)
     {
-        if (owner.Creature.CombatState is not { } combatState || CombatManager.Instance.IsOverOrEnding)
+        if (owner.Creature.CombatState is null || CombatManager.Instance.IsOverOrEnding)
             return;
 
         for (int i = 0; i < hitCount; i++)
@@ -231,9 +245,7 @@ public abstract class BronzeCard(
             if (!owner.Creature.IsAlive || CombatManager.Instance.IsOverOrEnding)
                 return;
 
-            var resolved = target is { IsAlive: true }
-                ? target
-                : owner.RunState.Rng.CombatTargets.NextItem(combatState.HittableEnemies.Where(e => e.IsAlive).ToList());
+            var resolved = ResolveTarget(owner, target);
             if (resolved is null)
                 return;
 

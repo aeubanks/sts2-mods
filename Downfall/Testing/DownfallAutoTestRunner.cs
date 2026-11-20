@@ -225,6 +225,7 @@ internal static class DownfallAutoTestRunner
                 ("HexaRelicsAndPotionsInCombat", HexaghostTests.TestRelicsAndPotionsInCombat),
                 ("AutomatonVisualsRuntime", AutomatonTests.TestVisualsRuntime),
                 ("AutomatonStarterEncodeAndFunctionCompile", AutomatonTests.TestStarterEncodeAndFunctionCompile),
+                ("AutomatonCommonCardsInCombat", AutomatonTests.TestCommonCardsInCombat),
             ];
 
             int matchedIndex = 0;
@@ -799,6 +800,8 @@ internal static class DownfallAutoTestRunner
             AutoTestAssert.True(new LocString("gameplay_ui", $"{bronzeTipKey}.title").Exists(), $"Missing {bronzeTipKey}.title");
             AutoTestAssert.True(new LocString("gameplay_ui", $"{bronzeTipKey}.description").Exists(), $"Missing {bronzeTipKey}.description");
         }
+        AutoTestAssert.True(new LocString("cards", "DOWNFALL-BIT_SHIFT.selectionScreenPrompt").Exists(), "Missing BitShift prompt");
+        AutoTestAssert.True(new LocString("cards", "DOWNFALL-CUT_THROUGH.selectionScreenPrompt").Exists(), "Missing CutThrough prompt");
 
         return Task.CompletedTask;
     }

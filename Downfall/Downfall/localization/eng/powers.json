@@ -526,5 +526,8 @@
   "DOWNFALL-LOSE_INTENSITY_POWER.smartDescription": "At the end of your turn, lose [blue]{Amount}[/blue] [gold]Intensity[/gold].",
   "DOWNFALL-VOLCANO_VISAGE_POWER.title": "Volcanic Visage",
   "DOWNFALL-VOLCANO_VISAGE_POWER.description": "Whenever you [gold]Ignite[/gold] a Ghostflame, apply [gold]Soulburn[/gold] to ALL enemies.",
-  "DOWNFALL-VOLCANO_VISAGE_POWER.smartDescription": "Whenever you [gold]Ignite[/gold] a Ghostflame, apply [blue]{Amount}[/blue] [gold]Soulburn[/gold] to ALL enemies."
+  "DOWNFALL-VOLCANO_VISAGE_POWER.smartDescription": "Whenever you [gold]Ignite[/gold] a Ghostflame, apply [blue]{Amount}[/blue] [gold]Soulburn[/gold] to ALL enemies.",
+  "DOWNFALL-REMOVE_NEXT_ERROR_POWER.title": "Remove Errors",
+  "DOWNFALL-REMOVE_NEXT_ERROR_POWER.description": "Remove the next [gold]Compile[/gold] [red]Error[/red] [gold]Encoded[/gold].",
+  "DOWNFALL-REMOVE_NEXT_ERROR_POWER.smartDescription": "Remove the next [blue]{Amount}[/blue] [gold]Compile[/gold] {Amount:plural:[red]Error[/red]|[red]Errors[/red]} [gold]Encoded[/gold]."
 }

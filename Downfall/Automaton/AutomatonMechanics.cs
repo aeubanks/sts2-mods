@@ -1,11 +1,13 @@
 using Downfall.Automaton.Cards;
 using Downfall.Automaton.Orbs;
+using MegaCrit.Sts2.Core.CardSelection;
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Commands;
 using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Entities.Orbs;
 using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.GameActions.Multiplayer;
+using MegaCrit.Sts2.Core.Localization;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Nodes.Rooms;
 
@@ -111,6 +113,60 @@ public static class AutomatonMechanics
             return;
 
         NCombatRoom.Instance?.GetCreatureNode(player.Creature)?.OrbManager?.UpdateVisuals(OrbEvokeType.None);
+    }
+
+    /// <summary>
+    /// Insert: shuffles <paramref name="count"/> newly generated cards of type <typeparamref name="TCard"/>
+    /// into the player's Draw Pile.
+    /// </summary>
+    public static async Task InsertCardIntoDrawPileAsync<TCard>(Player player, int count = 1)
+        where TCard : CardModel
+    {
+        if (player.Creature.CombatState is not { } combatState
+            || !player.Creature.IsAlive
+            || CombatManager.Instance.IsOverOrEnding)
+        {
+            return;
+        }
+
+        for (int i = 0; i < count; i++)
+        {
+            if (!player.Creature.IsAlive || CombatManager.Instance.IsOverOrEnding)
+                break;
+
+            var card = combatState.CreateCard<TCard>(player);
+            await CardPileCmd.AddGeneratedCardToCombat(card, PileType.Draw, player, CardPilePosition.Random);
+        }
+    }
+
+    /// <summary>
+    /// Scry <paramref name="count"/>: inspect top cards of Draw Pile and discard any chosen cards.
+    /// </summary>
+    public static async Task<IReadOnlyList<CardModel>> ScryAsync(
+        PlayerChoiceContext choiceContext,
+        Player player,
+        int count,
+        LocString prompt)
+    {
+        if (count <= 0 || !player.Creature.IsAlive || CombatManager.Instance.IsOverOrEnding)
+            return [];
+
+        var drawPile = PileType.Draw.GetPile(player);
+        if (drawPile.Cards.Count == 0)
+            return [];
+
+        var topCards = drawPile.Cards.Take(Math.Min(count, drawPile.Cards.Count)).ToList();
+        var prefs = new CardSelectorPrefs(prompt, 0, topCards.Count);
+        var chosen = (await CardSelectCmd.FromSimpleGrid(choiceContext, topCards, player, prefs)).ToList();
+
+        foreach (var card in chosen)
+        {
+            if (!player.Creature.IsAlive || CombatManager.Instance.IsOverOrEnding)
+                break;
+            await CardPileCmd.Add(card, PileType.Discard);
+        }
+
+        return chosen;
     }
 
     /// <summary>
