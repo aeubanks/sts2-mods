@@ -37,7 +37,7 @@ public interface IOnBeforeEncodeListener
 /// </summary>
 public interface IPreCompileListener
 {
-    void OnPreCompile(Player player, IReadOnlyList<BronzeCard> encodedCards);
+    Task OnPreCompileAsync(PlayerChoiceContext choiceContext, Player player, IReadOnlyList<BronzeCard> encodedCards);
 }
 
 /// <summary>
@@ -217,6 +217,45 @@ public static class AutomatonMechanics
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// Shared helper for SpaghettiCode and BuildAFunctionPotion: repeatedly choose 1 of 3 random
+    /// Encodable cards to Encode until a Function compiles (or safety cap is reached).
+    /// Returns true if a Function was compiled during the loop.
+    /// </summary>
+    public static async Task<bool> BuildFunctionFromChoicesAsync(PlayerChoiceContext choiceContext, Player player)
+    {
+        if (player.Creature.CombatState is not { } combatState
+            || !player.Creature.IsAlive
+            || CombatManager.Instance.IsOverOrEnding)
+        {
+            return false;
+        }
+
+        var state = AutomatonCombatState.Get(combatState);
+        int startCompiled = state.FunctionsCompiledThisCombat;
+
+        for (int safety = 0; safety < FunctionCapacity * 2; safety++)
+        {
+            if (!player.Creature.IsAlive
+                || CombatManager.Instance.IsOverOrEnding
+                || state.FunctionsCompiledThisCombat > startCompiled)
+            {
+                break;
+            }
+
+            var choices = CreateDistinctRandomEncodableChoices(player, 3)
+                .Cast<CardModel>()
+                .ToList();
+            var chosen = await CardSelectCmd.FromChooseACardScreen(choiceContext, choices, player, canSkip: false);
+            if (chosen is not BronzeCard bronze || !player.Creature.IsAlive || CombatManager.Instance.IsOverOrEnding)
+                break;
+
+            await EncodeCardAsync(choiceContext, player, bronze);
+        }
+
+        return state.FunctionsCompiledThisCombat > startCompiled;
     }
 
     private static List<CardModel> GetRandomEncodableCandidates(Player player)
@@ -409,7 +448,9 @@ public static class AutomatonMechanics
         // 1. Pre-compile listeners (CleanCodePower strips Compile Errors for this Function).
         foreach (var listener in GetListeners<IPreCompileListener>(player))
         {
-            listener.OnPreCompile(player, encodedCards);
+            if (!player.Creature.IsAlive || CombatManager.Instance.IsOverOrEnding)
+                return null;
+            await listener.OnPreCompileAsync(choiceContext, player, encodedCards);
         }
 
         // 2. Per-card OnCompilePreEmbed (e.g. ChosenStrike permanent damage bonus before cloning into Function).

@@ -1535,5 +1535,17 @@
   "DOWNFALL-DEBUG.title": "Debug",
   "DOWNFALL-DEBUG.description": "Remove all [gold]Compile[/gold] [red]Error[/red] effects from [gold]Encoded[/gold] cards.",
   "DOWNFALL-DECOMPILE.title": "Decompile",
-  "DOWNFALL-DECOMPILE.description": "[gold]Exhaust[/gold] all [gold]Encoded[/gold] cards.\nGain [blue]1[/blue] Energy and draw [blue]1[/blue] card for each card [gold]Exhausted[/gold]."
+  "DOWNFALL-DECOMPILE.description": "[gold]Exhaust[/gold] all [gold]Encoded[/gold] cards.\nGain [blue]1[/blue] Energy and draw [blue]1[/blue] card for each card [gold]Exhausted[/gold].",
+  "DOWNFALL-BRONZE_DAZE.title": "Daze",
+  "DOWNFALL-BRONZE_DAZE.description": "Apply {WeakPower:diff()} [gold]Weak[/gold].",
+  "DOWNFALL-BRONZE_GRIEVOUS_WOUND.title": "Grievous Wound",
+  "DOWNFALL-BRONZE_GRIEVOUS_WOUND.description": "Apply {VulnerablePower:diff()} [gold]Vulnerable[/gold].",
+  "DOWNFALL-BRONZE_IGNITE.title": "Ignite",
+  "DOWNFALL-BRONZE_IGNITE.description": "Apply {SoulburnPower:diff()} [gold]Soulburn[/gold].\nAt the end of your turn, take {SelfDamage:diff()} damage.",
+  "DOWNFALL-BRONZE_INTO_THE_VOID.title": "Into the Void",
+  "DOWNFALL-BRONZE_INTO_THE_VOID.description": "Enemy loses {StrengthLoss:diff()} [gold]Strength[/gold] this turn.\nWhen drawn, lose {Energy:energyIcons()}.",
+  "DOWNFALL-BRONZE_USEFUL_SLIME.title": "Lubricant",
+  "DOWNFALL-BRONZE_USEFUL_SLIME.description": "Draw {Cards:diff()} cards.",
+  "DOWNFALL-BRONZE_UNKNOWN_STATUS.title": "Perplex",
+  "DOWNFALL-BRONZE_UNKNOWN_STATUS.description": "Gain {Block:diff()} [gold]Block[/gold]."
 }

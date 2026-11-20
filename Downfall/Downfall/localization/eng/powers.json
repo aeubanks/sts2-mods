@@ -562,5 +562,11 @@
   "DOWNFALL-LIBRARY_POWER.smartDescription": "At the start of your turn, add [blue]{Amount}[/blue] random {Amount:plural:card|cards} with [gold]Encode[/gold] to your [gold]Hand[/gold]; {Amount:plural:it costs|they cost} [blue]0[/blue] until played.",
   "DOWNFALL-VERIFY_POWER.title": "Sentient Form",
   "DOWNFALL-VERIFY_POWER.description": "Whenever you draw a [gold]Function[/gold], increase all numbers on it except cost.",
-  "DOWNFALL-VERIFY_POWER.smartDescription": "Whenever you draw a [gold]Function[/gold], increase all numbers on it by [blue]{Amount}[/blue] except cost."
+  "DOWNFALL-VERIFY_POWER.smartDescription": "Whenever you draw a [gold]Function[/gold], increase all numbers on it by [blue]{Amount}[/blue] except cost.",
+  "DOWNFALL-CLEAN_CODE_POWER.title": "Clean Code",
+  "DOWNFALL-CLEAN_CODE_POWER.description": "Remove all [gold]Compile[/gold] [red]Error[/red] effects from [gold]Encoded[/gold] cards for your next [gold]Function[/gold].",
+  "DOWNFALL-CLEAN_CODE_POWER.smartDescription": "Remove all [gold]Compile[/gold] [red]Error[/red] effects from [gold]Encoded[/gold] cards. Lasts for [blue]{Amount}[/blue] more {Amount:plural:[gold]Function[/gold]|[gold]Functions[/gold]}.",
+  "DOWNFALL-FREE_FUNCTION_POWER.title": "Free Function",
+  "DOWNFALL-FREE_FUNCTION_POWER.description": "The next [gold]Function[/gold] you create costs [blue]0[/blue] until played.",
+  "DOWNFALL-FREE_FUNCTION_POWER.smartDescription": "The next [blue]{Amount}[/blue] {Amount:plural:[gold]Function[/gold] you create costs|[gold]Functions[/gold] you create cost} [blue]0[/blue] until played."
 }

@@ -229,6 +229,7 @@ internal static class DownfallAutoTestRunner
                 ("AutomatonUncommonBatch1InCombat", AutomatonTests.TestUncommonBatch1InCombat),
                 ("AutomatonUncommonBatch2InCombat", AutomatonTests.TestUncommonBatch2InCombat),
                 ("AutomatonRareCardsInCombat", AutomatonTests.TestRareCardsInCombat),
+                ("AutomatonRelicsAndPotionsInCombat", AutomatonTests.TestRelicsAndPotionsInCombat),
             ];
 
             int matchedIndex = 0;

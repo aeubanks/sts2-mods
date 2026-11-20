@@ -1335,4 +1335,264 @@ internal static class AutomatonTests
         AutoTestAssert.True(pcs.Hand.Cards.Any(c => c is BronzeCard { Encodes: true } && c.EnergyCost.GetWithModifiers(CostModifiers.All) == 0),
             "LibraryPower added a 0-cost Encodable card to Hand on Turn 2");
     }
+
+    public static async Task TestRelicsAndPotionsInCombat()
+    {
+        var (player, _, combatState) = await DownfallAutoTestRunner.StartCombatAsync<TheAutomaton>("AUTOMATON_9E");
+        var pcs = AutoTestAssert.NotNull(player.PlayerCombatState, "PlayerCombatState");
+        var enemy = AutoTestAssert.NotNull(combatState.HittableEnemies.FirstOrDefault(), "Enemy");
+        var ctx = new BlockingPlayerChoiceContext();
+
+        await CreatureCmd.SetMaxAndCurrentHp(enemy, 1500m);
+
+        async Task PlayCardAsync(CardModel card, Creature? target = null)
+        {
+            await CardCmd.AutoPlay(ctx, card, target, AutoPlayType.Default);
+        }
+
+        async Task ClearHandAndRefillAsync(int energy = 20)
+        {
+            foreach (var c in pcs.Hand.Cards.ToList())
+                await CardPileCmd.Add(c, PileType.Discard);
+            pcs.Energy = energy;
+        }
+
+        void ClearSequence()
+        {
+            foreach (var orb in AutomatonMechanics.GetEncodedOrbs(player).ToList())
+                AutomatonMechanics.RemoveEncodedOrb(player, orb);
+        }
+
+        // 1. Verify RelicPool (10 total: 2 Starter + 8 Pool), PotionPool (4), and TokenCardPool (6 Good Statuses)!
+        var relicPool = ModelDb.RelicPool<AutomatonRelicPool>().AllRelics.ToList();
+        foreach (var t in new[]
+        {
+            typeof(BronzeCore), typeof(PlatinumCore), typeof(ProtectiveGoggles), typeof(SilverBullet),
+            typeof(CableSpool), typeof(DecasWashers), typeof(Mallet), typeof(Timepiece),
+            typeof(BronzeIdol), typeof(DonusWashers)
+        })
+        {
+            AutoTestAssert.True(relicPool.Any(r => r.GetType() == t), $"AutomatonRelicPool missing {t.Name}");
+        }
+        AutoTestAssert.Equal(10, relicPool.Count, "AutomatonRelicPool has exact 10 relics (no non-upgrade Boss relics)");
+
+        var potionPool = ModelDb.PotionPool<AutomatonPotionPool>().AllPotions.ToList();
+        foreach (var t in new[]
+        {
+            typeof(Downfall.Automaton.Potions.FreeFunctionsPotion),
+            typeof(Downfall.Automaton.Potions.BurnAndBuffPotion),
+            typeof(Downfall.Automaton.Potions.CleanCodePotion),
+            typeof(Downfall.Automaton.Potions.BuildAFunctionPotion)
+        })
+        {
+            AutoTestAssert.True(potionPool.Any(p => p.GetType() == t), $"AutomatonPotionPool missing {t.Name}");
+        }
+
+        var tokenCards = ModelDb.CardPool<MegaCrit.Sts2.Core.Models.CardPools.TokenCardPool>().AllCards.ToList();
+        foreach (var t in new[]
+        {
+            typeof(BronzeDaze), typeof(BronzeGrievousWound), typeof(BronzeIgnite),
+            typeof(BronzeIntoTheVoid), typeof(BronzeUsefulSlime), typeof(BronzeUnknownStatus)
+        })
+        {
+            AutoTestAssert.True(tokenCards.Any(c => c.GetType() == t), $"TokenCardPool missing Good Status {t.Name}");
+        }
+
+        // 2. CableSpool (first Encodable card played encodes a copy!) + Timepiece (Functions gain Retain!)
+        await ClearHandAndRefillAsync();
+        ClearSequence();
+        var cableSpool = await RelicCmd.Obtain<CableSpool>(player);
+        var timepiece = await RelicCmd.Obtain<Timepiece>(player);
+        AutoTestAssert.NotNull(cableSpool, "Obtained CableSpool");
+        AutoTestAssert.NotNull(timepiece, "Obtained Timepiece");
+
+        var firstEnc = combatState.CreateCard<Safeguard>(player);
+        await CardPileCmd.Add(firstEnc, PileType.Hand);
+        await PlayCardAsync(firstEnc);
+        AutoTestAssert.Equal(2, AutomatonMechanics.GetEncodedOrbs(player).Count, "CableSpool encoded an extra copy of the first Encodable card played (2 total)");
+
+        // Playing 2nd Encodable card compiles (3rd slot) and does NOT trigger CableSpool a second time!
+        var secondEnc = combatState.CreateCard<Safeguard>(player);
+        await CardPileCmd.Add(secondEnc, PileType.Hand);
+        await PlayCardAsync(secondEnc);
+        AutoTestAssert.Equal(0, AutomatonMechanics.GetEncodedOrbs(player).Count, "CableSpool did NOT trigger on 2nd Encodable card played");
+        var retainedFunc = AutoTestAssert.NotNull(pcs.Hand.Cards.OfType<FunctionCard>().FirstOrDefault(), "Compiled Function from CableSpool + Safeguard");
+        AutoTestAssert.True(retainedFunc.Keywords.Contains(CardKeyword.Retain), "Timepiece granted Retain to compiled Function");
+
+        // 3. ProtectiveGoggles (+4 Block at end of turn ONLY when sequence is empty!) + SilverBullet + Mallet + DonusWashers + DecasWashers on combat turn start!
+        await RelicCmd.Obtain<ProtectiveGoggles>(player);
+        await RelicCmd.Obtain<SilverBullet>(player);
+        await RelicCmd.Obtain<Mallet>(player);
+        await RelicCmd.Obtain<DonusWashers>(player);
+        var decas = await RelicCmd.Obtain<DecasWashers>(player);
+        AutoTestAssert.NotNull(decas, "Obtained DecasWashers");
+
+        // First test ProtectiveGoggles when sequence is NON-empty -> NO Block at turn end!
+        await ClearHandAndRefillAsync();
+        if (player.Creature.Block > 0)
+            await CreatureCmd.LoseBlock(ctx, player.Creature, player.Creature.Block, null);
+        await AutomatonMechanics.EncodeCardAsync(ctx, player, (BronzeCard)combatState.CreateCard<Safeguard>(player));
+        int roundBefore = combatState.RoundNumber;
+        for (int i = 0; i < 10; i++)
+            await CardPileCmd.Add(combatState.CreateCard<BronzeStrike>(player), PileType.Draw, CardPilePosition.Top);
+
+        // Next turn triggers SilverBullet, Mallet, DonusWashers, and DecasWashers (1st of 3 turns)!
+        await DownfallAutoTestRunner.EndTurnAndWaitForRoundAsync(player, roundBefore + 1);
+        AutoTestAssert.True(pcs.Hand.Cards.Any(c => c is WhirlingStrike && c.EnergyCost.GetWithModifiers(CostModifiers.All) == 0),
+            "SilverBullet added 0-cost WhirlingStrike (Piercing Shot) to Hand");
+        AutoTestAssert.Equal(2, pcs.Hand.Cards.Count(c => c is FineTuning { IsUpgraded: true }),
+            "Mallet added 2 copies of FineTuning+ to Hand");
+        int expectedDonusEnergy = pcs.Hand.Cards.Any(c => c is MegaCrit.Sts2.Core.Models.Cards.Void) ? 4 : 5;
+        AutoTestAssert.Equal(expectedDonusEnergy, pcs.Energy, "DonusWashers granted +2 Energy (3 -> 5, or 4 if DecasWashers immediately drew the inserted Void)");
+        AutoTestAssert.True(pcs.DrawPile.Cards.Any(c => c is MegaCrit.Sts2.Core.Models.Cards.Void)
+            || pcs.Hand.Cards.Any(c => c is MegaCrit.Sts2.Core.Models.Cards.Void)
+            || pcs.DiscardPile.Cards.Any(c => c is MegaCrit.Sts2.Core.Models.Cards.Void),
+            "DonusWashers inserted a Void into Draw Pile");
+        AutoTestAssert.Equal(2, decas.DisplayAmount, "DecasWashers drew an extra card and decremented remaining turns 3 -> 2");
+
+        // Now test ProtectiveGoggles with EMPTY sequence -> grants 4 Block at end of turn (and verify via BeforeSideTurnEnd directly before enemy attack/block reset)!
+        ClearSequence();
+        if (player.Creature.Block > 0)
+            await CreatureCmd.LoseBlock(ctx, player.Creature, player.Creature.Block, null);
+        var goggles = player.Relics.OfType<ProtectiveGoggles>().First();
+        await goggles.BeforeSideTurnEnd(ctx, CombatSide.Player, [player.Creature]);
+        AutoTestAssert.Equal(4, player.Creature.Block, "ProtectiveGoggles granted +4 Block when ending turn with no Encoded cards");
+
+        // With non-empty sequence, ProtectiveGoggles grants 0 additional Block
+        await AutomatonMechanics.EncodeCardAsync(ctx, player, (BronzeCard)combatState.CreateCard<Safeguard>(player));
+        await goggles.BeforeSideTurnEnd(ctx, CombatSide.Player, [player.Creature]);
+        AutoTestAssert.Equal(4, player.Creature.Block, "ProtectiveGoggles did NOT grant Block when cards are Encoded");
+        ClearSequence();
+
+        // 4. Potions: FreeFunctionsPotion (Machine Oil), CleanCodePotion (Alchyrical Elixir), BurnAndBuffPotion (Vexing Draught), BuildAFunctionPotion (Kio's Clever Concoction)!
+        await ClearHandAndRefillAsync();
+        var oilTarget = combatState.CreateCard<Safeguard>(player); // 4 Block
+        await AutomatonMechanics.EncodeCardAsync(ctx, player, oilTarget);
+        var oilProc = await PotionCmd.TryToProcure<Downfall.Automaton.Potions.FreeFunctionsPotion>(player);
+        var oilPotion = AutoTestAssert.NotNull(oilProc.potion, "Procured FreeFunctionsPotion");
+        await oilPotion.OnUseWrapper(ctx, null);
+        AutoTestAssert.Equal(5, oilTarget.DynamicVars.Block.IntValue, "FreeFunctionsPotion (Machine Oil) Fine Tuned Encoded Safeguard 4 -> 5 Block");
+        ClearSequence();
+
+        // CleanCodePotion -> CleanCodePower(1) + FreeFunctionPower(1) -> strips Break Compile Error & makes Function cost 0!
+        var ccProc = await PotionCmd.TryToProcure<Downfall.Automaton.Potions.CleanCodePotion>(player);
+        var ccPotion = AutoTestAssert.NotNull(ccProc.potion, "Procured CleanCodePotion");
+        await ccPotion.OnUseWrapper(ctx, null);
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<CleanCodePower>(), "CleanCodePotion applied CleanCodePower(1)");
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<FreeFunctionPower>(), "CleanCodePotion applied FreeFunctionPower(1)");
+        await AutomatonMechanics.EncodeCardAsync(ctx, player, (BronzeCard)combatState.CreateCard<Downfall.Automaton.Cards.Break>(player));
+        var cleanFunc = AutoTestAssert.NotNull(await AutomatonMechanics.CompileFunctionAsync(ctx, player), "Compiled Break with CleanCodePower + FreeFunctionPower");
+        AutoTestAssert.Equal(0, pcs.Hand.Cards.Count(c => c.Type == CardType.Status), "CleanCodePower suppressed Break's 5-Status Compile Error");
+        AutoTestAssert.Equal(0, cleanFunc.EnergyCost.GetWithModifiers(CostModifiers.All), "FreeFunctionPower made compiled Function cost 0 until played");
+        AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<CleanCodePower>(), "CleanCodePower decremented to 0");
+        AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<FreeFunctionPower>(), "FreeFunctionPower decremented to 0");
+
+        // BuildAFunctionPotion (test potency=2 Sacred Bark -> 2 total copies of compiled Function!)
+        await ClearHandAndRefillAsync();
+        ClearSequence();
+        var bafProc = await PotionCmd.TryToProcure<Downfall.Automaton.Potions.BuildAFunctionPotion>(player);
+        var bafPotion = AutoTestAssert.NotNull(bafProc.potion, "Procured BuildAFunctionPotion");
+        bafPotion.DynamicVars["Copies"].BaseValue = 2m;
+        await bafPotion.OnUseWrapper(ctx, null);
+        AutoTestAssert.Equal(2, pcs.Hand.Cards.OfType<FunctionCard>().Count(), "BuildAFunctionPotion with Copies=2 added 2 copies of the compiled Function");
+
+        // 5. BronzeIdol + ALL 6 Good Statuses + BurnAndBuffPotion (Vexing Draught)!
+        await ClearHandAndRefillAsync();
+        ClearSequence();
+        await PowerCmd.Remove<StrengthPower>(player.Creature);
+        await PowerCmd.Remove<DexterityPower>(player.Creature);
+        await RelicCmd.Obtain<BronzeIdol>(player);
+
+        // BurnAndBuffPotion: +2 Str, +2 Dex, +2 Burns into Discard -> BronzeIdol transforms them into BronzeIgnite!
+        int igniteBefore = pcs.DiscardPile.Cards.Count(c => c is BronzeIgnite);
+        var bnbProc = await PotionCmd.TryToProcure<Downfall.Automaton.Potions.BurnAndBuffPotion>(player);
+        var bnbPotion = AutoTestAssert.NotNull(bnbProc.potion, "Procured BurnAndBuffPotion");
+        await bnbPotion.OnUseWrapper(ctx, null);
+        AutoTestAssert.Equal(2, player.Creature.GetPowerAmount<StrengthPower>(), "BurnAndBuffPotion granted +2 Strength");
+        AutoTestAssert.Equal(2, player.Creature.GetPowerAmount<DexterityPower>(), "BurnAndBuffPotion granted +2 Dexterity");
+        AutoTestAssert.Equal(igniteBefore + 2, pcs.DiscardPile.Cards.Count(c => c is BronzeIgnite), "BronzeIdol converted BurnAndBuffPotion's 2 Burns into BronzeIgnite in Discard Pile");
+
+        // HyperBeam puts 5 Voids on TOP of Draw Pile -> BronzeIdol replaces all 5 IN-PLACE on TOP with BronzeIntoTheVoid!
+        var hyper = combatState.CreateCard<HyperBeam>(player);
+        await CardPileCmd.Add(hyper, PileType.Hand);
+        await PlayCardAsync(hyper);
+        AutoTestAssert.Equal(5, pcs.DrawPile.Cards.Take(5).Count(c => c is BronzeIntoTheVoid),
+            "BronzeIdol replaced all 5 HyperBeam Voids IN-PLACE on TOP of Draw Pile with BronzeIntoTheVoid");
+
+        // Draw top BronzeIntoTheVoid -> loses 1 Energy, play on enemy -> applies DarkShacklesPower(5)!
+        int energyBeforeVoidDraw = pcs.Energy;
+        await CardPileCmd.Draw(ctx, 1m, player);
+        AutoTestAssert.Equal(energyBeforeVoidDraw - 1, pcs.Energy, "Drawing BronzeIntoTheVoid lost 1 Energy");
+        var intoVoid = AutoTestAssert.NotNull(pcs.Hand.Cards.OfType<BronzeIntoTheVoid>().FirstOrDefault(), "BronzeIntoTheVoid in Hand");
+        await PlayCardAsync(intoVoid, enemy);
+        AutoTestAssert.Equal(5, enemy.GetPowerAmount<DarkShacklesPower>(), "Playing BronzeIntoTheVoid applied DarkShacklesPower(5)");
+
+        // Insert Dazed -> BronzeDaze (1 Weak), Slimed -> BronzeUsefulSlime (draw 2), Wound -> BronzeGrievousWound (1 Vulnerable), Burn -> BronzeIgnite (10 Soulburn + 2 self-dmg at turn end)!
+        await ClearHandAndRefillAsync();
+        var dazedGen = combatState.CreateCard<Dazed>(player);
+        await CardPileCmd.AddGeneratedCardToCombat(dazedGen, PileType.Hand, player);
+        var bronzeDaze = AutoTestAssert.NotNull(pcs.Hand.Cards.OfType<BronzeDaze>().FirstOrDefault(), "BronzeIdol converted Dazed to BronzeDaze");
+        await PlayCardAsync(bronzeDaze, enemy);
+        AutoTestAssert.Equal(1, enemy.GetPowerAmount<WeakPower>(), "BronzeDaze applied 1 Weak");
+
+        var woundGen = combatState.CreateCard<Wound>(player);
+        await CardPileCmd.AddGeneratedCardToCombat(woundGen, PileType.Hand, player);
+        var bronzeWound = AutoTestAssert.NotNull(pcs.Hand.Cards.OfType<BronzeGrievousWound>().FirstOrDefault(), "BronzeIdol converted Wound to BronzeGrievousWound");
+        await PlayCardAsync(bronzeWound, enemy);
+        AutoTestAssert.Equal(1, enemy.GetPowerAmount<VulnerablePower>(), "BronzeGrievousWound applied 1 Vulnerable");
+
+        var slimeGen = combatState.CreateCard<Slimed>(player);
+        await CardPileCmd.AddGeneratedCardToCombat(slimeGen, PileType.Hand, player);
+        var bronzeSlime = AutoTestAssert.NotNull(pcs.Hand.Cards.OfType<BronzeUsefulSlime>().FirstOrDefault(), "BronzeIdol converted Slimed to BronzeUsefulSlime");
+        for (int i = 0; i < 4; i++)
+            await CardPileCmd.Add(combatState.CreateCard<BronzeDefend>(player), PileType.Draw, CardPilePosition.Top);
+        int handBeforeSlime = pcs.Hand.Cards.Count;
+        await PlayCardAsync(bronzeSlime);
+        AutoTestAssert.Equal(handBeforeSlime + 1, pcs.Hand.Cards.Count, "BronzeUsefulSlime exhausted itself and drew 2 cards (net +1)");
+
+        var burnGen = combatState.CreateCard<Burn>(player);
+        await CardPileCmd.AddGeneratedCardToCombat(burnGen, PileType.Hand, player);
+        var bronzeIgnite = AutoTestAssert.NotNull(pcs.Hand.Cards.OfType<BronzeIgnite>().FirstOrDefault(), "BronzeIdol converted Burn to BronzeIgnite");
+        AutoTestAssert.Equal(CardType.Status, bronzeIgnite.Type, "Good Status preserves CardType.Status");
+        await PlayCardAsync(bronzeIgnite, enemy);
+        AutoTestAssert.Equal(10, enemy.GetPowerAmount<Downfall.Core.SoulburnPower>(), "BronzeIgnite applied 10 Soulburn");
+
+        // BronzeIdol non-standard Status -> BronzeUnknownStatus (Perplex) preserving Ethereal/Exhaust keywords + FeaturePower draw synergy!
+        await ClearHandAndRefillAsync();
+        if (player.Creature.Block > 0)
+            await CreatureCmd.LoseBlock(ctx, player.Creature, player.Creature.Block, null);
+        await PowerCmd.Remove<DexterityPower>(player.Creature);
+        var soot = combatState.CreateCard<Soot>(player);
+        soot.AddKeyword(CardKeyword.Ethereal);
+        soot.AddKeyword(CardKeyword.Exhaust);
+        await CardPileCmd.AddGeneratedCardToCombat(soot, PileType.Hand, player);
+        var convertedUnknown = AutoTestAssert.NotNull(pcs.Hand.Cards.OfType<BronzeUnknownStatus>().FirstOrDefault(),
+            "BronzeIdol converted non-standard Status (Soot) into BronzeUnknownStatus (Perplex)");
+        AutoTestAssert.Equal(CardType.Status, convertedUnknown.Type, "BronzeUnknownStatus preserves CardType.Status");
+        AutoTestAssert.True(convertedUnknown.Keywords.Contains(CardKeyword.Ethereal), "BronzeUnknownStatus preserved Ethereal keyword");
+        AutoTestAssert.True(convertedUnknown.Keywords.Contains(CardKeyword.Exhaust), "BronzeUnknownStatus preserved Exhaust keyword");
+        CardCmd.Upgrade(convertedUnknown);
+        await PlayCardAsync(convertedUnknown);
+        AutoTestAssert.Equal(11, player.Creature.Block, "BronzeUnknownStatus+ (Perplex+) granted 11 Block");
+
+        // Verify Good Status triggers FeaturePower on draw + BronzeIgnite.OnTurnEndInHand deals 2 unpowered self-damage at real turn end!
+        await ClearHandAndRefillAsync();
+        if (player.Creature.Block > 0)
+            await CreatureCmd.LoseBlock(ctx, player.Creature, player.Creature.Block, null);
+        await PowerCmd.Apply<FeaturePower>(ctx, player.Creature, 3m, player.Creature, null);
+        var igniteForDraw = combatState.CreateCard<BronzeIgnite>(player);
+        await CardPileCmd.Add(igniteForDraw, PileType.Draw, CardPilePosition.Top);
+        await CardPileCmd.Draw(ctx, 1m, player);
+        AutoTestAssert.Equal(3, player.Creature.Block, "Drawing Good Status (BronzeIgnite) triggered FeaturePower (+3 Block)");
+
+        // Clear Block and end turn with BronzeIgnite in Hand -> takes 2 self-damage (keep enemy stunned/non-lethal by giving enemy 0 strength / checking HP drop >= 2)!
+        if (player.Creature.Block > 0)
+            await CreatureCmd.LoseBlock(ctx, player.Creature, player.Creature.Block, null);
+        int hpBeforeIgniteTurnEnd = player.Creature.CurrentHp;
+        // Remove ProtectiveGoggles so it doesn't absorb BronzeIgnite's 2 self-damage!
+        await RelicCmd.Remove(player.Relics.OfType<ProtectiveGoggles>().First());
+        await DownfallAutoTestRunner.EndTurnAndWaitForRoundAsync(player, combatState.RoundNumber + 1);
+        AutoTestAssert.True(player.Creature.CurrentHp <= hpBeforeIgniteTurnEnd - 2,
+            $"BronzeIgnite OnTurnEndInHand dealt at least 2 self-damage (HP {hpBeforeIgniteTurnEnd} -> {player.Creature.CurrentHp})");
+    }
 }

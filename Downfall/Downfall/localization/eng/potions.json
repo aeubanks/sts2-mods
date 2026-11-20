@@ -61,5 +61,13 @@
   "DOWNFALL-DOUBLE_CHARGE_POTION.title": "Combustive Fluid",
   "DOWNFALL-DOUBLE_CHARGE_POTION.description": "[gold]Ignite[/gold] the current Ghostflame [blue]{IgniteCount}[/blue] times.",
   "DOWNFALL-INFERNO_CHARGE_POTION.title": "Inferno Potion",
-  "DOWNFALL-INFERNO_CHARGE_POTION.description": "Your Ghostflame effects affect ALL enemies{FlameAffectAllEnemiesPower:plural:| [blue]{}[/blue] times} this combat."
+  "DOWNFALL-INFERNO_CHARGE_POTION.description": "Your Ghostflame effects affect ALL enemies{FlameAffectAllEnemiesPower:plural:| [blue]{}[/blue] times} this combat.",
+  "DOWNFALL-FREE_FUNCTIONS_POTION.title": "Machine Oil",
+  "DOWNFALL-FREE_FUNCTIONS_POTION.description": "Increase all numbers on [gold]Encoded[/gold] cards by [blue]{Amount}[/blue] except cost.",
+  "DOWNFALL-BURN_AND_BUFF_POTION.title": "Vexing Draught",
+  "DOWNFALL-BURN_AND_BUFF_POTION.description": "Gain [blue]{StrengthPower}[/blue] [gold]Strength[/gold] and [blue]{DexterityPower}[/blue] [gold]Dexterity[/gold].\nAdd [blue]2[/blue] [gold]Burns[/gold] into your [gold]Discard Pile[/gold].",
+  "DOWNFALL-CLEAN_CODE_POTION.title": "Alchyrical Elixir",
+  "DOWNFALL-CLEAN_CODE_POTION.description": "Remove all [gold]Compile[/gold] [red]Error[/red] effects from the next {Functions:plural:[gold]Function[/gold]|[blue]{}[/blue] [gold]Functions[/gold]} you create; {Functions:plural:it costs|they cost} [blue]0[/blue] until played.",
+  "DOWNFALL-BUILD_A_FUNCTION_POTION.title": "Kio's Clever Concoction",
+  "DOWNFALL-BUILD_A_FUNCTION_POTION.description": "Choose [blue]1[/blue] of [blue]3[/blue] random cards to [gold]Encode[/gold]; repeat until you create a [gold]Function[/gold]{Copies:plural:| and gain [blue]{}[/blue] total copies of it}."
 }
