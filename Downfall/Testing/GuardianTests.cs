@@ -608,6 +608,293 @@ internal static class GuardianTests
         AutoTestAssert.Equal(2, player.Creature.GetPowerAmount<FlexPotionPower>(), "ChargeUp applied FlexPotionPower(2) on Round 2");
     }
 
+    internal static async Task TestUncommonBatch1InCombat()
+    {
+        var (player, _, combatState) = await DownfallAutoTestRunner.StartCombatAsync<TheGuardian>("GUARDIAN_UNC1");
+        var pcs = AutoTestAssert.NotNull(player.PlayerCombatState, "PlayerCombatState");
+        var enemy1 = AutoTestAssert.NotNull(combatState.HittableEnemies.FirstOrDefault(), "Enemy 1");
+        var enemy2 = await CreatureCmd.Add<MegaCrit.Sts2.Core.Models.Monsters.Nibbit>(combatState);
+        var ctx = new ThrowingPlayerChoiceContext();
+        await CreatureCmd.GainMaxHp(enemy1, 1000m);
+        await CreatureCmd.GainMaxHp(enemy2, 1000m);
+
+        // 1. BronzeArmor (Exhaust, ReduceDebuffs 2, Brace 8) & upgraded BronzeArmor+ (no Exhaust)
+        await ClearHandAndRefillEnergy(player, pcs);
+        await PowerCmd.Apply<WeakPower>(ctx, player.Creature, 3m, enemy1, null);
+        int msBefore = player.Creature.GetPowerAmount<ModeShiftPower>();
+        var ba = combatState.CreateCard<BronzeArmor>(player);
+        var baUp = combatState.CreateCard<BronzeArmor>(player);
+        CardCmd.Upgrade(baUp);
+        await CardPileCmd.Add(ba, PileType.Hand);
+        await CardPileCmd.Add(baUp, PileType.Hand);
+
+        AutoTestAssert.True(ba.TryManualPlay(null), "Play BronzeArmor");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<WeakPower>(), "BronzeArmor reduced WeakPower 3 -> 1");
+        AutoTestAssert.Equal(PileType.Exhaust, ba.Pile?.Type, "Unupgraded BronzeArmor Exhausted");
+        AutoTestAssert.True(player.Creature.GetPowerAmount<ModeShiftPower>() != msBefore, "BronzeArmor Braced 8");
+
+        AutoTestAssert.True(baUp.TryManualPlay(null), "Play upgraded BronzeArmor+");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<WeakPower>(), "BronzeArmor+ cleared remaining WeakPower");
+        AutoTestAssert.Equal(PileType.Discard, baUp.Pile?.Type, "Upgraded BronzeArmor+ did not Exhaust");
+
+        // 2. BronzeOrb (9 dmg, Brace for unblocked damage, Exhaust)
+        await ClearHandAndRefillEnergy(player, pcs);
+        await PowerCmd.Remove<DefensiveModePower>(player.Creature);
+        await PowerCmd.Remove<ThornsPower>(player.Creature);
+        var msForOrb = player.Creature.GetPower<ModeShiftPower>()!;
+        if (msForOrb.Amount < 15)
+            await PowerCmd.ModifyAmount(ctx, msForOrb, 15 - msForOrb.Amount, player.Creature, null);
+        await CreatureCmd.GainBlock(enemy1, 4m, ValueProp.Unpowered, null);
+        msBefore = player.Creature.GetPowerAmount<ModeShiftPower>();
+        var bronzeOrb = combatState.CreateCard<BronzeOrb>(player);
+        await CardPileCmd.Add(bronzeOrb, PileType.Hand);
+        int e1Hp = enemy1.CurrentHp;
+        AutoTestAssert.True(bronzeOrb.TryManualPlay(enemy1), "Play BronzeOrb against 4 Block enemy (5 unblocked)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(e1Hp - 5, enemy1.CurrentHp, "BronzeOrb dealt 5 unblocked damage");
+        AutoTestAssert.Equal(msBefore - 5, player.Creature.GetPowerAmount<ModeShiftPower>(), "BronzeOrb Braced for exact unblocked damage (5)");
+        AutoTestAssert.Equal(PileType.Exhaust, bronzeOrb.Pile?.Type, "BronzeOrb Exhausted");
+
+        // 3. DonusPower (Draw 2 + ReduceDebuffs 1), GuardianHarden (4 PlatingPower), FloatingOrbs (3 dmg on 0-cost card, NO self-trigger on 0-cost FloatingOrbs, YES on Stasis-0 card, NO on X=0 MultiBeam)
+        await ClearHandAndRefillEnergy(player, pcs);
+        await PowerCmd.Apply<FrailPower>(ctx, player.Creature, 2m, enemy1, null);
+        var donus = combatState.CreateCard<DonusPower>(player);
+        var harden = combatState.CreateCard<GuardianHarden>(player);
+        var floatOrbs = combatState.CreateCard<FloatingOrbs>(player);
+        floatOrbs.EnergyCost.SetThisTurnOrUntilPlayed(0, reduceOnly: true);
+        var zeroCostShiv = combatState.CreateCard<CrystalShiv>(player);
+        await CardPileCmd.Add(donus, PileType.Hand);
+        await CardPileCmd.Add(harden, PileType.Hand);
+        await CardPileCmd.Add(floatOrbs, PileType.Hand);
+        await CardPileCmd.Add(zeroCostShiv, PileType.Hand);
+
+        AutoTestAssert.True(donus.TryManualPlay(null), "Play DonusPower");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<FrailPower>(), "DonusPower reduced FrailPower 2 -> 1");
+
+        AutoTestAssert.True(harden.TryManualPlay(null), "Play GuardianHarden");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(4, player.Creature.GetPowerAmount<PlatingPower>(), "GuardianHarden granted 4 PlatingPower");
+
+        int totalHp = enemy1.CurrentHp + enemy2.CurrentHp;
+        AutoTestAssert.True(floatOrbs.TryManualPlay(null), "Play 0-cost FloatingOrbs (must NOT self-trigger)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(3, player.Creature.GetPowerAmount<FloatingOrbsPower>(), "FloatingOrbs applied FloatingOrbsPower(3)");
+        AutoTestAssert.Equal(totalHp, enemy1.CurrentHp + enemy2.CurrentHp, "0-cost FloatingOrbs did NOT self-trigger");
+
+        AutoTestAssert.True(zeroCostShiv.TryManualPlay(enemy1), "Play 0-cost CrystalShiv (3 dmg + 3 FloatingOrbs)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(totalHp - 6, enemy1.CurrentHp + enemy2.CurrentHp, "FloatingOrbs dealt 3 extra damage on 0-cost play");
+
+        // Stasis-released 0-cost card DOES trigger FloatingOrbs!
+        var stasisDefend = combatState.CreateCard<GuardianDefend>(player);
+        var defOrb = await GuardianMechanics.PlaceInStasisAsync(ctx, player, stasisDefend);
+        AutoTestAssert.NotNull(defOrb, "Defend placed in Stasis for FloatingOrbs 0-cost test");
+        await GuardianMechanics.AccelerateAllAsync(ctx, player, 2);
+        AutoTestAssert.Equal(PileType.Hand, stasisDefend.Pile?.Type, "Stasis-released Defend returned to Hand at 0 cost");
+        totalHp = enemy1.CurrentHp + enemy2.CurrentHp;
+        AutoTestAssert.True(stasisDefend.TryManualPlay(null), "Play Stasis-released 0-cost Defend");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(totalHp - 3, enemy1.CurrentHp + enemy2.CurrentHp, "FloatingOrbs triggered on Stasis-released 0-cost card");
+
+        // X-cost MultiBeam played at X=0 Energy must NOT trigger FloatingOrbs!
+        var zeroXBeam = combatState.CreateCard<MultiBeam>(player);
+        await CardPileCmd.Add(zeroXBeam, PileType.Hand);
+        if (pcs.Energy > 0)
+            await PlayerCmd.LoseEnergy(pcs.Energy, player);
+        totalHp = enemy1.CurrentHp + enemy2.CurrentHp;
+        AutoTestAssert.True(zeroXBeam.TryManualPlay(null), "Play X-cost MultiBeam at X=0 with FloatingOrbs active");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(totalHp, enemy1.CurrentHp + enemy2.CurrentHp, "FloatingOrbs did NOT trigger on X=0 MultiBeam");
+
+        // 4. EvasiveProtocol: (a) triggers ModeShift via Brace -> reduces debuffs; (b) already Defensive without ModeShift -> reduces once; (c) already Defensive AND triggers ModeShift -> reduces once via listener (no double-reduce)!
+        await ClearHandAndRefillEnergy(player, pcs);
+        await PowerCmd.Remove<DefensiveModePower>(player.Creature);
+        await PowerCmd.Remove<ThornsPower>(player.Creature);
+        var msPower = player.Creature.GetPower<ModeShiftPower>()!;
+        if (msPower.Amount > 5)
+            await PowerCmd.ModifyAmount(ctx, msPower, 5 - msPower.Amount, player.Creature, null);
+        await PowerCmd.Apply<WeakPower>(ctx, player.Creature, 6m, enemy1, null);
+        var evasive1 = combatState.CreateCard<EvasiveProtocol>(player);
+        await CardPileCmd.Add(evasive1, PileType.Hand);
+        AutoTestAssert.True(evasive1.TryManualPlay(null), "Play EvasiveProtocol (triggers ModeShift via Brace 6 >= 5)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.True(player.Creature.HasPower<DefensiveModePower>(), "EvasiveProtocol entered Defensive Mode");
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<EvasiveProtocolPower>(), "EvasiveProtocolPower(1) applied");
+        AutoTestAssert.Equal(5, player.Creature.GetPowerAmount<WeakPower>(), "EvasiveProtocol triggered debuff reduction (6 -> 5) on ModeShift");
+
+        // Case 3: Play second EvasiveProtocol while ALREADY in Defensive Mode (high ModeShift so Brace doesn't re-trigger)
+        var evasive2 = combatState.CreateCard<EvasiveProtocol>(player);
+        await CardPileCmd.Add(evasive2, PileType.Hand);
+        AutoTestAssert.True(evasive2.TryManualPlay(null), "Play EvasiveProtocol while already in Defensive Mode");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(2, player.Creature.GetPowerAmount<EvasiveProtocolPower>(), "EvasiveProtocolPower stacked to 2");
+        AutoTestAssert.Equal(4, player.Creature.GetPowerAmount<WeakPower>(), "EvasiveProtocol reduced WeakPower (5 -> 4) immediately while in Defensive Mode");
+
+        // Case 4: Play third EvasiveProtocol while ALREADY in Defensive Mode AND ModeShift <= 6 (triggers ModeShift -> reduces by total 3 once, NOT 3+1=4!)
+        msPower = player.Creature.GetPower<ModeShiftPower>()!;
+        if (msPower.Amount > 5)
+            await PowerCmd.ModifyAmount(ctx, msPower, 5 - msPower.Amount, player.Creature, null);
+        var evasive3 = combatState.CreateCard<EvasiveProtocol>(player);
+        await CardPileCmd.Add(evasive3, PileType.Hand);
+        AutoTestAssert.True(evasive3.TryManualPlay(null), "Play EvasiveProtocol #3 while Defensive AND triggering ModeShift");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(3, player.Creature.GetPowerAmount<EvasiveProtocolPower>(), "EvasiveProtocolPower stacked to 3");
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<WeakPower>(), "Case 4 reduced WeakPower once by 3 (4 -> 1), no double-reduce");
+
+        // 5. GuardianWhirl (<16 Block: 2 hits = 8 each; >=16 Block: 4 hits = 16 each)
+        await ClearHandAndRefillEnergy(player, pcs);
+        await PowerCmd.Remove<WeakPower>(player.Creature);
+        await CreatureCmd.LoseBlock(ctx, player.Creature, player.Creature.Block, null);
+        var whirl1 = combatState.CreateCard<GuardianWhirl>(player);
+        var whirl2 = combatState.CreateCard<GuardianWhirl>(player);
+        await CardPileCmd.Add(whirl1, PileType.Hand);
+        await CardPileCmd.Add(whirl2, PileType.Hand);
+
+        totalHp = enemy1.CurrentHp + enemy2.CurrentHp;
+        AutoTestAssert.True(whirl1.TryManualPlay(null), "Play GuardianWhirl at 0 Block (4x2 AoE = 16 total)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(totalHp - 16, enemy1.CurrentHp + enemy2.CurrentHp, "GuardianWhirl dealt 8 per enemy (16 total) at 0 Block");
+
+        await CreatureCmd.GainBlock(player.Creature, 16m, ValueProp.Unpowered, null);
+        totalHp = enemy1.CurrentHp + enemy2.CurrentHp;
+        AutoTestAssert.True(whirl2.TryManualPlay(null), "Play GuardianWhirl at 16 Block (4x4 AoE = 32 total)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(totalHp - 32, enemy1.CurrentHp + enemy2.CurrentHp, "GuardianWhirl dealt 16 per enemy (32 total) at 16+ Block");
+
+        // 6. PrismaticBarrier (3 sockets: 2 Block per Gem + triggers Gems)
+        await ClearHandAndRefillEnergy(player, pcs);
+        await CreatureCmd.LoseBlock(ctx, player.Creature, player.Creature.Block, null);
+        var prism = combatState.CreateCard<PrismaticBarrier>(player);
+        AutoTestAssert.Equal(3, prism.MaxSockets, "PrismaticBarrier has 3 sockets");
+        AutoTestAssert.True(prism.TrySocketGem(GemType.Orange), "Socket Citrine #1");
+        AutoTestAssert.True(prism.TrySocketGem(GemType.Orange), "Socket Citrine #2");
+        await CardPileCmd.Add(prism, PileType.Hand);
+        int energyBefore = pcs.Energy;
+        AutoTestAssert.True(prism.TryManualPlay(null), "Play PrismaticBarrier with 2 Gems");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(4, player.Creature.Block, "PrismaticBarrier granted 2x2 = 4 Block for 2 socketed Gems");
+        AutoTestAssert.Equal(energyBefore + 1, pcs.Energy, "PrismaticBarrier triggered 2 Citrine Gems (-1 cost +2 energy)");
+
+        // 7. Clone (copy hand card into Stasis preserving sockets; upgraded also Accelerates), Preprogram (top of draw pile into Stasis), Emergency (AccelerateAll 1x / 2x), MultiBeam (Tick +2 dmg & X-cost hits), Orbwalk (Tick +1 Str & Volatile vs upgraded non-Volatile)
+        await ClearHandAndRefillEnergy(player, pcs);
+        foreach (var orb in GuardianMechanics.GetStasisOrbs(player))
+            await GuardianMechanics.EvokeSpecificOrbAsync(ctx, player, orb);
+        await ClearHandAndRefillEnergy(player, pcs);
+
+        var multiBeam = combatState.CreateCard<MultiBeam>(player);
+        var orbwalk = combatState.CreateCard<Orbwalk>(player);
+        var orbwalkUp = combatState.CreateCard<Orbwalk>(player);
+        CardCmd.Upgrade(orbwalkUp);
+        AutoTestAssert.True(orbwalk.IsVolatile, "Unupgraded Orbwalk is Volatile");
+        AutoTestAssert.True(!orbwalkUp.IsVolatile, "Upgraded Orbwalk+ is NOT Volatile");
+
+        var mbOrb = await GuardianMechanics.PlaceInStasisAsync(ctx, player, multiBeam);
+        var owOrb = await GuardianMechanics.PlaceInStasisAsync(ctx, player, orbwalk);
+        AutoTestAssert.NotNull(mbOrb, "MultiBeam placed in Stasis");
+        AutoTestAssert.NotNull(owOrb, "Orbwalk placed in Stasis");
+
+        // Emergency+ Accelerates ALL cards in Stasis twice!
+        // MultiBeam (X-cost -> TurnsRemaining=1): 1st tick evokes it (+2 dmg -> 8 dmg) and returns it to Hand!
+        // Orbwalk (2-cost -> TurnsRemaining=3): 2 ticks (+2 Str, turns 3->1), then unupgraded Emergency (1x) ticks 1->0 (+3 Str total, Volatile -> Exhausts)!
+        var emergUp = combatState.CreateCard<Emergency>(player);
+        CardCmd.Upgrade(emergUp);
+        var emergBase = combatState.CreateCard<Emergency>(player);
+        await CardPileCmd.Add(emergUp, PileType.Hand);
+        await CardPileCmd.Add(emergBase, PileType.Hand);
+        int strBefore = player.Creature.GetPowerAmount<StrengthPower>();
+        AutoTestAssert.True(emergUp.TryManualPlay(null), "Play Emergency+ (AccelerateAll twice)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(8m, multiBeam.DynamicVars.Damage.BaseValue, "MultiBeam gained +2 damage from Tick");
+        AutoTestAssert.Equal(PileType.Hand, multiBeam.Pile?.Type, "MultiBeam returned to Hand on Evoke");
+        AutoTestAssert.Equal(strBefore + 2, player.Creature.GetPowerAmount<StrengthPower>(), "Orbwalk granted +2 Strength across 2 Ticks");
+        AutoTestAssert.Equal(1, owOrb!.TurnsRemaining, "Orbwalk has 1 turn remaining in Stasis after 2 Ticks");
+
+        AutoTestAssert.True(emergBase.TryManualPlay(null), "Play unupgraded Emergency (AccelerateAll once)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(strBefore + 3, player.Creature.GetPowerAmount<StrengthPower>(), "Orbwalk granted 3rd Strength on 3rd Tick");
+        AutoTestAssert.Equal(PileType.Exhaust, orbwalk.Pile?.Type, "Unupgraded Volatile Orbwalk Exhausted on Evoke");
+
+        // Play MultiBeam with X=2 Energy (ensure X-cost deals 2 hits at X=2!)
+        await PowerCmd.Remove<StrengthPower>(player.Creature);
+        await PowerCmd.Remove<FloatingOrbsPower>(player.Creature);
+        if (pcs.Energy > 2)
+            await PlayerCmd.LoseEnergy(pcs.Energy - 2, player);
+        else if (pcs.Energy < 2)
+            await PlayerCmd.GainEnergy(2 - pcs.Energy, player);
+        totalHp = enemy1.CurrentHp + enemy2.CurrentHp;
+        AutoTestAssert.True(multiBeam.TryManualPlay(null), "Play MultiBeam at X=2 (8 dmg x 2 x 2 enemies = 32)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(totalHp - 32, enemy1.CurrentHp + enemy2.CurrentHp, "MultiBeam dealt 8x2 to both enemies (32 total)");
+
+        // Test Clone+ (copies hand card preserving sockets & Accelerates) and Preprogram (top of draw pile -> Stasis + socketed Gem)
+        await ClearHandAndRefillEnergy(player, pcs);
+        var copyTarget = combatState.CreateCard<TwinSlam>(player);
+        AutoTestAssert.True(copyTarget.TrySocketGem(GemType.Red), "Socket Ruby into TwinSlam before Clone");
+        var cloneCard = combatState.CreateCard<Clone>(player);
+        CardCmd.Upgrade(cloneCard);
+        await CardPileCmd.Add(copyTarget, PileType.Hand);
+        await CardPileCmd.Add(cloneCard, PileType.Hand);
+        using (DownfallAutoTestRunner.PreferCards(c => ReferenceEquals(c, copyTarget)))
+        {
+            AutoTestAssert.True(cloneCard.TryManualPlay(null), "Play upgraded Clone+ targeting TwinSlam");
+            await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        }
+        // TwinSlam costs 1 -> TurnsRemaining starts at 2, Clone+ Accelerates it to 1!
+        var clonedOrb = GuardianMechanics.GetStasisOrbs(player)
+            .FirstOrDefault(o => o.StasisCard is TwinSlam ts && !ReferenceEquals(ts, copyTarget));
+        AutoTestAssert.NotNull(clonedOrb, "Clone+ placed a copy of TwinSlam into Stasis");
+        AutoTestAssert.Equal(1, clonedOrb!.TurnsRemaining, "Clone+ Accelerated the cloned TwinSlam from 2 -> 1 turn");
+        AutoTestAssert.Equal(PileType.Hand, copyTarget.Pile?.Type, "Original TwinSlam stayed in Hand after Clone+");
+        var clonedTwin = (TwinSlam)clonedOrb.StasisCard!;
+        AutoTestAssert.Equal(1, clonedTwin.GetSocketedGems().Count, "Cloned TwinSlam preserved its socketed Ruby");
+
+        // Complete Clone+ round-trip: Accelerate cloned TwinSlam into Hand and play it (verifies Ruby +2 Str + SecondStrike spawn)
+        await GuardianMechanics.AccelerateAsync(ctx, player);
+        AutoTestAssert.Equal(PileType.Hand, clonedTwin.Pile?.Type, "Cloned TwinSlam evoked into Hand");
+        int strBeforeClonePlay = player.Creature.GetPowerAmount<StrengthPower>();
+        AutoTestAssert.True(clonedTwin.TryManualPlay(enemy1), "Play evoked cloned TwinSlam");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(strBeforeClonePlay + 2, player.Creature.GetPowerAmount<StrengthPower>(), "Cloned TwinSlam triggered preserved Ruby (+2 Str)");
+        AutoTestAssert.True(pcs.Hand.Cards.OfType<SecondStrike>().Any(), "Cloned TwinSlam spawned SecondStrike");
+
+        // Preprogram: (a) puts a top draw-pile card into Stasis and triggers socketed Gem
+        var drawTarget = combatState.CreateCard<GuardianStrike>(player);
+        await CardPileCmd.Add(drawTarget, PileType.Draw, CardPilePosition.Top);
+        var preprogram = combatState.CreateCard<Preprogram>(player);
+        AutoTestAssert.True(preprogram.TrySocketGem(GemType.Orange), "Socket Citrine into Preprogram");
+        await CardPileCmd.Add(preprogram, PileType.Hand);
+        energyBefore = pcs.Energy;
+        using (DownfallAutoTestRunner.PreferCards(c => ReferenceEquals(c, drawTarget)))
+        {
+            AutoTestAssert.True(preprogram.TryManualPlay(null), "Play Preprogram");
+            await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        }
+        AutoTestAssert.True(GuardianMechanics.GetStasisOrbs(player).Any(o => ReferenceEquals(o.StasisCard, drawTarget)), "Preprogram placed top draw card into Stasis");
+        AutoTestAssert.Equal(energyBefore, pcs.Energy, "Preprogram triggered socketed Citrine (-1 cost +1 energy)");
+
+        // Preprogram (b): empty draw pile shuffles discard, 0-selection cancel puts 0 cards in Stasis and still triggers socketed Gem!
+        await ClearHandAndRefillEnergy(player, pcs);
+        foreach (var c in PileType.Draw.GetPile(player).Cards.ToList())
+            await CardPileCmd.Add(c, PileType.Discard);
+        AutoTestAssert.Equal(0, PileType.Draw.GetPile(player).Cards.Count, "Draw pile emptied for Preprogram shuffle test");
+        int stasisBeforeCancel = GuardianMechanics.GetStasisOrbs(player).Count;
+        var preprogram2 = combatState.CreateCard<Preprogram>(player);
+        AutoTestAssert.True(preprogram2.TrySocketGem(GemType.Orange), "Socket Citrine into Preprogram #2");
+        await CardPileCmd.Add(preprogram2, PileType.Hand);
+        energyBefore = pcs.Energy;
+        using (DownfallAutoTestRunner.CancelCardSelection())
+        {
+            AutoTestAssert.True(preprogram2.TryManualPlay(null), "Play Preprogram with empty draw pile and cancel selection");
+            await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        }
+        AutoTestAssert.True(PileType.Draw.GetPile(player).Cards.Count > 0, "Preprogram shuffled discard into draw pile");
+        AutoTestAssert.Equal(stasisBeforeCancel, GuardianMechanics.GetStasisOrbs(player).Count, "Cancelled Preprogram placed 0 cards into Stasis");
+        AutoTestAssert.Equal(energyBefore, pcs.Energy, "Cancelled Preprogram still triggered socketed Citrine");
+    }
+
     internal static async Task ClearHandAndRefillEnergy(Player player, PlayerCombatState pcs)
     {
         foreach (var c in pcs.Hand.Cards.ToList())

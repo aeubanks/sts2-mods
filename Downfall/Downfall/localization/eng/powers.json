@@ -433,5 +433,11 @@
   "DOWNFALL-CLONE_POWER.smartDescription": "The next {Amount:plural:card|[blue]{}[/blue] cards} you play this turn {Amount:plural:is|are} placed into [gold]Stasis[/gold].",
   "DOWNFALL-NEXT_TURN_TEMP_STRENGTH_POWER.title": "Charging Up",
   "DOWNFALL-NEXT_TURN_TEMP_STRENGTH_POWER.description": "At the start of your next turn, gain temporary [gold]Strength[/gold].",
-  "DOWNFALL-NEXT_TURN_TEMP_STRENGTH_POWER.smartDescription": "At the start of your next turn, gain [blue]{Amount}[/blue] temporary [gold]Strength[/gold]."
+  "DOWNFALL-NEXT_TURN_TEMP_STRENGTH_POWER.smartDescription": "At the start of your next turn, gain [blue]{Amount}[/blue] temporary [gold]Strength[/gold].",
+  "DOWNFALL-EVASIVE_PROTOCOL_POWER.title": "Evasive Protocol",
+  "DOWNFALL-EVASIVE_PROTOCOL_POWER.description": "Whenever you enter [gold]Defensive Mode[/gold], reduce each of your debuffs.",
+  "DOWNFALL-EVASIVE_PROTOCOL_POWER.smartDescription": "Whenever you enter [gold]Defensive Mode[/gold], reduce each of your debuffs by [blue]{Amount}[/blue].",
+  "DOWNFALL-FLOATING_ORBS_POWER.title": "Floating Orbs",
+  "DOWNFALL-FLOATING_ORBS_POWER.description": "Whenever you play a 0-Cost card, deal damage to a random enemy.",
+  "DOWNFALL-FLOATING_ORBS_POWER.smartDescription": "Whenever you play a 0-Cost card, deal [blue]{Amount}[/blue] damage to a random enemy."
 }
