@@ -48,19 +48,52 @@ internal static class GremlinTests
         AutoTestAssert.Equal(1, player.Creature.Powers.OfType<GremlinActivePower>().Count(), "Exactly 1 GremlinActivePower active");
         AutoTestAssert.Equal(5, GremlinMob.GetLivingCount(combatState, player), "All 5 Gremlins living");
 
-        // Verify standby Gremlin visual row is rendered with 4 visible standby Gremlins on-screen!
-        var visuals = NCombatRoom.Instance?.GetCreatureNode(player.Creature)?.Visuals;
+        // Verify standby Gremlin visual row is rendered at ZIndex=0 before Body (so it's in front of background, behind active Gremlin!) with 4 hoverable standby Gremlins on-screen!
+        var creatureNode = NCombatRoom.Instance?.GetCreatureNode(player.Creature);
+        var visuals = creatureNode?.Visuals;
         var standbyRow = visuals?.GetNodeOrNull<Node2D>(GremlinMob.StandbyRowNodeName);
         AutoTestAssert.NotNull(standbyRow, "GremlinStandbyRow node created on GremlinsVisuals");
         AutoTestAssert.True(standbyRow!.Visible, "GremlinStandbyRow visible in normal form");
+        AutoTestAssert.Equal(0, standbyRow.ZIndex, "GremlinStandbyRow stays at ZIndex 0 (in front of combat background)");
+        AutoTestAssert.Equal(0, standbyRow.GetIndex(), "GremlinStandbyRow is child 0 of Visuals (behind active Body)");
+        var hoverLayer = creatureNode?.GetNodeOrNull<Control>(GremlinMob.StandbyHoverLayerNodeName);
+        AutoTestAssert.NotNull(hoverLayer, "GremlinStandbyHoverLayer created on NCreature");
+        AutoTestAssert.True(hoverLayer!.Visible, "GremlinStandbyHoverLayer visible in normal form");
         for (int s = 0; s < 4; s++)
         {
             var slot = standbyRow.GetNode<Node2D>($"Slot{s}");
             AutoTestAssert.True(slot.Visible, $"Standby Slot{s} visible with 5 living Gremlins");
+            AutoTestAssert.Equal(0, slot.ZIndex, $"Standby Slot{s} at ZIndex 0");
             AutoTestAssert.True(slot.GlobalPosition.X > 0f, $"Standby Slot{s} stays on-screen (X={slot.GlobalPosition.X})");
             var label = slot.GetNode<Label>("HpLabel");
             AutoTestAssert.True(label.Text.EndsWith(" 16/16"), $"Standby Slot{s} displays 16/16 HP (got '{label.Text}')");
+            var hover = hoverLayer.GetNode<Control>($"Hover{s}");
+            AutoTestAssert.True(hover.Visible, $"Standby Hover{s} visible with 5 living Gremlins");
+            var kind = (GremlinKind)hover.GetMeta("gremlin_kind").AsInt32();
+            var singleTip = GremlinMob.BuildSingleGremlinHoverTip(player, kind);
+            AutoTestAssert.True(singleTip.Description.Contains("16/16"), $"Single-Gremlin HoverTip shows 16/16 HP for {kind}");
         }
+        var mobTip = GremlinMob.BuildMobStatusHoverTip(player);
+        AutoTestAssert.True(mobTip.Description.Contains("(Active)"), "Top-bar / Mob HoverTip lists Active Gremlin");
+
+        // Exercise live standby hover signals (MouseEntered -> MouseExited) cleanly!
+        var hover0 = hoverLayer.GetNode<Control>("Hover0");
+        hover0.EmitSignal(Control.SignalName.MouseEntered);
+        hover0.EmitSignal(Control.SignalName.MouseExited);
+
+        // Exercise live NTopBarHp OnFocus/OnUnfocus (invoking GremlinTopBarHpPatch) if mounted in NRun!
+        var topBarHp = MegaCrit.Sts2.Core.Nodes.NRun.Instance?.FindChildren("*", "Control", recursive: true, owned: false)
+            .OfType<MegaCrit.sts2.Core.Nodes.TopBar.NTopBarHp>()
+            .FirstOrDefault();
+        AutoTestAssert.NotNull(topBarHp, "NTopBarHp mounted under NRun.Instance");
+        var onFocus = typeof(MegaCrit.sts2.Core.Nodes.TopBar.NTopBarHp)
+            .GetMethod("OnFocus", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+        var onUnfocus = typeof(MegaCrit.sts2.Core.Nodes.TopBar.NTopBarHp)
+            .GetMethod("OnUnfocus", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+        AutoTestAssert.NotNull(onFocus, "NTopBarHp.OnFocus exists");
+        AutoTestAssert.NotNull(onUnfocus, "NTopBarHp.OnUnfocus exists");
+        onFocus!.Invoke(topBarHp, null);
+        onUnfocus!.Invoke(topBarHp, null);
 
         async Task ResetHandAndEnergy(int energy = 10)
         {
@@ -279,6 +312,7 @@ internal static class GremlinTests
         await GremlinMob.EnterNobAsync(player, combatState, ctx);
         AutoTestAssert.True(GremlinMob.IsNob(combatState, player), "EnterNobAsync set IsNob");
         AutoTestAssert.True(!standbyRow.Visible, "GremlinStandbyRow hidden while in Gremlin Nob form");
+        AutoTestAssert.True(!hoverLayer.Visible, "GremlinStandbyHoverLayer hidden while in Gremlin Nob form");
         AutoTestAssert.Equal(0, player.Creature.Powers.OfType<GremlinActivePower>().Count(), "EnterNobAsync removed active Gremlin power");
         AutoTestAssert.True(!await GremlinMob.SwapNextAsync(player, combatState, ctx), "SwapNextAsync blocked while in Nob form");
         var nobDance = combatState.CreateCard<GremlinDance>(player);
@@ -327,6 +361,7 @@ internal static class GremlinTests
         AutoTestAssert.Equal(16, player.Creature.CurrentHp, "Mad Gremlin entered with full 16/16 HP");
         AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<StrengthPower>(), "MadGremlinPower did NOT falsely trigger on the lethal hit that killed Fat");
         AutoTestAssert.True(!standbyRow.GetNode<Node2D>("Slot3").Visible, "Standby Slot3 hidden with 4 living Gremlins");
+        AutoTestAssert.True(!hoverLayer.GetNode<Control>("Hover3").Visible, "Standby Hover3 hidden with 4 living Gremlins");
 
         // Next powered hit on Mad DOES trigger MadGremlinPower!
         await CreatureCmd.Damage(ctx, player.Creature, 3m, ValueProp.Move, dealer: enemy1, cardSource: null, cardPlay: null);

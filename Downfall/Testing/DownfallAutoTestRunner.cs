@@ -570,6 +570,8 @@ internal static class DownfallAutoTestRunner
         AutoTestAssert.True(new LocString("cards", "DOWNFALL-ENCHANT_SWORD.selectionScreenPrompt").Exists(), "Missing EnchantSword selectionScreenPrompt loc");
         AutoTestAssert.True(new LocString("relics", "DOWNFALL-SIGNATURE_FINISHER.selectionScreenPrompt").Exists(), "Missing SignatureFinisher selectionScreenPrompt loc");
         AutoTestAssert.True(new LocString("relics", "DOWNFALL-GREMLIN_MOB_STATUS.title").Exists(), "Missing Gremlin Mob Status title loc");
+        AutoTestAssert.True(new LocString("static_hover_tips", "HIT_POINTS.title").Exists(), "Missing static HIT_POINTS.title loc");
+        AutoTestAssert.True(new LocString("static_hover_tips", "HIT_POINTS.description").Exists(), "Missing static HIT_POINTS.description loc");
         AutoTestAssert.True(new LocString("relics", "DOWNFALL-GREMLIN_KNOB.additionalRestSiteHealText").Exists(), "Missing GremlinKnob additionalRestSiteHealText loc");
         AutoTestAssert.True(new LocString("relics", "DOWNFALL-GREMLIN_KNOB_UPGRADE.additionalRestSiteHealText").Exists(), "Missing GremlinKnobUpgrade additionalRestSiteHealText loc");
         AutoTestAssert.True(ResourceLoader.Exists("res://Downfall/images/champ/ui/stance_charge_on.png"), "Missing Champ stance_charge_on.png");

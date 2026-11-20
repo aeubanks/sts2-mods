@@ -15,6 +15,8 @@ using MegaCrit.Sts2.Core.HoverTips;
 using MegaCrit.Sts2.Core.Localization;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Models.Powers;
+using MegaCrit.Sts2.Core.Nodes.Combat;
+using MegaCrit.Sts2.Core.Nodes.HoverTips;
 using MegaCrit.Sts2.Core.Nodes.Rooms;
 using MegaCrit.Sts2.Core.ValueProps;
 
@@ -58,6 +60,7 @@ internal static class GremlinMob
 {
     public const int SacrificedHp = -1;
     public const string StandbyRowNodeName = "GremlinStandbyRow";
+    public const string StandbyHoverLayerNodeName = "GremlinStandbyHoverLayer";
 
     private sealed class RunMobState
     {
@@ -88,6 +91,9 @@ internal static class GremlinMob
         new(-206f, -130f)
     ];
 
+    // Add back row (Slots 3, 2) BEFORE front row (Slots 1, 0) for consistent draw & hover order.
+    private static readonly int[] StandbyDrawOrder = [3, 2, 1, 0];
+
     public static string SpriteTexturePathFor(GremlinKind kind) => kind switch
     {
         GremlinKind.Mad => "res://Downfall/images/gremlins/char/angry.png",
@@ -107,6 +113,49 @@ internal static class GremlinMob
         GremlinKind.Wizard => "Wizard",
         _ => "Gremlin"
     };
+
+    private static (string PowerKey, int BaseAmount) PowerLocInfoFor(GremlinKind kind) => kind switch
+    {
+        GremlinKind.Mad => ("DOWNFALL-MAD_GREMLIN_POWER", 2),
+        GremlinKind.Fat => ("DOWNFALL-FAT_GREMLIN_POWER", 1),
+        GremlinKind.Shield => ("DOWNFALL-SHIELD_GREMLIN_POWER", 2),
+        GremlinKind.Sneaky => ("DOWNFALL-SNEAKY_GREMLIN_POWER", 2),
+        GremlinKind.Wizard => ("DOWNFALL-GREMLIN_WIZARD_POWER", 1),
+        _ => ("DOWNFALL-MAD_GREMLIN_POWER", 2)
+    };
+
+    private static RunMobState? TryGetStateReadOnly(Player player, int maxHp)
+    {
+        if (RunStates.TryGetValue(player, out var cached))
+            return cached;
+
+        string? saved = player.Relics.OfType<GremlinKnobBase>().FirstOrDefault()?.MobStateEncoded;
+        return TryDecodeState(saved, maxHp, out var decoded) ? decoded : null;
+    }
+
+    public static HoverTip BuildSingleGremlinHoverTip(Player player, GremlinKind kind)
+    {
+        int maxHp = Math.Max(1, player.Creature.MaxHp);
+        var state = TryGetStateReadOnly(player, maxHp);
+        int hp = state is null
+            ? Math.Clamp(player.Creature.CurrentHp, 0, maxHp)
+            : (kind == state.Order[0] && state.Hp[(int)kind] > 0 && player.Creature.CurrentHp > 0
+                ? Math.Clamp(player.Creature.CurrentHp, 0, maxHp)
+                : (state.Hp[(int)kind] > 0 ? Math.Min(state.Hp[(int)kind], maxHp) : state.Hp[(int)kind]));
+
+        string hpLine = hp switch
+        {
+            SacrificedHp => "[red]Lost[/red]",
+            0 => "[red]Dead[/red]",
+            _ => $"HP: [blue]{hp}/{maxHp}[/blue]"
+        };
+
+        (string powerKey, int baseAmount) = PowerLocInfoFor(kind);
+        var powerDesc = new LocString("powers", $"{powerKey}.smartDescription");
+        powerDesc.Add("Amount", baseAmount);
+        string desc = $"{hpLine}\n{powerDesc.GetFormattedText()}";
+        return new HoverTip(new LocString("powers", $"{powerKey}.title"), desc);
+    }
 
     public static string ShortNameFor(GremlinKind kind) => kind switch
     {
@@ -326,19 +375,7 @@ internal static class GremlinMob
         int maxHp = Math.Max(1, player.Creature.MaxHp);
 
         // Strictly read-only: never consume gameplay RNG or mutate [SavedProperty] from a UI HoverTip getter!
-        RunMobState? state = null;
-        if (RunStates.TryGetValue(player, out var cached))
-        {
-            state = cached;
-        }
-        else
-        {
-            string? saved = player.Relics.OfType<GremlinKnobBase>().FirstOrDefault()?.MobStateEncoded;
-            if (TryDecodeState(saved, maxHp, out var decoded) && decoded is not null)
-            {
-                state = decoded;
-            }
-        }
+        var state = TryGetStateReadOnly(player, maxHp);
 
         var sb = new StringBuilder();
         if (state is null)
@@ -904,8 +941,9 @@ internal static class GremlinMob
         if (player.Character is not TheGremlins)
             return;
 
-        var visuals = NCombatRoom.Instance?.GetCreatureNode(player.Creature)?.Visuals;
-        if (visuals is null)
+        var creatureNode = NCombatRoom.Instance?.GetCreatureNode(player.Creature);
+        var visuals = creatureNode?.Visuals;
+        if (creatureNode is null || visuals is null)
             return;
 
         var state = GetOrCreateState(player);
@@ -919,73 +957,99 @@ internal static class GremlinMob
         {
             row = CreateStandbyRowNode();
             visuals.AddChild(row);
+            // Draw behind active Gremlin Body (child 1+) while staying at ZIndex = 0 (in front of combat background!).
+            visuals.MoveChild(row, 0);
         }
+
+        var hoverLayer = creatureNode.GetNodeOrNull<Control>(StandbyHoverLayerNodeName);
+        if (hoverLayer is null)
+        {
+            hoverLayer = CreateStandbyHoverLayer(player);
+            creatureNode.AddChild(hoverLayer);
+        }
+        hoverLayer.Position = visuals.Position;
 
         if (state.IsNob)
         {
             row.Visible = false;
+            hoverLayer.Visible = false;
             return;
         }
 
         row.Visible = true;
+        hoverLayer.Visible = true;
         int maxHp = Math.Max(1, player.Creature.MaxHp);
         var livingStandby = state.Order.Skip(1).Where(k => state.Hp[(int)k] > 0).ToList();
 
         for (int i = 0; i < StandbySlotOffsets.Length; i++)
         {
-            if (row.GetNodeOrNull<Node2D>($"Slot{i}") is not { } slot)
-                continue;
+            var slot = row.GetNodeOrNull<Node2D>($"Slot{i}");
+            var hover = hoverLayer.GetNodeOrNull<Control>($"Hover{i}");
 
             if (i >= livingStandby.Count)
             {
-                slot.Visible = false;
+                if (slot is not null)
+                    slot.Visible = false;
+                if (hover is not null)
+                    hover.Visible = false;
                 continue;
             }
 
             GremlinKind kind = livingStandby[i];
             int hp = Math.Clamp(state.Hp[(int)kind], 1, maxHp);
-            slot.Visible = true;
 
-            if (slot.GetNodeOrNull<Sprite2D>("Sprite") is { } sprite)
+            if (slot is not null)
             {
-                string texPath = SpriteTexturePathFor(kind);
-                if (sprite.Texture?.ResourcePath != texPath && ResourceLoader.Exists(texPath))
+                slot.Visible = true;
+                if (slot.GetNodeOrNull<Sprite2D>("Sprite") is { } sprite)
                 {
-                    sprite.Texture = ResourceLoader.Load<Texture2D>(texPath);
+                    string texPath = SpriteTexturePathFor(kind);
+                    if (sprite.Texture?.ResourcePath != texPath && ResourceLoader.Exists(texPath))
+                    {
+                        sprite.Texture = ResourceLoader.Load<Texture2D>(texPath);
+                    }
+                }
+
+                if (slot.GetNodeOrNull<ColorRect>("HpFill") is { } hpFill)
+                {
+                    float ratio = Math.Clamp(hp / (float)maxHp, 0f, 1f);
+                    hpFill.OffsetRight = -26f + 52f * ratio;
+                    hpFill.Color = ratio > 0.5f
+                        ? new Color(0.84f, 0.22f, 0.22f, 1f)
+                        : new Color(0.95f, 0.45f, 0.15f, 1f);
+                }
+
+                if (slot.GetNodeOrNull<Label>("HpLabel") is { } hpLabel)
+                {
+                    hpLabel.Text = $"{ShortNameFor(kind)} {hp}/{maxHp}";
                 }
             }
 
-            if (slot.GetNodeOrNull<ColorRect>("HpFill") is { } hpFill)
+            if (hover is not null)
             {
-                float ratio = Math.Clamp(hp / (float)maxHp, 0f, 1f);
-                hpFill.OffsetRight = -26f + 52f * ratio;
-                hpFill.Color = ratio > 0.5f
-                    ? new Color(0.84f, 0.22f, 0.22f, 1f)
-                    : new Color(0.95f, 0.45f, 0.15f, 1f);
-            }
-
-            if (slot.GetNodeOrNull<Label>("HpLabel") is { } hpLabel)
-            {
-                hpLabel.Text = $"{ShortNameFor(kind)} {hp}/{maxHp}";
+                hover.Visible = true;
+                hover.SetMeta("gremlin_kind", (int)kind);
             }
         }
     }
 
     private static Node2D CreateStandbyRowNode()
     {
+        // IMPORTANT: Keep ZIndex = 0 (never negative!) so Godot draws standby Gremlins IN FRONT of
+        // the ZIndex = 0 combat room background, while MoveChild(row, 0) keeps them BEHIND active Body.
         var row = new Node2D
         {
             Name = StandbyRowNodeName,
-            ZIndex = -2
+            ZIndex = 0
         };
 
-        for (int i = 0; i < StandbySlotOffsets.Length; i++)
+        foreach (int i in StandbyDrawOrder)
         {
             var slot = new Node2D
             {
                 Name = $"Slot{i}",
                 Position = StandbySlotOffsets[i],
-                ZIndex = i < 2 ? 1 : 0
+                ZIndex = 0
             };
 
             var sprite = new Sprite2D
@@ -993,7 +1057,7 @@ internal static class GremlinMob
                 Name = "Sprite",
                 Position = new Vector2(0f, -86f),
                 Scale = new Vector2(0.62f, 0.62f),
-                Modulate = new Color(0.92f, 0.92f, 0.96f, 1f)
+                Modulate = new Color(0.94f, 0.94f, 0.98f, 1f)
             };
             slot.AddChild(sprite);
 
@@ -1042,5 +1106,43 @@ internal static class GremlinMob
         }
 
         return row;
+    }
+
+    private static Control CreateStandbyHoverLayer(Player player)
+    {
+        var layer = new Control
+        {
+            Name = StandbyHoverLayerNodeName,
+            MouseFilter = Control.MouseFilterEnum.Ignore
+        };
+
+        foreach (int i in StandbyDrawOrder)
+        {
+            Vector2 offset = StandbySlotOffsets[i];
+            var hover = new Control
+            {
+                Name = $"Hover{i}",
+                MouseFilter = Control.MouseFilterEnum.Pass,
+                OffsetLeft = offset.X - 42f,
+                OffsetRight = offset.X + 42f,
+                OffsetTop = offset.Y - 128f,
+                OffsetBottom = offset.Y + 24f
+            };
+
+            hover.Connect(Control.SignalName.MouseEntered, Callable.From(() =>
+            {
+                if (!hover.IsVisibleInTree() || !hover.HasMeta("gremlin_kind"))
+                    return;
+                var kind = (GremlinKind)hover.GetMeta("gremlin_kind").AsInt32();
+                NHoverTipSet.CreateAndShow(hover, BuildSingleGremlinHoverTip(player, kind), HoverTipAlignment.Right);
+            }));
+            hover.Connect(Control.SignalName.MouseExited, Callable.From(() => NHoverTipSet.Remove(hover)));
+            hover.Connect(CanvasItem.SignalName.Hidden, Callable.From(() => NHoverTipSet.Remove(hover)));
+            hover.Connect(Node.SignalName.TreeExiting, Callable.From(() => NHoverTipSet.Remove(hover)));
+
+            layer.AddChild(hover);
+        }
+
+        return layer;
     }
 }
