@@ -15,6 +15,7 @@ public sealed class TheCollector : DownfallCharacter
     public static readonly Color CharacterColor = new("#0D9E83");
 
     public override string CharacterKey => CharKey;
+    public override DownfallIdleStyle IdleStyle => DownfallIdleStyle.Floating;
     public override Color NameColor => new("#3AD6B5");
     public override Color EnergyLabelOutlineColor => new("#0B3B31");
     public override CharacterGender Gender => CharacterGender.Feminine;

@@ -2,6 +2,7 @@ using Downfall.Core;
 using Downfall.Hexaghost.Cards;
 using Downfall.Hexaghost.Orbs;
 using Downfall.Hexaghost.Powers;
+using Godot;
 using MegaCrit.Sts2.Core.CardSelection;
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Commands;
@@ -305,6 +306,8 @@ public static class HexaMechanics
         }
 
         RefreshGhostflameVisuals(player);
+        ghostflame.PlayIgniteVisual();
+        DownfallSpriteAnimator.ForCreature(player.Creature)?.PlayHexaPulse(new Color(1.25f, 1.65f, 1.35f, 1f), 0.20f);
 
         await ghostflame.OnIgniteAsync(choiceContext, player);
         if (!player.Creature.IsAlive || CombatManager.Instance.IsOverOrEnding)
@@ -340,6 +343,7 @@ public static class HexaMechanics
 
         ghostflame.MarkExtinguished();
         RefreshGhostflameVisuals(player);
+        ghostflame.PlayExtinguishVisual();
 
         if (!player.Creature.IsAlive)
             return;
@@ -375,6 +379,7 @@ public static class HexaMechanics
         state.ActiveSlotIndex = (GetActiveSlotIndex(player) + 1) % flames.Count;
         state.AdvancesThisTurn++;
         state.AdvancesThisCombat++;
+        DownfallSpriteAnimator.ForCreature(player.Creature)?.PlayHexaPulse(new Color(1.30f, 1.05f, 1.55f, 1f), 0.24f);
 
         var entered = flames[state.ActiveSlotIndex];
         await ExtinguishAsync(choiceContext, player, entered);
@@ -405,6 +410,7 @@ public static class HexaMechanics
 
         var state = HexaCombatState.Get(combatState);
         state.ActiveSlotIndex = (GetActiveSlotIndex(player) - 1 + flames.Count) % flames.Count;
+        DownfallSpriteAnimator.ForCreature(player.Creature)?.PlayHexaPulse(new Color(1.15f, 1.15f, 1.55f, 1f), -0.24f);
 
         var entered = flames[state.ActiveSlotIndex];
         await ExtinguishAsync(choiceContext, player, entered);

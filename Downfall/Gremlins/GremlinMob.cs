@@ -859,6 +859,8 @@ internal static class GremlinMob
         if (ResourceLoader.Load<Texture2D>(texturePath) is { } texture)
         {
             body.Texture = texture;
+            bool isNob = texturePath.EndsWith("/nob.png", StringComparison.OrdinalIgnoreCase);
+            DownfallSpriteAnimator.ForCreature(player.Creature)?.PlayGremlinSwap(isNob);
         }
     }
 

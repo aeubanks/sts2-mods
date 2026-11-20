@@ -1,5 +1,6 @@
 using Downfall.Automaton.Cards;
 using Downfall.Automaton.Orbs;
+using Downfall.Core;
 using MegaCrit.Sts2.Core.CardSelection;
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Commands;
@@ -383,6 +384,7 @@ public static class AutomatonMechanics
         orb.InitializeEncodedCard(card, slotIndex);
         await OrbCmd.Channel(choiceContext, orb, player);
         RefreshOrbVisuals(player);
+        orb.PlayPulseVisual();
 
         await card.OnEncodedAsync(choiceContext, player, slotIndex);
         if (!player.Creature.IsAlive || CombatManager.Instance.IsOverOrEnding)
@@ -422,6 +424,11 @@ public static class AutomatonMechanics
         var encodedOrbs = GetEncodedOrbs(player);
         if (encodedOrbs.Count == 0)
             return null;
+
+        foreach (var encodedOrb in encodedOrbs)
+            encodedOrb.PlayPulseVisual();
+        DownfallSpriteAnimator.ForCreature(player.Creature)?.PlayCast();
+        await Cmd.CustomScaledWait(0.08f, 0.16f);
 
         var encodedCards = new List<BronzeCard>(encodedOrbs.Count);
         for (int i = 0; i < encodedOrbs.Count; i++)

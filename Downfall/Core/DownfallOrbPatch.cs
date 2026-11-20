@@ -54,7 +54,7 @@ internal static class DownfallOrbPatch
 
             if (sprite is Sprite2D s2d)
             {
-                Action onPassive = () =>
+                Action<Func<Tween?>> runOrbAnim = buildTween =>
                 {
                     if (!GodotObject.IsInstanceValid(s2d) || !s2d.IsInsideTree())
                         return;
@@ -69,15 +69,26 @@ internal static class DownfallOrbPatch
                     if (PassiveTweens.TryGetValue(s2d, out var prev) && GodotObject.IsInstanceValid(prev) && prev.IsRunning())
                         prev.Kill();
 
-                    var activeTween = orb.PlayPassiveAnimation(s2d);
+                    var activeTween = buildTween();
                     if (activeTween is not null)
                         PassiveTweens.AddOrUpdate(s2d, activeTween);
                 };
 
+                Action onPassive = () => runOrbAnim(() => orb.PlayPassiveAnimation(s2d));
+                Action<string> onCustom = animName => runOrbAnim(() => orb.PlayCustomAnimation(s2d, animName));
+
                 orb.PassiveActivated += onPassive;
+                orb.CustomAnimationRequested += onCustom;
+
+                if (orb.EnableIdleJiggle && !NonInteractiveMode.IsActive)
+                {
+                    s2d.AddChild(DownfallOrbIdleNode.Create(s2d, orb, __instance));
+                }
+
                 s2d.TreeExiting += () =>
                 {
                     orb.PassiveActivated -= onPassive;
+                    orb.CustomAnimationRequested -= onCustom;
                     if (PassiveTweens.TryGetValue(s2d, out var prev) && GodotObject.IsInstanceValid(prev) && prev.IsRunning())
                         prev.Kill();
                     PassiveTweens.Remove(s2d);
@@ -145,5 +156,59 @@ internal static class DownfallOrbPatch
         }
 
         return false;
+    }
+
+    internal static bool IsAnimating(Sprite2D sprite, NOrb? orbNode)
+    {
+        if (PassiveTweens.TryGetValue(sprite, out var pTween) && GodotObject.IsInstanceValid(pTween) && pTween.IsRunning())
+            return true;
+
+        if (orbNode is not null && GodotObject.IsInstanceValid(orbNode))
+        {
+            var curTween = (Tween?)CurTweenField.GetValue(orbNode);
+            if (curTween is not null && GodotObject.IsInstanceValid(curTween) && curTween.IsRunning())
+                return true;
+        }
+
+        return false;
+    }
+}
+
+internal sealed partial class DownfallOrbIdleNode : Node
+{
+    private Sprite2D? _sprite;
+    private DownfallOrb? _orb;
+    private NOrb? _orbNode;
+    private float _phase;
+    private float _time;
+
+    internal static DownfallOrbIdleNode Create(Sprite2D sprite, DownfallOrb orb, NOrb orbNode)
+    {
+        return new DownfallOrbIdleNode
+        {
+            Name = "DownfallOrbIdleNode",
+            _sprite = sprite,
+            _orb = orb,
+            _orbNode = orbNode,
+            _phase = (float)(sprite.GetInstanceId() % 628UL) * 0.01f
+        };
+    }
+
+    public override void _Process(double delta)
+    {
+        if (_sprite is null || _orb is null || !GodotObject.IsInstanceValid(_sprite))
+            return;
+
+        if (DownfallOrbPatch.IsAnimating(_sprite, _orbNode))
+            return;
+
+        _time += (float)delta;
+        float wobble = Mathf.Sin(_time * 3.1f + _phase);
+        Vector2 baseScale = _orb.SpriteScale;
+        _sprite.Scale = new Vector2(
+            baseScale.X * (1f + wobble * 0.045f),
+            baseScale.Y * (1f - wobble * 0.050f));
+        _sprite.Position = new Vector2(0f, wobble * 1.6f);
+        _sprite.Rotation = 0f;
     }
 }

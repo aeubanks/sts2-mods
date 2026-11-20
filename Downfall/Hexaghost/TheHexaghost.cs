@@ -15,6 +15,7 @@ public sealed class TheHexaghost : DownfallCharacter
     public static readonly Color CharacterColor = new("#723E6D");
 
     public override string CharacterKey => CharKey;
+    public override DownfallIdleStyle IdleStyle => DownfallIdleStyle.FloatingMystical;
     public override Color NameColor => new("#7FE898");
     public override Color EnergyLabelOutlineColor => new("#2E1430");
     public override CharacterGender Gender => CharacterGender.Neutral;

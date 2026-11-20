@@ -5,8 +5,11 @@ using MegaCrit.Sts2.Core.Commands;
 using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.GameActions.Multiplayer;
+using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.HoverTips;
 using MegaCrit.Sts2.Core.Models;
+using MegaCrit.Sts2.Core.Saves;
+using MegaCrit.Sts2.Core.Settings;
 
 namespace Downfall.Guardian.Orbs;
 
@@ -118,11 +121,42 @@ public sealed class StasisOrb : DownfallOrb
             _turnsRemaining--;
 
         GuardianMechanics.RefreshOrbVisuals(Owner);
+        RequestAnimation("tick");
 
         if (_turnsRemaining <= 0)
         {
+            await Cmd.CustomScaledWait(0.06f, 0.12f);
             await GuardianMechanics.EvokeStasisIfHandHasRoomAsync(choiceContext, Owner, this);
         }
+    }
+
+    public override Tween? PlayCustomAnimation(Sprite2D sprite, string animName)
+    {
+        if (NonInteractiveMode.IsActive || animName != "tick")
+            return null;
+
+        float speed = SaveManager.Instance?.PrefsSave.FastMode == FastModeType.Fast ? 0.65f : 1.0f;
+        Vector2 baseScale = SpriteScale;
+        sprite.Position = Vector2.Zero;
+        sprite.Rotation = 0f;
+        sprite.Scale = baseScale;
+
+        var tween = sprite.CreateTween();
+        tween.SetParallel(true);
+        tween.TweenProperty(sprite, "scale", baseScale * 1.24f, 0.08 * speed)
+            .SetTrans(Tween.TransitionType.Back).SetEase(Tween.EaseType.Out);
+        tween.TweenProperty(sprite, "rotation", 0.14f, 0.06 * speed);
+        tween.TweenProperty(sprite, "modulate", new Color(0.85f, 1.50f, 1.65f, 1f), 0.08 * speed);
+
+        tween.Chain().SetParallel(true);
+        tween.TweenProperty(sprite, "rotation", -0.10f, 0.07 * speed);
+
+        tween.Chain().SetParallel(true);
+        tween.TweenProperty(sprite, "scale", baseScale, 0.13 * speed)
+            .SetTrans(Tween.TransitionType.Sine).SetEase(Tween.EaseType.Out);
+        tween.TweenProperty(sprite, "rotation", 0f, 0.13 * speed);
+        tween.TweenProperty(sprite, "modulate", SpriteTint, 0.13 * speed);
+        return tween;
     }
 
     public override async Task<IEnumerable<Creature>> Evoke(PlayerChoiceContext playerChoiceContext)

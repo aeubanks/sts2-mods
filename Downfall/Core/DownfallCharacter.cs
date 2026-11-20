@@ -7,6 +7,7 @@ namespace Downfall.Core;
 public abstract class DownfallCharacter : PlaceholderCharacterModel
 {
     public abstract string CharacterKey { get; }
+    public virtual DownfallIdleStyle IdleStyle => DownfallIdleStyle.Grounded;
 
     public override Control CustomIcon
     {

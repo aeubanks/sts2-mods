@@ -31,6 +31,7 @@ public sealed class BronzeSlime : SlimeOrb
         {
             IsStunned = false;
             RefreshVisuals();
+            RequestAnimation("unsquish");
             return;
         }
 

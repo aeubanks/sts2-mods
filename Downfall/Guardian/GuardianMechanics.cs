@@ -1,3 +1,4 @@
+using Downfall.Core;
 using Downfall.Guardian.Orbs;
 using Downfall.Guardian.Powers;
 using Godot;
@@ -345,9 +346,13 @@ internal static class GuardianMechanics
             return;
 
         string path = defensive ? DefensiveSpritePath : IdleSpritePath;
+        if (sprite.Texture?.ResourcePath == path)
+            return;
+
         if (ResourceLoader.Load<Texture2D>(path) is { } texture)
         {
             sprite.Texture = texture;
+            DownfallSpriteAnimator.ForCreature(creature)?.PlayGuardianModeShift(defensive);
         }
     }
 

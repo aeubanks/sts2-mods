@@ -1,6 +1,7 @@
 using Downfall.Champ.Cards;
 using Downfall.Champ.Powers;
 using Downfall.Champ.Relics;
+using Downfall.Core;
 using Godot;
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Commands;
@@ -325,6 +326,14 @@ internal static class ChampStances
         if (ResourceLoader.Load<Texture2D>(texturePath) is { } texture)
         {
             body.Texture = texture;
+            Color auraColor = stance switch
+            {
+                ChampStanceKind.Berserker => new Color(1.55f, 0.78f, 0.75f, 1f),
+                ChampStanceKind.Defensive => new Color(0.75f, 1.25f, 1.60f, 1f),
+                ChampStanceKind.Ultimate => new Color(1.60f, 1.42f, 0.78f, 1f),
+                _ => new Color(1.25f, 1.25f, 1.25f, 1f)
+            };
+            DownfallSpriteAnimator.ForCreature(player.Creature)?.PlayChampStanceTransition(auraColor);
         }
     }
 

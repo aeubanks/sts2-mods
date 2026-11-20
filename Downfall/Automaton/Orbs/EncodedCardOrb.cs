@@ -2,7 +2,10 @@ using Downfall.Core;
 using Godot;
 using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.GameActions.Multiplayer;
+using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.HoverTips;
+using MegaCrit.Sts2.Core.Saves;
+using MegaCrit.Sts2.Core.Settings;
 
 namespace Downfall.Automaton.Orbs;
 
@@ -57,6 +60,31 @@ public sealed class EncodedCardOrb : DownfallOrb
         _encodedCard = card;
         _sequenceSlotIndex = Math.Max(0, slotIndex);
         card.SequenceSlotIndex = _sequenceSlotIndex;
+    }
+
+    internal void PlayPulseVisual() => RequestAnimation("pulse");
+
+    public override Tween? PlayCustomAnimation(Sprite2D sprite, string animName)
+    {
+        if (NonInteractiveMode.IsActive || animName != "pulse")
+            return null;
+
+        float speed = SaveManager.Instance?.PrefsSave.FastMode == FastModeType.Fast ? 0.65f : 1.0f;
+        Vector2 baseScale = SpriteScale;
+        sprite.Position = Vector2.Zero;
+        sprite.Rotation = 0f;
+
+        var tween = sprite.CreateTween();
+        tween.SetParallel(true);
+        tween.TweenProperty(sprite, "scale", baseScale * 1.28f, 0.09 * speed)
+            .SetTrans(Tween.TransitionType.Back).SetEase(Tween.EaseType.Out);
+        tween.TweenProperty(sprite, "modulate", new Color(1.60f, 1.42f, 0.88f, 1f), 0.08 * speed);
+
+        tween.Chain().SetParallel(true);
+        tween.TweenProperty(sprite, "scale", baseScale, 0.14 * speed)
+            .SetTrans(Tween.TransitionType.Sine).SetEase(Tween.EaseType.Out);
+        tween.TweenProperty(sprite, "modulate", SpriteTint, 0.14 * speed);
+        return tween;
     }
 
     public override Task<IEnumerable<Creature>> Evoke(PlayerChoiceContext playerChoiceContext)

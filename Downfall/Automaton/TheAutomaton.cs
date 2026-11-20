@@ -15,6 +15,7 @@ public sealed class TheAutomaton : DownfallCharacter
     public static readonly Color CharacterColor = new("#D6CA9E");
 
     public override string CharacterKey => CharKey;
+    public override DownfallIdleStyle IdleStyle => DownfallIdleStyle.Floating;
     public override Color NameColor => new("#E6DCAA");
     public override Color EnergyLabelOutlineColor => new("#3D3219");
     public override CharacterGender Gender => CharacterGender.Neutral;

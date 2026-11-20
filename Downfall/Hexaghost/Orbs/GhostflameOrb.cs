@@ -6,8 +6,11 @@ using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.GameActions.Multiplayer;
+using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Models.Powers;
+using MegaCrit.Sts2.Core.Saves;
+using MegaCrit.Sts2.Core.Settings;
 using MegaCrit.Sts2.Core.ValueProps;
 
 namespace Downfall.Hexaghost.Orbs;
@@ -74,6 +77,56 @@ public abstract class GhostflameOrb : DownfallOrb
         AssertMutable();
         _isIgnited = false;
         _triggerProgress = 0;
+    }
+
+    internal void PlayIgniteVisual() => RequestAnimation("ignite");
+    internal void PlayExtinguishVisual() => RequestAnimation("extinguish");
+
+    public override Tween? PlayCustomAnimation(Sprite2D sprite, string animName)
+    {
+        if (NonInteractiveMode.IsActive)
+            return null;
+
+        float speed = SaveManager.Instance?.PrefsSave.FastMode == FastModeType.Fast ? 0.65f : 1.0f;
+        Vector2 baseScale = SpriteScale;
+        sprite.Position = Vector2.Zero;
+        sprite.Rotation = 0f;
+
+        if (animName == "ignite")
+        {
+            var tween = sprite.CreateTween();
+            tween.SetParallel(true);
+            tween.TweenProperty(sprite, "scale", baseScale * 1.45f, 0.11 * speed)
+                .SetTrans(Tween.TransitionType.Back).SetEase(Tween.EaseType.Out);
+            tween.TweenProperty(sprite, "position", new Vector2(0f, -10f), 0.11 * speed)
+                .SetTrans(Tween.TransitionType.Quad).SetEase(Tween.EaseType.Out);
+            tween.TweenProperty(sprite, "modulate", new Color(1.45f, 1.85f, 1.50f, 1f), 0.09 * speed);
+
+            tween.Chain().SetParallel(true);
+            tween.TweenProperty(sprite, "scale", baseScale, 0.18 * speed)
+                .SetTrans(Tween.TransitionType.Sine).SetEase(Tween.EaseType.Out);
+            tween.TweenProperty(sprite, "position", Vector2.Zero, 0.18 * speed)
+                .SetTrans(Tween.TransitionType.Sine).SetEase(Tween.EaseType.Out);
+            tween.TweenProperty(sprite, "modulate", SpriteTint, 0.18 * speed);
+            return tween;
+        }
+
+        if (animName == "extinguish")
+        {
+            var tween = sprite.CreateTween();
+            tween.SetParallel(true);
+            tween.TweenProperty(sprite, "scale", baseScale * 0.80f, 0.09 * speed)
+                .SetTrans(Tween.TransitionType.Quad).SetEase(Tween.EaseType.Out);
+            tween.TweenProperty(sprite, "modulate", new Color(0.70f, 0.70f, 0.90f, 0.75f), 0.09 * speed);
+
+            tween.Chain().SetParallel(true);
+            tween.TweenProperty(sprite, "scale", baseScale, 0.14 * speed)
+                .SetTrans(Tween.TransitionType.Sine).SetEase(Tween.EaseType.Out);
+            tween.TweenProperty(sprite, "modulate", SpriteTint, 0.14 * speed);
+            return tween;
+        }
+
+        return null;
     }
 
     protected void SetTriggerProgress(int value)

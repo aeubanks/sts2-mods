@@ -17,6 +17,7 @@ namespace Downfall.Slimebound;
 public abstract class SlimeOrb : DownfallOrb
 {
     protected override string CharacterKey => TheSlimeBoss.CharKey;
+    public override bool EnableIdleJiggle => true;
 
     public abstract int BaseDamage { get; }
     public virtual int BaseSecondary => 0;
@@ -142,6 +143,36 @@ public abstract class SlimeOrb : DownfallOrb
                 sprite.Modulate = SpriteTint;
             }
         }));
+
+        return tween;
+    }
+
+    public override Tween? PlayCustomAnimation(Sprite2D sprite, string animName)
+    {
+        if (NonInteractiveMode.IsActive || animName != "unsquish")
+            return null;
+
+        float speed = SaveManager.Instance?.PrefsSave.FastMode == FastModeType.Fast ? 0.65f : 1.0f;
+        Vector2 baseScale = SpriteScale;
+
+        sprite.Position = new Vector2(0f, 5f);
+        sprite.Rotation = 0f;
+        sprite.Scale = new Vector2(baseScale.X * 1.22f, baseScale.Y * 0.74f);
+
+        var tween = sprite.CreateTween();
+        tween.SetParallel(true);
+        tween.TweenProperty(sprite, "position", new Vector2(0f, -12f), 0.12 * speed)
+            .SetTrans(Tween.TransitionType.Back).SetEase(Tween.EaseType.Out);
+        tween.TweenProperty(sprite, "scale", new Vector2(baseScale.X * 0.90f, baseScale.Y * 1.18f), 0.12 * speed)
+            .SetTrans(Tween.TransitionType.Back).SetEase(Tween.EaseType.Out);
+        tween.TweenProperty(sprite, "modulate", new Color(1.30f, 1.30f, 1.20f, 1f), 0.10 * speed);
+
+        tween.Chain().SetParallel(true);
+        tween.TweenProperty(sprite, "position", Vector2.Zero, 0.14 * speed)
+            .SetTrans(Tween.TransitionType.Sine).SetEase(Tween.EaseType.Out);
+        tween.TweenProperty(sprite, "scale", baseScale, 0.14 * speed)
+            .SetTrans(Tween.TransitionType.Back).SetEase(Tween.EaseType.Out);
+        tween.TweenProperty(sprite, "modulate", SpriteTint, 0.14 * speed);
 
         return tween;
     }

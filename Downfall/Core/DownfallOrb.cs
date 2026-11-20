@@ -51,10 +51,27 @@ public abstract class DownfallOrb : CustomOrbModel
     public virtual Vector2 SpriteScale => Vector2.One;
 
     /// <summary>
+    /// Whether this orb's Sprite2D plays a gentle out-of-phase idle squish/wobble (used by spawned slimes).
+    /// </summary>
+    public virtual bool EnableIdleJiggle => false;
+
+    /// <summary>
+    /// Optional event fired by subclasses for named non-passive orb animations (e.g. ignite, tick, unsquish).
+    /// </summary>
+    public event Action<string>? CustomAnimationRequested;
+
+    protected void RequestAnimation(string animName) => CustomAnimationRequested?.Invoke(animName);
+
+    /// <summary>
     /// Optional animation played on the live orb Sprite2D whenever ActivatePassive() fires.
     /// Return the active Tween (if any) so DownfallOrbPatch does not overwrite scale/modulate mid-animation.
     /// </summary>
     public virtual Tween? PlayPassiveAnimation(Sprite2D sprite) => null;
+
+    /// <summary>
+    /// Optional named animation played on the live orb Sprite2D whenever RequestAnimation() is called.
+    /// </summary>
+    public virtual Tween? PlayCustomAnimation(Sprite2D sprite, string animName) => null;
 
     public override Node2D CreateCustomSprite()
     {
