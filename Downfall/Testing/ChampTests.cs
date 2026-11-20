@@ -1122,4 +1122,306 @@ internal static class ChampTests
         AutoTestAssert.Equal(3, player.Creature.GetPowerAmount<ShieldWallBlockPower>(), "ShieldWallBlockPower did NOT decay across turns or damage");
         AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<Downfall.Champ.Powers.ParryPower>(), "Unused ParryPower expired at end of round");
     }
+
+    public static async Task TestRareCardsInCombat()
+    {
+        var (player, _, combatState) = await DownfallAutoTestRunner.StartCombatAsync<TheChamp>("DFCHP05");
+        var pcs = AutoTestAssert.NotNull(player.PlayerCombatState, "PlayerCombatState");
+        var enemy = AutoTestAssert.NotNull(combatState.HittableEnemies.FirstOrDefault(), "First enemy");
+        var ctx = new ThrowingPlayerChoiceContext();
+
+        foreach (var e in combatState.HittableEnemies.ToList())
+            await CreatureCmd.GainMaxHp(e, 3000m);
+
+        async Task ResetCombatState(int energy = 10)
+        {
+            foreach (var c in pcs.Hand.Cards.ToList())
+                await CardPileCmd.Add(c, PileType.Discard);
+            if (pcs.Energy > energy)
+                await PlayerCmd.LoseEnergy(pcs.Energy - energy, player);
+            else if (pcs.Energy < energy)
+                await PlayerCmd.GainEnergy(energy - pcs.Energy, player);
+            if (player.Creature.Block > 0)
+                await CreatureCmd.LoseBlock(ctx, player.Creature, player.Creature.Block, null);
+            foreach (var p in player.Creature.Powers.ToList())
+                await PowerCmd.Remove(p);
+            foreach (var e in combatState.HittableEnemies.ToList())
+            {
+                foreach (var ep in e.Powers.ToList())
+                    await PowerCmd.Remove(ep);
+            }
+        }
+
+        // 1. CheapShot: non-Boss -> 5 dmg + Stun + Exhaust!
+        await ResetCombatState();
+        int hp = enemy.CurrentHp;
+        var cheapShot = combatState.CreateCard<CheapShot>(player);
+        await CardPileCmd.Add(cheapShot, PileType.Hand);
+        AutoTestAssert.True(cheapShot.TryManualPlay(enemy), "Play CheapShot");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(hp - 5, enemy.CurrentHp, "CheapShot dealt 5 damage");
+        AutoTestAssert.True(enemy.IsStunned, "CheapShot stunned non-Boss enemy");
+        AutoTestAssert.Equal(PileType.Exhaust, cheapShot.Pile?.Type, "CheapShot exhausted");
+
+        // 2. DancingMaster + Devastate: first Finisher each turn gives +1 Energy & +1 Draw; Devastate costs 1 less per Finisher!
+        await ResetCombatState(energy: 10);
+        for (int i = 0; i < 4; i++)
+            await CardPileCmd.Add(combatState.CreateCard<ChampStrike>(player), PileType.Draw);
+        var dmCard = combatState.CreateCard<DancingMaster>(player);
+        await CardPileCmd.Add(dmCard, PileType.Hand);
+        AutoTestAssert.True(dmCard.TryManualPlay(null), "Play DancingMaster");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<DancingMasterPower>(), "DancingMasterPower(1) applied");
+
+        await ChampStances.EnterStanceAsync(player, ChampStanceKind.Defensive, ctx);
+        int energyBefore = pcs.Energy;
+        var fin1 = combatState.CreateCard<BringItOn>(player);
+        await CardPileCmd.Add(fin1, PileType.Hand);
+        AutoTestAssert.True(fin1.TryManualPlay(null), "Play Finisher #1 with DancingMaster");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        // Spent 1 Energy, gained 1 Energy from DancingMaster -> net energyBefore; drew 1 card!
+        AutoTestAssert.Equal(energyBefore, pcs.Energy, "DancingMaster refunded 1 Energy on first Finisher");
+        AutoTestAssert.Equal(1, pcs.Hand.Cards.Count, "DancingMaster drew 1 card on first Finisher");
+
+        await ChampStances.EnterStanceAsync(player, ChampStanceKind.Defensive, ctx);
+        var fin2 = combatState.CreateCard<BringItOn>(player);
+        await CardPileCmd.Add(fin2, PileType.Hand);
+        AutoTestAssert.True(fin2.TryManualPlay(null), "Play Finisher #2 same turn");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(energyBefore - 1, pcs.Energy, "DancingMaster did NOT trigger a second time this turn");
+        AutoTestAssert.Equal(1, pcs.Hand.Cards.Count, "DancingMaster did NOT draw a second time this turn");
+
+        var devastate = combatState.CreateCard<Devastate>(player);
+        await CardPileCmd.Add(devastate, PileType.Hand);
+        AutoTestAssert.Equal(3, devastate.EnergyCost.GetWithModifiers(CostModifiers.All), "Devastate cost reduced from 5 to 3 after 2 Finishers");
+        hp = enemy.CurrentHp;
+        AutoTestAssert.True(devastate.TryManualPlay(enemy), "Play Devastate");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(hp - 18, enemy.CurrentHp, "Devastate dealt 6x3 = 18 damage");
+
+        // 3. EnchantCrown, EnchantShield, EnchantSword: unplayable with no target; mutate target in combat!
+        await ResetCombatState();
+        var eCrown = combatState.CreateCard<EnchantCrown>(player);
+        await CardPileCmd.Add(eCrown, PileType.Hand);
+        AutoTestAssert.True(!eCrown.TryManualPlay(null), "EnchantCrown unplayable with no valid target in Hand");
+
+        var targetExpensive = combatState.CreateCard<Haymaker>(player); // cost 2
+        await CardPileCmd.Add(targetExpensive, PileType.Hand);
+        using (DownfallAutoTestRunner.PreferCards(c => ReferenceEquals(c, targetExpensive)))
+        {
+            AutoTestAssert.True(eCrown.TryManualPlay(null), "Play EnchantCrown");
+            await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        }
+        AutoTestAssert.Equal(0, targetExpensive.EnergyCost.GetWithModifiers(CostModifiers.Local), "EnchantCrown set target card to 0 cost this combat");
+
+        var targetDef = combatState.CreateCard<ChampDefend>(player);
+        await CardPileCmd.Add(targetDef, PileType.Hand);
+        var eShield = combatState.CreateCard<EnchantShield>(player);
+        await CardPileCmd.Add(eShield, PileType.Hand);
+        using (DownfallAutoTestRunner.PreferCards(c => ReferenceEquals(c, targetDef)))
+        {
+            AutoTestAssert.True(eShield.TryManualPlay(null), "Play EnchantShield");
+            await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        }
+        AutoTestAssert.Equal(13m, targetDef.DynamicVars.Block.BaseValue, "EnchantShield increased Defend Block 5 -> 13");
+
+        var targetStr = combatState.CreateCard<ChampStrike>(player);
+        await CardPileCmd.Add(targetStr, PileType.Hand);
+        var eSword = combatState.CreateCard<EnchantSword>(player);
+        await CardPileCmd.Add(eSword, PileType.Hand);
+        using (DownfallAutoTestRunner.PreferCards(c => ReferenceEquals(c, targetStr)))
+        {
+            AutoTestAssert.True(eSword.TryManualPlay(null), "Play EnchantSword");
+            await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        }
+        AutoTestAssert.Equal(14m, targetStr.DynamicVars.Damage.BaseValue, "EnchantSword increased Strike damage 6 -> 14");
+
+        // 4. HoldFirm: 10 Block + 10 Counter + BlurPower(1)!
+        await ResetCombatState();
+        var holdFirm = combatState.CreateCard<HoldFirm>(player);
+        await CardPileCmd.Add(holdFirm, PileType.Hand);
+        AutoTestAssert.True(holdFirm.TryManualPlay(null), "Play HoldFirm");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(10, player.Creature.Block, "HoldFirm gained 10 Block");
+        AutoTestAssert.Equal(10, player.Creature.GetPowerAmount<CounterPower>(), "HoldFirm gained 10 Counter");
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<BlurPower>(), "HoldFirm applied BlurPower(1)");
+
+        // 5. IgnorePain + PushThroughPower: prevents ALL HP loss until next turn!
+        await ResetCombatState();
+        await ChampStances.EnterStanceAsync(player, ChampStanceKind.Berserker, ctx);
+        var ignorePain = combatState.CreateCard<IgnorePain>(player);
+        await CardPileCmd.Add(ignorePain, PileType.Hand);
+        AutoTestAssert.True(ignorePain.TryManualPlay(null), "Play IgnorePain in Berserker");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<PushThroughPower>(), "IgnorePain applied PushThroughPower(1)");
+        int playerHpBefore = player.Creature.CurrentHp;
+        await CreatureCmd.Damage(ctx, player.Creature, 40m, ValueProp.Unpowered, enemy, null, null);
+        AutoTestAssert.Equal(playerHpBefore, player.Creature.CurrentHp, "PushThroughPower prevented 40 unblocked damage");
+
+        // 6. Improvising + ImprovisingPower(2): entering a Stance triggers Skill Bonus twice!
+        await ResetCombatState();
+        var improv = combatState.CreateCard<Improvising>(player);
+        await CardPileCmd.Add(improv, PileType.Hand);
+        AutoTestAssert.True(improv.TryManualPlay(null), "Play Improvising");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        await ChampStances.EnterStanceAsync(player, ChampStanceKind.Berserker, ctx);
+        AutoTestAssert.Equal(4, player.Creature.GetPowerAmount<VigorPower>(), "ImprovisingPower(2) triggered Berserker Skill Bonus twice (+4 Vigor)");
+
+        // 7. MurderStrike: Retain; scales +2 damage in Hand whenever a Skill is played!
+        await ResetCombatState();
+        var murder = combatState.CreateCard<MurderStrike>(player);
+        AutoTestAssert.True(murder.Keywords.Contains(CardKeyword.Retain), "MurderStrike has Retain");
+        await CardPileCmd.Add(murder, PileType.Hand);
+        var msSkill = combatState.CreateCard<ChampDefend>(player);
+        await CardPileCmd.Add(msSkill, PileType.Hand);
+        AutoTestAssert.True(msSkill.TryManualPlay(null), "Play Defend while MurderStrike is in Hand");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(8m, murder.DynamicVars.Damage.BaseValue, "MurderStrike scaled from 6 to 8 damage");
+        hp = enemy.CurrentHp;
+        AutoTestAssert.True(murder.TryManualPlay(enemy), "Play scaled MurderStrike");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(hp - 8, enemy.CurrentHp, "MurderStrike dealt 8 damage");
+
+        // 8. SteelEdge (X-cost Finisher): X=0 still triggers 1 Finisher Bonus; X=2 hits twice & triggers 2 Finisher Bonuses!
+        await ResetCombatState(energy: 0);
+        await ChampStances.EnterStanceAsync(player, ChampStanceKind.Berserker, ctx);
+        hp = enemy.CurrentHp;
+        var steel0 = combatState.CreateCard<SteelEdge>(player);
+        await CardPileCmd.Add(steel0, PileType.Hand);
+        AutoTestAssert.True(steel0.TryManualPlay(enemy), "Play SteelEdge at X=0 in Berserker");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(hp, enemy.CurrentHp, "SteelEdge at X=0 dealt 0 damage");
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<StrengthPower>(), "SteelEdge at X=0 still triggered 1 Berserker Finisher (+1 Strength)");
+        AutoTestAssert.Equal(ChampStanceKind.None, ChampStances.GetCurrentStance(player.Creature), "SteelEdge exited Stance");
+
+        await ResetCombatState(energy: 2);
+        await ChampStances.EnterStanceAsync(player, ChampStanceKind.Defensive, ctx);
+        hp = enemy.CurrentHp;
+        var steel2 = combatState.CreateCard<SteelEdge>(player);
+        await CardPileCmd.Add(steel2, PileType.Hand);
+        AutoTestAssert.True(steel2.TryManualPlay(enemy), "Play SteelEdge at X=2 in Defensive");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(hp - 12, enemy.CurrentHp, "SteelEdge at X=2 dealt 6x2 = 12 damage");
+        AutoTestAssert.Equal(12, player.Creature.Block, "SteelEdge at X=2 triggered 2 Defensive Finishers (+12 Block)");
+
+        // 9. TripleStrike: 6 dmg + 2 0-cost Strike Echoes that trigger Skill Bonus without spending Stance charges!
+        await ResetCombatState();
+        await ChampStances.EnterStanceAsync(player, ChampStanceKind.Berserker, ctx);
+        hp = enemy.CurrentHp;
+        var triple = combatState.CreateCard<TripleStrike>(player);
+        await CardPileCmd.Add(triple, PileType.Hand);
+        AutoTestAssert.True(triple.TryManualPlay(enemy), "Play TripleStrike");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(hp - 6, enemy.CurrentHp, "TripleStrike dealt 6 damage");
+        var echoStrikes = pcs.Hand.Cards.OfType<ChampStrike>().Where(c => c.TriggersSkillBonus).ToList();
+        AutoTestAssert.Equal(2, echoStrikes.Count, "TripleStrike added 2 Skill-Bonus Strike Echoes");
+        AutoTestAssert.True(echoStrikes.All(c => Downfall.Core.DownfallEcho.IsEcho(c) && c.EnergyCost.GetWithModifiers(CostModifiers.Local) == 0), "TripleStrike Strikes are 0-cost Echoes");
+
+        AutoTestAssert.True(echoStrikes[0].TryManualPlay(enemy), "Play TripleStrike Echo Strike in Berserker");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(2, player.Creature.GetPowerAmount<VigorPower>(), "TripleStrike Strike Echo triggered Berserker Skill Bonus (+2 Vigor)");
+        AutoTestAssert.Equal(3, player.Creature.GetPower<BerserkerStancePower>()!.DisplayAmount, "TripleStrike Strike Echo did not spend Stance charges");
+
+        // 10. VampiricStrike (Clobber Strike): 6 unblocked dmg -> 6 Block!
+        await ResetCombatState();
+        var vamp = combatState.CreateCard<VampiricStrike>(player);
+        await CardPileCmd.Add(vamp, PileType.Hand);
+        AutoTestAssert.True(vamp.TryManualPlay(enemy), "Play VampiricStrike");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(6, player.Creature.Block, "VampiricStrike gained 6 Block equal to unblocked damage");
+
+        // 11. LastStand + LastStandPower: above 50% HP applies LastStandPower -> dropping below 50% HP cleanses debuffs & grants +6 Strength!
+        await ResetCombatState();
+        var lastStand = combatState.CreateCard<LastStand>(player);
+        await CardPileCmd.Add(lastStand, PileType.Hand);
+        AutoTestAssert.True(lastStand.TryManualPlay(null), "Play LastStand above 50% HP");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(6, player.Creature.GetPowerAmount<LastStandPower>(), "LastStandPower(6) applied above 50% HP");
+        await PowerCmd.Apply<WeakPower>(ctx, player.Creature, 2m, enemy, null);
+        // Drop HP below 50% (80 -> 39)
+        await CreatureCmd.Damage(ctx, player.Creature, 41m, ValueProp.Unpowered, enemy, null, null);
+        AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<LastStandPower>(), "LastStandPower triggered and removed itself");
+        AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<WeakPower>(), "LastStandPower cleansed Weak debuff");
+        AutoTestAssert.Equal(6, player.Creature.GetPowerAmount<StrengthPower>(), "LastStandPower granted +6 Strength");
+
+        // Already below 50% HP -> playing LastStand triggers immediately!
+        await PowerCmd.Apply<VulnerablePower>(ctx, player.Creature, 2m, enemy, null);
+        var lastStandImmediate = combatState.CreateCard<LastStand>(player);
+        await CardPileCmd.Add(lastStandImmediate, PileType.Hand);
+        AutoTestAssert.True(lastStandImmediate.TryManualPlay(null), "Play LastStand while already below 50% HP");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<VulnerablePower>(), "Immediate LastStand cleansed Vulnerable");
+        AutoTestAssert.Equal(12, player.Creature.GetPowerAmount<StrengthPower>(), "Immediate LastStand granted +6 Strength (6 -> 12)");
+
+        // 12. Turn 1 -> Turn 2 powers: GladiatorForm, HeavySlash, ShieldThrow, SwordThrow, StrikeOfGenius (+), UltimateStanceCard!
+        await ResetCombatState(energy: 15);
+        var gladForm = combatState.CreateCard<GladiatorForm>(player);
+        await CardPileCmd.Add(gladForm, PileType.Hand);
+        AutoTestAssert.True(gladForm.TryManualPlay(null), "Play GladiatorForm");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+
+        // Spend 6 Vigor via HeavySlash (9 + 6 = 15 unblocked dmg -> NextTurnVigor = 2 from GladiatorForm + 15 from HeavySlash = 17)!
+        await PowerCmd.Apply<VigorPower>(ctx, player.Creature, 6m, player.Creature, null);
+        var heavy = combatState.CreateCard<HeavySlash>(player);
+        await CardPileCmd.Add(heavy, PileType.Hand);
+        AutoTestAssert.True(heavy.TryManualPlay(enemy), "Play HeavySlash with 6 Vigor + GladiatorForm");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(17, player.Creature.GetPowerAmount<NextTurnVigorPower>(), "GladiatorForm(2) + HeavySlash(15) = 17 NextTurnVigorPower");
+
+        // Spend 6 Counter -> GladiatorForm queues NextTurnCounterPower(2)!
+        await PowerCmd.Apply<CounterPower>(ctx, player.Creature, 6m, player.Creature, null);
+        await CreatureCmd.GainBlock(player.Creature, 12m, ValueProp.Unpowered, null);
+        await CreatureCmd.Damage(ctx, player.Creature, 2m, ValueProp.Move, enemy, null, null);
+        AutoTestAssert.Equal(2, player.Creature.GetPowerAmount<NextTurnCounterPower>(), "GladiatorForm queued NextTurnCounterPower(2) from 6 Counter spent");
+
+        // ShieldThrow outside Defensive (10 Block remaining -> 10x2 = 20 dmg + NoBlockNextTurnPower(1))!
+        hp = enemy.CurrentHp;
+        var shieldThrow = combatState.CreateCard<ShieldThrow>(player);
+        await CardPileCmd.Add(shieldThrow, PileType.Hand);
+        AutoTestAssert.True(shieldThrow.TryManualPlay(enemy), "Play ShieldThrow outside Defensive");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(hp - 20, enemy.CurrentHp, "ShieldThrow dealt 10x2 = 20 damage");
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<NoBlockNextTurnPower>(), "ShieldThrow applied NoBlockNextTurnPower(1)");
+
+        // SwordThrow outside Berserker (9x2 = 18 dmg + EntangleNextTurnPower(1))!
+        hp = enemy.CurrentHp;
+        var swordThrow = combatState.CreateCard<SwordThrow>(player);
+        await CardPileCmd.Add(swordThrow, PileType.Hand);
+        AutoTestAssert.True(swordThrow.TryManualPlay(enemy), "Play SwordThrow outside Berserker");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(hp - 18, enemy.CurrentHp, "SwordThrow dealt 9x2 = 18 damage");
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<EntangleNextTurnPower>(), "SwordThrow applied EntangleNextTurnPower(1)");
+
+        // StrikeOfGenius+ and UltimateStanceCard!
+        var sogPlus = combatState.CreateCard<StrikeOfGenius>(player);
+        CardCmd.Upgrade(sogPlus);
+        await CardPileCmd.Add(sogPlus, PileType.Hand);
+        AutoTestAssert.True(sogPlus.TryManualPlay(null), "Play StrikeOfGenius+");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+
+        var ultCard = combatState.CreateCard<UltimateStanceCard>(player);
+        await CardPileCmd.Add(ultCard, PileType.Hand);
+        AutoTestAssert.True(ultCard.TryManualPlay(null), "Play UltimateStanceCard");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+
+        // Also apply PushThroughPower(1) to verify round-end expiry across Turn 1 -> Turn 2!
+        await PowerCmd.Apply<PushThroughPower>(ctx, player.Creature, 1m, player.Creature, null);
+
+        // Advance Turn 1 -> Turn 2!
+        await CreatureCmd.GainBlock(player.Creature, 80m, ValueProp.Unpowered, null);
+        await DownfallAutoTestRunner.EndTurnAndWaitForRoundAsync(player, 2);
+
+        AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<PushThroughPower>(), "PushThroughPower(1) expired at end of Round 1");
+        AutoTestAssert.Equal(ChampStanceKind.Ultimate, ChampStances.GetCurrentStance(player.Creature), "UltimateStanceCard entered Ultimate Stance on Turn 2");
+        AutoTestAssert.Equal(17, player.Creature.GetPowerAmount<VigorPower>(), "NextTurnVigorPower granted 17 Vigor on Turn 2");
+        AutoTestAssert.Equal(2, player.Creature.GetPowerAmount<CounterPower>(), "NextTurnCounterPower granted 2 Counter on Turn 2");
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<NoBlockPower>(), "NoBlockNextTurnPower applied NoBlockPower(1) on Turn 2");
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<ChampEntanglePower>(), "EntangleNextTurnPower applied ChampEntanglePower(1) on Turn 2");
+
+        var geniusEcho = pcs.Hand.Cards.FirstOrDefault(c => Downfall.Core.DownfallEcho.IsEcho(c) && c.Tags.Contains(CardTag.Strike));
+        AutoTestAssert.NotNull(geniusEcho, "StrikeOfGenius+ added a Strike Echo to Turn 2 Hand");
+        AutoTestAssert.True(geniusEcho!.IsUpgraded, "StrikeOfGenius+ Strike Echo is Upgraded");
+        AutoTestAssert.Equal(0, geniusEcho.EnergyCost.GetWithModifiers(CostModifiers.Local), "StrikeOfGenius+ Strike Echo costs 0");
+        AutoTestAssert.True(!geniusEcho.TryManualPlay(enemy), "ChampEntanglePower prevented playing Attacks on Turn 2");
+    }
 }

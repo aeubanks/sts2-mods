@@ -1,5 +1,7 @@
 using System.Runtime.CompilerServices;
 using MegaCrit.Sts2.Core.Entities.Cards;
+using MegaCrit.Sts2.Core.HoverTips;
+using MegaCrit.Sts2.Core.Localization;
 using MegaCrit.Sts2.Core.Models;
 
 namespace Downfall.Core;
@@ -12,6 +14,10 @@ internal static class DownfallEcho
 {
     private static readonly ConditionalWeakTable<CardModel, object> EchoCards = new();
     private static readonly object EchoMarker = new();
+
+    public static IHoverTip EchoHoverTip => new HoverTip(
+        new LocString("gameplay_ui", "DOWNFALL-ECHO_KEYWORD.title"),
+        new LocString("gameplay_ui", "DOWNFALL-ECHO_KEYWORD.description"));
 
     public static bool IsEcho(CardModel card) => EchoCards.TryGetValue(card, out _);
 

@@ -1,3 +1,4 @@
+using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Commands;
 using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.GameActions.Multiplayer;
@@ -9,6 +10,8 @@ namespace Downfall.Champ.Cards;
 public sealed class ChampStrike()
     : ChampCard(1, CardType.Attack, CardRarity.Basic, TargetType.AnyEnemy)
 {
+    internal bool TriggersSkillBonus { get; set; }
+
     protected override HashSet<CardTag> CanonicalTags => [CardTag.Strike];
 
     protected override IEnumerable<DynamicVar> CanonicalVars =>
@@ -24,6 +27,11 @@ public sealed class ChampStrike()
             .Targeting(cardPlay.Target)
             .WithHitFx("vfx/vfx_attack_slash")
             .Execute(choiceContext);
+
+        if (TriggersSkillBonus && Owner.Creature.IsAlive && !CombatManager.Instance.IsOverOrEnding)
+        {
+            await ChampStances.TriggerSkillBonusAsync(Owner, choiceContext);
+        }
     }
 
     protected override void OnUpgrade()

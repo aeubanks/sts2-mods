@@ -155,6 +155,7 @@ internal static class DownfallAutoTestRunner
                 ("ChampCommonCardsInCombat", ChampTests.TestCommonCardsInCombat),
                 ("ChampUncommonBatch1InCombat", ChampTests.TestUncommonBatch1InCombat),
                 ("ChampUncommonBatch2InCombat", ChampTests.TestUncommonBatch2InCombat),
+                ("ChampRareCardsInCombat", ChampTests.TestRareCardsInCombat),
             ];
 
             foreach (var (name, run) in tests)
@@ -168,7 +169,7 @@ internal static class DownfallAutoTestRunner
                     _activeCardSelector = new AutoSlayCardSelector(new Rng(1));
                     using var selectorScope = CardSelectorStack.SetTestSelector(new DelegatingCardSelector());
                     Log($"RUN  {name}");
-                    await run().WaitAsync(TimeSpan.FromSeconds(30));
+                    await run().WaitAsync(TimeSpan.FromSeconds(45));
                     AutoTestAssert.Equal(errorsBefore, Volatile.Read(ref _unhandledErrors), $"{name} triggered unhandled background exceptions");
                     passed++;
                     Log($"PASS {name}");
@@ -560,6 +561,9 @@ internal static class DownfallAutoTestRunner
         AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-COMBO_KEYWORD.description").Exists(), "Missing Combo desc loc");
         AutoTestAssert.True(new LocString("cards", "DOWNFALL-CHAMP_HEADBUTT.selectionScreenPrompt").Exists(), "Missing ChampHeadbutt selectionScreenPrompt loc");
         AutoTestAssert.True(new LocString("cards", "DOWNFALL-WIND_UP.selectionScreenPrompt").Exists(), "Missing WindUp selectionScreenPrompt loc");
+        AutoTestAssert.True(new LocString("cards", "DOWNFALL-ENCHANT_CROWN.selectionScreenPrompt").Exists(), "Missing EnchantCrown selectionScreenPrompt loc");
+        AutoTestAssert.True(new LocString("cards", "DOWNFALL-ENCHANT_SHIELD.selectionScreenPrompt").Exists(), "Missing EnchantShield selectionScreenPrompt loc");
+        AutoTestAssert.True(new LocString("cards", "DOWNFALL-ENCHANT_SWORD.selectionScreenPrompt").Exists(), "Missing EnchantSword selectionScreenPrompt loc");
 
         return Task.CompletedTask;
     }

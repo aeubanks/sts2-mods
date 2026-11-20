@@ -53,6 +53,11 @@ public sealed class CounterPower : ChampPower
             await parry.ConsumeAsync();
         }
 
+        if (Owner.GetPower<GladiatorFormPower>() is { } gladForm)
+        {
+            await gladForm.OnCounterSpentAsync(choiceContext, counterAmount);
+        }
+
         for (int i = 0; i < riposteCount; i++)
         {
             if (!Owner.IsAlive || CombatManager.Instance.IsOverOrEnding)
