@@ -11,7 +11,7 @@ using MegaCrit.Sts2.Core.Runs;
 
 namespace Downfall.Gremlins.Relics;
 
-public sealed class GremlinKnobUpgrade : GremlinRelic
+public sealed class GremlinKnobUpgrade : GremlinKnobBase
 {
     private bool _triggeredThisTurn;
 
@@ -27,11 +27,7 @@ public sealed class GremlinKnobUpgrade : GremlinRelic
         new CardsVar(1)
     ];
 
-    protected override IEnumerable<IHoverTip> ExtraHoverTips =>
-    [
-        HoverTipFactory.ForEnergy(this),
-        GremlinCard.SwapHoverTip
-    ];
+    protected override IEnumerable<IHoverTip> ExtraHoverTips => BaseKnobHoverTips;
 
     protected override void DeepCloneFields()
     {
@@ -43,7 +39,13 @@ public sealed class GremlinKnobUpgrade : GremlinRelic
     {
         if (Owner.Relics.OfType<GremlinKnob>().FirstOrDefault() is { } oldKnob)
         {
+            MobStateEncoded = oldKnob.MobStateEncoded;
             await RelicCmd.Remove(oldKnob);
+        }
+
+        if (Owner.Character is TheGremlins)
+        {
+            GremlinMob.SyncFrontHpFromCreature(Owner);
         }
 
         _triggeredThisTurn = false;
@@ -54,10 +56,7 @@ public sealed class GremlinKnobUpgrade : GremlinRelic
     {
         _triggeredThisTurn = false;
         Status = RelicStatus.Normal;
-        if (Owner.Creature.CombatState is { } combatState && Owner.Character is TheGremlins)
-        {
-            await GremlinMob.EnsureInitializedAsync(combatState, Owner, new ThrowingPlayerChoiceContext());
-        }
+        await base.BeforeCombatStart();
     }
 
     public override Task BeforeSideTurnStart(
@@ -78,7 +77,7 @@ public sealed class GremlinKnobUpgrade : GremlinRelic
     {
         _triggeredThisTurn = false;
         Status = RelicStatus.Normal;
-        return Task.CompletedTask;
+        return base.AfterCombatEnd(room);
     }
 
     public override async Task AfterShuffle(PlayerChoiceContext choiceContext, Player shuffler)

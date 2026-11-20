@@ -70,9 +70,15 @@ internal static class ChampTests
         AutoTestAssert.Equal(3, bStance.DisplayAmount, "Berserker Stance starts with 3 charges");
         AutoTestAssert.Equal(2, player.Creature.GetPowerAmount<VigorPower>(), "BerserkersShout granted 2 Vigor");
 
-        var body = NCombatRoom.Instance?.GetCreatureNode(player.Creature)?.Visuals?.Body as Sprite2D;
+        var visuals = NCombatRoom.Instance?.GetCreatureNode(player.Creature)?.Visuals;
+        var body = visuals?.Body as Sprite2D;
         AutoTestAssert.NotNull(body, "Champ Sprite2D body exists");
         AutoTestAssert.Equal(ChampStances.SpriteTexturePathFor(ChampStanceKind.Berserker), body!.Texture?.ResourcePath, "Combat sprite swapped to Berserker pose");
+        var stanceHud = visuals?.GetNodeOrNull<Node2D>(ChampStances.StanceIndicatorNodeName);
+        AutoTestAssert.NotNull(stanceHud, "Champ stance HUD indicator created");
+        AutoTestAssert.True(stanceHud!.Visible, "Champ stance HUD visible in Berserker");
+        AutoTestAssert.Equal("Berserker Stance", stanceHud.GetNode<Label>("StanceLabel").Text, "HUD shows Berserker Stance");
+        AutoTestAssert.Equal("3/3", stanceHud.GetNode<Label>("ChargesLabel").Text, "HUD shows 3/3 charges");
 
         // 4. Playing 4 Skills spends 3 charges (+2 Vigor each -> 2+6 = 8 Vigor), 4th grants 0; same-stance BerserkersShout does NOT reset charges!
         for (int i = 0; i < 4; i++)
@@ -83,6 +89,7 @@ internal static class ChampTests
             await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
         }
         AutoTestAssert.Equal(0, bStance.DisplayAmount, "Berserker Stance has 0 charges after 4 Skills");
+        AutoTestAssert.Equal("0/3", stanceHud.GetNode<Label>("ChargesLabel").Text, "HUD updates to 0/3 charges");
         AutoTestAssert.Equal(8, player.Creature.GetPowerAmount<VigorPower>(), "3 Skill Bonus charges granted +6 Vigor (2 -> 8)");
 
         var bShoutSame = combatState.CreateCard<BerserkersShout>(player);
@@ -100,6 +107,7 @@ internal static class ChampTests
         AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<StrengthPower>(), "Berserker Finisher Bonus granted +1 Strength");
         AutoTestAssert.Equal(ChampStanceKind.None, ChampStances.GetCurrentStance(player.Creature), "Execute exited Berserker Stance");
         AutoTestAssert.Equal(ChampStances.SpriteTexturePathFor(ChampStanceKind.None), body.Texture?.ResourcePath, "Combat sprite returned to Idle pose");
+        AutoTestAssert.True(!stanceHud.Visible, "Champ stance HUD hidden in Neutral");
 
         // 6. DefensiveShout enters Defensive Stance with 3 charges + 3 Counter; Defend spends 1 charge -> +3 Counter (6 total).
         await ResetHandAndEnergy();
@@ -109,6 +117,9 @@ internal static class ChampTests
         await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
         AutoTestAssert.Equal(ChampStanceKind.Defensive, ChampStances.GetCurrentStance(player.Creature), "Entered Defensive Stance");
         AutoTestAssert.Equal(ChampStances.SpriteTexturePathFor(ChampStanceKind.Defensive), body.Texture?.ResourcePath, "Combat sprite swapped to Defensive pose");
+        AutoTestAssert.True(stanceHud.Visible, "Champ stance HUD visible in Defensive");
+        AutoTestAssert.Equal("Defensive Stance", stanceHud.GetNode<Label>("StanceLabel").Text, "HUD shows Defensive Stance");
+        AutoTestAssert.Equal("3/3", stanceHud.GetNode<Label>("ChargesLabel").Text, "HUD resets to 3/3 charges in Defensive");
         AutoTestAssert.Equal(3, player.Creature.GetPowerAmount<CounterPower>(), "DefensiveShout granted 3 Counter");
 
         var defInDef = combatState.CreateCard<ChampDefend>(player);
@@ -116,6 +127,7 @@ internal static class ChampTests
         AutoTestAssert.True(defInDef.TryManualPlay(null), "Play Defend in Defensive Stance");
         await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
         AutoTestAssert.Equal(2, player.Creature.GetPower<DefensiveStancePower>()!.DisplayAmount, "Defensive Stance spent 1 charge (3 -> 2)");
+        AutoTestAssert.Equal("2/3", stanceHud.GetNode<Label>("ChargesLabel").Text, "HUD decrements to 2/3 charges");
         AutoTestAssert.Equal(6, player.Creature.GetPowerAmount<CounterPower>(), "Defensive Skill Bonus granted +3 Counter (3 -> 6)");
 
         // 7. Multi-hit enemy powered attack triggers CounterPower ONCE (even when fully blocked!) -> removes Counter, adds 1 6-dmg Riposte!

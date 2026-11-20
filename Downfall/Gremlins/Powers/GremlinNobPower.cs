@@ -27,6 +27,22 @@ public sealed class GremlinNobPower : GremlinPower, ITempHpDepletedListener
         HoverTipFactory.FromCard<Rush>()
     ];
 
+    public override bool ShouldDie(Creature creature)
+    {
+        if (creature != Owner || Owner.Player is not { } player)
+            return true;
+
+        return !GremlinMob.ShouldPreventDeath(player);
+    }
+
+    public override async Task AfterPreventingDeath(Creature creature)
+    {
+        if (creature != Owner || Owner.Player is not { } player)
+            return;
+
+        await GremlinMob.HandleActiveGremlinDeathAsync(player);
+    }
+
     public override async Task AfterApplied(Creature? applier, CardModel? cardSource)
     {
         if (Owner.Player is { } player && Owner.CombatState is { } combatState)

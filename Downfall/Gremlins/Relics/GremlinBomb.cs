@@ -52,7 +52,6 @@ public sealed class GremlinBomb : GremlinRelic
         if (_triggeredThisCombat
             || target != Owner.Creature
             || result.UnblockedDamage <= 0
-            || !target.IsAlive
             || target.CurrentHp * 2 > target.MaxHp
             || target.CombatState is not { } combatState
             || CombatManager.Instance.IsOverOrEnding)
@@ -60,6 +59,24 @@ public sealed class GremlinBomb : GremlinRelic
             return;
         }
 
+        await TriggerExplosionAsync(choiceContext, combatState);
+    }
+
+    public override async Task BeforeDeath(Creature creature)
+    {
+        if (_triggeredThisCombat
+            || creature != Owner.Creature
+            || creature.CombatState is not { } combatState
+            || CombatManager.Instance.IsOverOrEnding)
+        {
+            return;
+        }
+
+        await TriggerExplosionAsync(new ThrowingPlayerChoiceContext(), combatState);
+    }
+
+    private async Task TriggerExplosionAsync(PlayerChoiceContext choiceContext, ICombatState combatState)
+    {
         _triggeredThisCombat = true;
         Status = RelicStatus.Disabled;
         Flash();
@@ -72,7 +89,7 @@ public sealed class GremlinBomb : GremlinRelic
                 enemies,
                 DynamicVars.Damage.BaseValue,
                 ValueProp.Unpowered,
-                dealer: Owner.Creature,
+                dealer: Owner.Creature.IsAlive ? Owner.Creature : null,
                 cardSource: null,
                 cardPlay: null);
         }

@@ -11,7 +11,7 @@ public sealed class GremlinGravestone : GremlinRelic
 
     protected override IEnumerable<DynamicVar> CanonicalVars =>
     [
-        new HealVar(15m)
+        new HealVar(5m)
     ];
 
     public override async Task AfterRoomEntered(AbstractRoom room)
@@ -20,6 +20,17 @@ public sealed class GremlinGravestone : GremlinRelic
             return;
 
         Flash();
+        if (Owner.Character is TheGremlins && GremlinMob.CanResurrect(Owner))
+        {
+            GremlinMob.ResurrectRandom(Owner, Owner.Creature.MaxHp, preferCombatRng: false);
+            return;
+        }
+
         await CreatureCmd.Heal(Owner.Creature, DynamicVars.Heal.BaseValue);
+        if (Owner.Character is TheGremlins)
+        {
+            GremlinMob.SyncFrontHpFromCreature(Owner);
+            GremlinMob.HealStandbyGremlins(Owner, DynamicVars.Heal.IntValue);
+        }
     }
 }

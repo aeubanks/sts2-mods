@@ -17,7 +17,7 @@
   "DOWNFALL-EAU_DE_GREM_POTION.title": "Eau de Grem",
   "DOWNFALL-EAU_DE_GREM_POTION.description": "Trigger all [blue]5[/blue] Gremlin abilities [blue]{Repeat}[/blue] times.",
   "DOWNFALL-NECROMANCY_POTION.title": "Gremlin In A Jar",
-  "DOWNFALL-NECROMANCY_POTION.description": "Heal [blue]{HealPercent}%[/blue] of your Max HP.",
+  "DOWNFALL-NECROMANCY_POTION.description": "Revive a fallen Gremlin with [blue]{HealPercent}%[/blue] of your Max HP. If all Gremlins are alive, heal your active Gremlin by [blue]{HealPercent}%[/blue] of your Max HP instead.",
   "DOWNFALL-SWAP_POTION.title": "Bottled Dupe",
   "DOWNFALL-SWAP_POTION.description": "[gold]Swap[/gold] to a random Gremlin.",
   "DOWNFALL-WIZ_POTION.title": "Pizazz Potion",

@@ -1,5 +1,6 @@
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Entities.Cards;
+using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.Entities.Powers;
 using MegaCrit.Sts2.Core.GameActions.Multiplayer;
 using MegaCrit.Sts2.Core.Localization.DynamicVars;
@@ -22,6 +23,28 @@ public abstract class ChampStancePower : ChampPower
         new DynamicVar(ChargesKey, InitialCharges)
     ];
 
+    public override Task BeforeSideTurnStart(
+        PlayerChoiceContext choiceContext,
+        CombatSide side,
+        IReadOnlyList<Creature> participants,
+        ICombatState combatState)
+    {
+        if (side == Owner.Side && participants.Contains(Owner) && Owner.Player is { } player)
+        {
+            ChampStances.UpdateCombatSprite(player, StanceKind);
+        }
+        return Task.CompletedTask;
+    }
+
+    public override Task AfterRemoved(Creature oldOwner)
+    {
+        if (oldOwner.Player is { } player)
+        {
+            ChampStances.UpdateCombatSprite(player, ChampStances.GetCurrentStance(oldOwner));
+        }
+        return Task.CompletedTask;
+    }
+
     public override async Task BeforeCardPlayed(CardPlay cardPlay)
     {
         if (cardPlay.Card.Owner != Owner.Player
@@ -36,6 +59,7 @@ public abstract class ChampStancePower : ChampPower
 
         DynamicVars[ChargesKey].BaseValue--;
         InvokeDisplayAmountChanged();
+        ChampStances.UpdateStanceIndicator(player);
         Flash();
 
         await ChampStances.TriggerSkillBonusAsync(

@@ -17,7 +17,7 @@ public sealed class TheGremlins : DownfallCharacter
     public override string CharacterKey => CharKey;
     public override Color NameColor => CharacterColor;
     public override CharacterGender Gender => CharacterGender.Neutral;
-    public override int StartingHp => 75;
+    public override int StartingHp => 16;
 
     public override IEnumerable<CardModel> StartingDeck =>
     [

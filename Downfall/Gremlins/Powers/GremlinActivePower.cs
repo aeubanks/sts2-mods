@@ -12,6 +12,22 @@ public abstract class GremlinActivePower : GremlinPower
     public override PowerType Type => PowerType.Buff;
     public override PowerStackType StackType => PowerStackType.Counter;
 
+    public override bool ShouldDie(Creature creature)
+    {
+        if (creature != Owner || Owner.Player is not { } player)
+            return true;
+
+        return !GremlinMob.ShouldPreventDeath(player);
+    }
+
+    public override async Task AfterPreventingDeath(Creature creature)
+    {
+        if (creature != Owner || Owner.Player is not { } player)
+            return;
+
+        await GremlinMob.HandleActiveGremlinDeathAsync(player);
+    }
+
     public override Task BeforeSideTurnStart(
         PlayerChoiceContext choiceContext,
         CombatSide side,
@@ -20,7 +36,7 @@ public abstract class GremlinActivePower : GremlinPower
     {
         if (side == Owner.Side && participants.Contains(Owner) && Owner.Player is { } player)
         {
-            GremlinMob.UpdateCombatSprite(player, GremlinMob.SpriteTexturePathFor(Kind));
+            GremlinMob.UpdateCombatVisuals(player);
         }
         return Task.CompletedTask;
     }

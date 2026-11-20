@@ -17,7 +17,7 @@ public sealed class ShortStature : GremlinRelic
 
     protected override IEnumerable<DynamicVar> CanonicalVars =>
     [
-        new DynamicVar("HealPercent", 20m)
+        new DynamicVar("HealPercent", 75m)
     ];
 
     protected override void DeepCloneFields()

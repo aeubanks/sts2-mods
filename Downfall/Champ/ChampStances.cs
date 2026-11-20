@@ -306,8 +306,14 @@ internal static class ChampStances
         }
     }
 
+    public const string StanceIndicatorNodeName = "ChampStanceIndicator";
+    private const string ChargeOnTexturePath = "res://Downfall/images/champ/ui/stance_charge_on.png";
+    private const string ChargeOffTexturePath = "res://Downfall/images/champ/ui/stance_charge_off.png";
+
     public static void UpdateCombatSprite(Player player, ChampStanceKind stance)
     {
+        UpdateStanceIndicator(player);
+
         if (player.Character is not TheChamp)
             return;
 
@@ -320,5 +326,151 @@ internal static class ChampStances
         {
             body.Texture = texture;
         }
+    }
+
+    public static void UpdateStanceIndicator(Player player)
+    {
+        var visuals = NCombatRoom.Instance?.GetCreatureNode(player.Creature)?.Visuals;
+        if (visuals is null)
+            return;
+
+        var active = GetActiveStancePower(player.Creature);
+        var indicator = visuals.GetNodeOrNull<Node2D>(StanceIndicatorNodeName);
+        if (active is null)
+        {
+            if (indicator is not null)
+                indicator.Visible = false;
+            return;
+        }
+
+        if (indicator is null)
+        {
+            indicator = CreateStanceIndicatorNode();
+            visuals.AddChild(indicator);
+        }
+
+        indicator.Visible = true;
+        int charges = Math.Clamp(active.DisplayAmount, 0, ChampStancePower.InitialCharges);
+
+        string title = active.Title.GetFormattedText();
+        (Color textColor, Color borderColor) = active.StanceKind switch
+        {
+            ChampStanceKind.Berserker => (new Color(1.0f, 0.45f, 0.32f), new Color(0.88f, 0.28f, 0.18f)),
+            ChampStanceKind.Defensive => (new Color(0.45f, 0.78f, 1.0f), new Color(0.22f, 0.58f, 0.92f)),
+            ChampStanceKind.Ultimate => (new Color(0.90f, 0.62f, 1.0f), new Color(0.75f, 0.35f, 0.98f)),
+            _ => (Colors.White, Colors.Gray)
+        };
+
+        if (indicator.GetNodeOrNull<Panel>("Backdrop") is { } panel
+            && panel.GetThemeStylebox("panel") is StyleBoxFlat styleBox)
+        {
+            styleBox.BorderColor = borderColor;
+        }
+
+        if (indicator.GetNodeOrNull<Label>("StanceLabel") is { } stanceLabel)
+        {
+            stanceLabel.Text = title;
+            stanceLabel.AddThemeColorOverride("font_color", textColor);
+        }
+
+        Texture2D? onTex = ResourceLoader.Exists(ChargeOnTexturePath) ? ResourceLoader.Load<Texture2D>(ChargeOnTexturePath) : null;
+        Texture2D? offTex = ResourceLoader.Exists(ChargeOffTexturePath) ? ResourceLoader.Load<Texture2D>(ChargeOffTexturePath) : null;
+        for (int i = 0; i < ChampStancePower.InitialCharges; i++)
+        {
+            if (indicator.GetNodeOrNull<Sprite2D>($"Charge{i}") is not { } pip)
+                continue;
+            bool lit = i < charges;
+            pip.Texture = lit ? (onTex ?? offTex) : (offTex ?? onTex);
+            pip.Modulate = lit ? Colors.White : new Color(0.65f, 0.65f, 0.72f, 0.85f);
+        }
+
+        if (indicator.GetNodeOrNull<Label>("ChargesLabel") is { } chargesLabel)
+        {
+            chargesLabel.Text = $"{charges}/{ChampStancePower.InitialCharges}";
+            chargesLabel.AddThemeColorOverride("font_color",
+                charges > 0 ? new Color(1.0f, 0.89f, 0.48f) : new Color(0.58f, 0.62f, 0.70f));
+        }
+    }
+
+    private static Node2D CreateStanceIndicatorNode()
+    {
+        var root = new Node2D
+        {
+            Name = StanceIndicatorNodeName,
+            Position = new Vector2(0f, -295f),
+            ZIndex = 10
+        };
+
+        var style = new StyleBoxFlat
+        {
+            BgColor = new Color(0.06f, 0.07f, 0.11f, 0.88f),
+            BorderColor = new Color(0.85f, 0.72f, 0.35f),
+            BorderWidthTop = 2,
+            BorderWidthBottom = 2,
+            BorderWidthLeft = 2,
+            BorderWidthRight = 2,
+            CornerRadiusTopLeft = 8,
+            CornerRadiusTopRight = 8,
+            CornerRadiusBottomLeft = 8,
+            CornerRadiusBottomRight = 8
+        };
+
+        var panel = new Panel
+        {
+            Name = "Backdrop",
+            MouseFilter = Control.MouseFilterEnum.Ignore,
+            OffsetLeft = -104f,
+            OffsetRight = 104f,
+            OffsetTop = -40f,
+            OffsetBottom = 38f
+        };
+        panel.AddThemeStyleboxOverride("panel", style);
+        root.AddChild(panel);
+
+        var stanceLabel = new Label
+        {
+            Name = "StanceLabel",
+            MouseFilter = Control.MouseFilterEnum.Ignore,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+            OffsetLeft = -100f,
+            OffsetRight = 100f,
+            OffsetTop = -36f,
+            OffsetBottom = -10f
+        };
+        stanceLabel.AddThemeFontSizeOverride("font_size", 15);
+        stanceLabel.AddThemeColorOverride("font_outline_color", Colors.Black);
+        stanceLabel.AddThemeConstantOverride("outline_size", 4);
+        root.AddChild(stanceLabel);
+
+        float[] pipX = [-54f, -14f, 26f];
+        for (int i = 0; i < ChampStancePower.InitialCharges; i++)
+        {
+            var pip = new Sprite2D
+            {
+                Name = $"Charge{i}",
+                Position = new Vector2(pipX[i], 14f),
+                Scale = new Vector2(0.46f, 0.46f)
+            };
+            root.AddChild(pip);
+        }
+
+        var chargesLabel = new Label
+        {
+            Name = "ChargesLabel",
+            MouseFilter = Control.MouseFilterEnum.Ignore,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+            OffsetLeft = 48f,
+            OffsetRight = 98f,
+            OffsetTop = 0f,
+            OffsetBottom = 28f
+        };
+        chargesLabel.AddThemeFontSizeOverride("font_size", 16);
+        chargesLabel.AddThemeColorOverride("font_outline_color", Colors.Black);
+        chargesLabel.AddThemeConstantOverride("outline_size", 4);
+        root.AddChild(chargesLabel);
+
+        return root;
     }
 }

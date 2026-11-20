@@ -9,7 +9,7 @@ using MegaCrit.Sts2.Core.Rooms;
 
 namespace Downfall.Gremlins.Relics;
 
-public sealed class GremlinKnob : GremlinRelic
+public sealed class GremlinKnob : GremlinKnobBase
 {
     private bool _triggeredThisCombat;
 
@@ -21,11 +21,7 @@ public sealed class GremlinKnob : GremlinRelic
         new CardsVar(1)
     ];
 
-    protected override IEnumerable<IHoverTip> ExtraHoverTips =>
-    [
-        HoverTipFactory.ForEnergy(this),
-        GremlinCard.SwapHoverTip
-    ];
+    protected override IEnumerable<IHoverTip> ExtraHoverTips => BaseKnobHoverTips;
 
     protected override void DeepCloneFields()
     {
@@ -37,17 +33,14 @@ public sealed class GremlinKnob : GremlinRelic
     {
         _triggeredThisCombat = false;
         Status = RelicStatus.Normal;
-        if (Owner.Creature.CombatState is { } combatState)
-        {
-            await GremlinMob.EnsureInitializedAsync(combatState, Owner, new ThrowingPlayerChoiceContext());
-        }
+        await base.BeforeCombatStart();
     }
 
     public override Task AfterCombatEnd(CombatRoom room)
     {
         _triggeredThisCombat = false;
         Status = RelicStatus.Normal;
-        return Task.CompletedTask;
+        return base.AfterCombatEnd(room);
     }
 
     public override async Task AfterPlayerTurnStart(PlayerChoiceContext choiceContext, Player player)

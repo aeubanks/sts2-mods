@@ -34,11 +34,12 @@ internal static class HermitTests
         AutoTestAssert.Equal(75, player.Creature.MaxHp, "Hermit starting MaxHp");
         AutoTestAssert.True(player.Relics.Any(r => r is OldLocket), "OldLocket in starting relics");
 
-        // Old Locket adds MementoCard to hand at start of combat (5 drawn + 1 Memento = 6).
+        // Old Locket adds MementoCard to leftmost slot of hand before Turn 1 draw (1 Memento + 5 drawn = 6).
         var memento = AutoTestAssert.NotNull(
             pcs.Hand.Cards.OfType<MementoCard>().FirstOrDefault(),
             "OldLocket added MementoCard to Turn 1 hand");
         AutoTestAssert.Equal(6, pcs.Hand.Cards.Count, "Turn 1 hand has 5 drawn cards + 1 MementoCard");
+        AutoTestAssert.True(ReferenceEquals(pcs.Hand.Cards[0], memento), "MementoCard starts on the leftmost side of Hand");
 
         // Test MementoCard Retain across Turn 1 -> Turn 2 and confirm OldLocket does NOT re-trigger.
         await DownfallAutoTestRunner.EndTurnAndWaitForRoundAsync(player, 2);

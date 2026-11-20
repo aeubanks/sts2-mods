@@ -2,8 +2,9 @@ using Downfall.Hermit.Cards;
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Commands;
 using MegaCrit.Sts2.Core.Entities.Cards;
-using MegaCrit.Sts2.Core.Entities.Creatures;
+using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Entities.Relics;
+using MegaCrit.Sts2.Core.GameActions.Multiplayer;
 using MegaCrit.Sts2.Core.HoverTips;
 
 namespace Downfall.Hermit.Relics;
@@ -19,13 +20,13 @@ public sealed class OldLocket : HermitRelic
         HoverTipFactory.FromCard<MementoCard>()
     ];
 
-    public override async Task AfterSideTurnStart(CombatSide side, IReadOnlyList<Creature> participants, ICombatState combatState)
+    public override async Task BeforeHandDraw(Player player, PlayerChoiceContext choiceContext, ICombatState combatState)
     {
-        if (side != CombatSide.Player || combatState.RoundNumber != 1 || combatState is not CombatState cs)
+        if (player != Owner || combatState.RoundNumber != 1)
             return;
 
         Flash();
-        var memento = cs.CreateCard<MementoCard>(Owner);
-        await CardPileCmd.AddGeneratedCardToCombat(memento, PileType.Hand, Owner);
+        var memento = combatState.CreateCard<MementoCard>(Owner);
+        await CardPileCmd.AddGeneratedCardToCombat(memento, PileType.Hand, Owner, CardPilePosition.Top);
     }
 }

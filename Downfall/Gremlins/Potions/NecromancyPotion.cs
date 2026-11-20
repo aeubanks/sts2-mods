@@ -15,7 +15,7 @@ public sealed class NecromancyPotion : GremlinPotion
 
     protected override IEnumerable<DynamicVar> CanonicalVars =>
     [
-        new DynamicVar("HealPercent", 20m)
+        new DynamicVar("HealPercent", 50m)
     ];
 
     protected override async Task OnUse(PlayerChoiceContext choiceContext, Creature? target)
@@ -24,6 +24,16 @@ public sealed class NecromancyPotion : GremlinPotion
             return;
 
         int healAmt = Math.Max(1, (int)(Owner.Creature.MaxHp * DynamicVars["HealPercent"].BaseValue / 100m));
+        if (Owner.Character is TheGremlins && GremlinMob.CanResurrect(Owner))
+        {
+            GremlinMob.ResurrectRandom(Owner, healAmt, preferCombatRng: Owner.Creature.CombatState is not null);
+            return;
+        }
+
         await CreatureCmd.Heal(Owner.Creature, healAmt);
+        if (Owner.Character is TheGremlins)
+        {
+            GremlinMob.SyncFrontHpFromCreature(Owner);
+        }
     }
 }

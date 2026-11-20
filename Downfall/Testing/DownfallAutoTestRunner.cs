@@ -367,7 +367,10 @@ internal static class DownfallAutoTestRunner
             $"{character.Id} VfxSpawnPosition should be on torso (got Y={playerCreatureNode.Visuals.VfxSpawnPosition.Position.Y})");
 
         var enemy = AutoTestAssert.NotNull(combatState.HittableEnemies.FirstOrDefault(), "Enemy for lethal test");
-        await CreatureCmd.Damage(new ThrowingPlayerChoiceContext(), combatPlayer.Creature, 999m, ValueProp.Unblockable | ValueProp.Unpowered, dealer: enemy, cardSource: null, cardPlay: null);
+        for (int attempt = 0; attempt < 6 && combatPlayer.Creature.IsAlive; attempt++)
+        {
+            await CreatureCmd.Damage(new ThrowingPlayerChoiceContext(), combatPlayer.Creature, 999m, ValueProp.Unblockable | ValueProp.Unpowered, dealer: enemy, cardSource: null, cardPlay: null);
+        }
         AutoTestAssert.True(combatPlayer.Creature.IsDead, $"{character.Id} died cleanly from lethal damage");
     }
 
@@ -566,6 +569,11 @@ internal static class DownfallAutoTestRunner
         AutoTestAssert.True(new LocString("cards", "DOWNFALL-ENCHANT_SHIELD.selectionScreenPrompt").Exists(), "Missing EnchantShield selectionScreenPrompt loc");
         AutoTestAssert.True(new LocString("cards", "DOWNFALL-ENCHANT_SWORD.selectionScreenPrompt").Exists(), "Missing EnchantSword selectionScreenPrompt loc");
         AutoTestAssert.True(new LocString("relics", "DOWNFALL-SIGNATURE_FINISHER.selectionScreenPrompt").Exists(), "Missing SignatureFinisher selectionScreenPrompt loc");
+        AutoTestAssert.True(new LocString("relics", "DOWNFALL-GREMLIN_MOB_STATUS.title").Exists(), "Missing Gremlin Mob Status title loc");
+        AutoTestAssert.True(new LocString("relics", "DOWNFALL-GREMLIN_KNOB.additionalRestSiteHealText").Exists(), "Missing GremlinKnob additionalRestSiteHealText loc");
+        AutoTestAssert.True(new LocString("relics", "DOWNFALL-GREMLIN_KNOB_UPGRADE.additionalRestSiteHealText").Exists(), "Missing GremlinKnobUpgrade additionalRestSiteHealText loc");
+        AutoTestAssert.True(ResourceLoader.Exists("res://Downfall/images/champ/ui/stance_charge_on.png"), "Missing Champ stance_charge_on.png");
+        AutoTestAssert.True(ResourceLoader.Exists("res://Downfall/images/champ/ui/stance_charge_off.png"), "Missing Champ stance_charge_off.png");
 
         return Task.CompletedTask;
     }

@@ -77,12 +77,17 @@ public sealed class LeaderVoucher : GremlinRelic, IGremlinSacrificeProvider
             var available = GremlinMob.AllKinds.Where(k => !alreadySacrificed.Contains(k)).ToList();
             if (available.Count >= 2)
             {
-                var chosen = available[Owner.RunState.Rng.Niche.NextInt(available.Count)];
-                SacrificedKindIndex = (int)chosen;
+                // Never sacrifice the last living Gremlin.
+                var living = available.Where(k => GremlinMob.GetGremlinHp(Owner, k) > 0).ToList();
+                var candidates = living.Count > 1
+                    ? available
+                    : available.Where(k => GremlinMob.GetGremlinHp(Owner, k) == 0).ToList();
 
-                if (Owner.Creature.CombatState is { } combatState)
+                if (candidates.Count > 0)
                 {
-                    await GremlinMob.SacrificeAsync(Owner, combatState, chosen, new ThrowingPlayerChoiceContext());
+                    var chosen = candidates[Owner.RunState.Rng.Niche.NextInt(candidates.Count)];
+                    SacrificedKindIndex = (int)chosen;
+                    await GremlinMob.SacrificeAsync(Owner, chosen, new ThrowingPlayerChoiceContext());
                 }
             }
         }

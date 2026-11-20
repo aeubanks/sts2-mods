@@ -16,13 +16,15 @@ public sealed class Necromancy()
     public override IEnumerable<CardKeyword> CanonicalKeywords => [CardKeyword.Exhaust];
 
     protected override bool IsPlayable =>
-        IsMutable && Owner?.Creature.GetPowerAmount<WizPower>() >= WizPower.Threshold;
+        IsMutable
+        && Owner?.Creature.GetPowerAmount<WizPower>() >= WizPower.Threshold
+        && (Owner.Character is not TheGremlins || GremlinMob.CanResurrect(Owner));
 
     protected override bool ShouldGlowGoldInternal => IsPlayable;
 
     protected override IEnumerable<DynamicVar> CanonicalVars =>
     [
-        new HealVar(15m)
+        new HealVar(10m)
     ];
 
     protected override IEnumerable<IHoverTip> ExtraHoverTips =>
@@ -37,7 +39,14 @@ public sealed class Necromancy()
             await wiz.ConsumeAsync(choiceContext);
         }
 
-        if (Owner.Creature.IsAlive && !CombatManager.Instance.IsOverOrEnding)
+        if (!Owner.Creature.IsAlive || CombatManager.Instance.IsOverOrEnding)
+            return;
+
+        if (Owner.Character is TheGremlins)
+        {
+            GremlinMob.ResurrectRandom(Owner, DynamicVars.Heal.IntValue, preferCombatRng: true);
+        }
+        else
         {
             await CreatureCmd.Heal(Owner.Creature, DynamicVars.Heal.BaseValue);
         }
@@ -45,6 +54,6 @@ public sealed class Necromancy()
 
     protected override void OnUpgrade()
     {
-        DynamicVars.Heal.UpgradeValueBy(5m);
+        DynamicVars.Heal.UpgradeValueBy(3m);
     }
 }

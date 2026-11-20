@@ -487,7 +487,7 @@
   "DOWNFALL-HECKLE.title": "Heckle",
   "DOWNFALL-HECKLE.description": "Whenever you apply a debuff to an enemy, gain {HecklePower:diff()} [gold]Temp HP[/gold].",
   "DOWNFALL-NECROMANCY.title": "Necromancy",
-  "DOWNFALL-NECROMANCY.description": "Can only be played if you have [blue]3[/blue] or more [gold]Wiz[/gold].\nConsume all [gold]Wiz[/gold] and heal {Heal:diff()} HP.",
+  "DOWNFALL-NECROMANCY.description": "Can only be played if you have [blue]3[/blue] or more [gold]Wiz[/gold] and a fallen Gremlin.\nConsume all [gold]Wiz[/gold] and revive a random fallen Gremlin with {Heal:diff()} HP.",
   "DOWNFALL-NOB.title": "NOB",
   "DOWNFALL-NOB.description": "Gain {DownfallTempHpPower:diff()} [gold]Temp HP[/gold].\nTransform into [gold]Gremlin Nob[/gold] until you run out of [gold]Temp HP[/gold].",
   "DOWNFALL-SECOND_VOLLEY.title": "Second Volley",
