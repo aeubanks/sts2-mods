@@ -72,6 +72,7 @@ public static class CollectorMechanics
     private static readonly Type[] BossCollectibles =
     [
         typeof(OuroborosCard),
+        typeof(TorchHeadCard),
         typeof(NemesisCard),
         typeof(BronzeOrbCard)
     ];
@@ -80,7 +81,8 @@ public static class CollectorMechanics
     [
         .. NormalCollectibles,
         .. EliteCollectibles,
-        typeof(OuroborosCard)
+        typeof(OuroborosCard),
+        typeof(TorchHeadCard)
     ];
 
     public static bool IsAfflicted(Creature creature) =>
@@ -151,31 +153,6 @@ public static class CollectorMechanics
         await PowerCmd.Apply<ReservesPower>(choiceContext, player.Creature, amount, player.Creature, cardSource);
         if (player.Creature.IsAlive && !CombatManager.Instance.IsOverOrEnding)
             await PlayerCmd.GainEnergy(amount, player);
-    }
-
-    /// <summary>
-    /// Deducts Reserves directly (used by Finger of Death) without ever draining regular Energy.
-    /// </summary>
-    public static async Task SpendReservesAsync(Player player, int requested)
-    {
-        if (requested <= 0 || player.PlayerCombatState is null || !player.Creature.IsAlive)
-            return;
-
-        int available = GetReserves(player);
-        int toSpend = Math.Min(requested, available);
-        if (toSpend <= 0)
-            return;
-
-        var power = player.Creature.GetPower<ReservesPower>();
-        if (power is not null)
-        {
-            if (power.Amount <= toSpend)
-                await PowerCmd.Remove(power);
-            else
-                await PowerCmd.ModifyAmount(new ThrowingPlayerChoiceContext(), power, -toSpend, null, null);
-        }
-
-        await PlayerCmd.LoseEnergy(toSpend, player);
     }
 
     public static async Task GainTempHpAsync(

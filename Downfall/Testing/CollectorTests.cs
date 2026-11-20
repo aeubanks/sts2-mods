@@ -931,4 +931,231 @@ internal static class CollectorTests
         AutoTestAssert.True(pcs.AllCards.Any(c => c is GreaterHurting && !pcs.ExhaustPile.Cards.Contains(c)), "Ethereal Hurting generated GreaterHurting without chain-exhausting it");
         AutoTestAssert.Equal(greatestCountBeforeEndTurn, pcs.AllCards.Count(c => c is GreatestHurting), "Ethereal Hurting did NOT chain-exhaust into GreatestHurting on the same turn");
     }
+
+    public static async Task TestRareCardsInCombat()
+    {
+        var (player, _, combatState) = await DownfallAutoTestRunner.StartCombatAsync<TheCollector>("COLLECTOR_10D");
+        var pcs = AutoTestAssert.NotNull(player.PlayerCombatState, "PlayerCombatState");
+        var enemy = AutoTestAssert.NotNull(combatState.HittableEnemies.FirstOrDefault(), "Enemy");
+        var ctx = new BlockingPlayerChoiceContext();
+
+        await CreatureCmd.SetMaxAndCurrentHp(enemy, 2000m);
+
+        static async Task ClearHandAsync(PlayerCombatState p)
+        {
+            foreach (var c in p.Hand.Cards.ToList())
+                await CardPileCmd.Add(c, PileType.Discard);
+        }
+
+        // 1. FingerOfDeath (Reserves-only playability & exact deduction leaving regular Energy intact!)
+        await ClearHandAsync(pcs);
+        var fod = combatState.CreateCard<FingerOfDeath>(player);
+        await CardPileCmd.Add(fod, PileType.Hand);
+        // Turn 1 has 3 regular Energy + 1 Reserve = 4 Energy, but only 1 Reserve -> FingerOfDeath MUST be unplayable!
+        AutoTestAssert.Equal(1, CollectorMechanics.GetReserves(player), "Turn 1 has 1 Reserve");
+        AutoTestAssert.Equal(4, pcs.Energy, "Turn 1 has 4 total Energy");
+        AutoTestAssert.True(!fod.CanPlay(), "FingerOfDeath is unplayable with only 1 Reserve despite 4 total Energy");
+
+        // Grant +4 Reserves -> now 3 regular + 5 Reserves = 8 total Energy -> playing FingerOfDeath leaves 3 regular + 1 Reserve = 4 Energy!
+        await CollectorMechanics.GainReservesAsync(ctx, player, 4);
+        AutoTestAssert.Equal(5, CollectorMechanics.GetReserves(player), "Now have 5 Reserves");
+        AutoTestAssert.Equal(8, pcs.Energy, "Now have 8 total Energy (3 regular + 5 Reserves)");
+        AutoTestAssert.True(fod.CanPlay(), "FingerOfDeath is playable with 5 Reserves");
+        AutoTestAssert.True(fod.TryManualPlay(enemy), "Play FingerOfDeath manually");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(60, enemy.GetPowerAmount<CollectorDoomPower>(), "FingerOfDeath applied 60 Doom");
+        AutoTestAssert.Equal(1, CollectorMechanics.GetReserves(player), "FingerOfDeath deducted 4 Reserves (5 -> 1)");
+        AutoTestAssert.Equal(4, pcs.Energy, "FingerOfDeath left 3 regular + 1 Reserve = 4 Energy");
+
+        // Exact-boundary Reserves test: +3 Reserves -> now 3 regular + 4 Reserves = 7 Energy -> playing FingerOfDeath+ removes ReservesPower cleanly (4 -> 0) and leaves 3 regular Energy!
+        await CollectorMechanics.GainReservesAsync(ctx, player, 3);
+        AutoTestAssert.Equal(4, CollectorMechanics.GetReserves(player), "Now have exact 4 Reserves");
+        AutoTestAssert.Equal(7, pcs.Energy, "Now have 7 total Energy (3 regular + 4 Reserves)");
+        var fodPlus = combatState.CreateCard<FingerOfDeath>(player);
+        CardCmd.Upgrade(fodPlus);
+        await CardPileCmd.Add(fodPlus, PileType.Hand);
+        AutoTestAssert.True(fodPlus.TryManualPlay(null), "Play FingerOfDeath+ with exact 4 Reserves");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(120, enemy.GetPowerAmount<CollectorDoomPower>(), "FingerOfDeath+ applied 60 AoE Doom (60 -> 120)");
+        AutoTestAssert.Equal(0, CollectorMechanics.GetReserves(player), "FingerOfDeath+ consumed exact 4 Reserves (4 -> 0) cleanly");
+        AutoTestAssert.Equal(3, pcs.Energy, "FingerOfDeath+ left all 3 regular Energy untouched");
+
+        // 2. Goodbye (doubles Doom: 120 -> 240, Exhaust)
+        var goodbye = combatState.CreateCard<Goodbye>(player);
+        await CardPileCmd.Add(goodbye, PileType.Hand);
+        await CardCmd.AutoPlay(ctx, goodbye, enemy, AutoPlayType.Default);
+        AutoTestAssert.Equal(240, enemy.GetPowerAmount<CollectorDoomPower>(), "Goodbye doubled enemy Doom 120 -> 240");
+        AutoTestAssert.True(pcs.ExhaustPile.Cards.Contains(goodbye), "Goodbye Exhausted");
+
+        // 3. ShootingStar (first Pyred Attack each turn returns as 0-cost until played; 2nd Attack Pyre does NOT re-trigger!) + CoffinNail (Exhaust -> +6 dmg copy next turn!)
+        await ClearHandAsync(pcs);
+        pcs.Energy = 10;
+        var shootingStar = combatState.CreateCard<ShootingStar>(player);
+        await CardPileCmd.Add(shootingStar, PileType.Hand);
+        await CardCmd.AutoPlay(ctx, shootingStar, null, AutoPlayType.Default);
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<ShootingStarPower>(), "ShootingStar applied ShootingStarPower(1)");
+
+        var coffinNail = combatState.CreateCard<CoffinNail>(player);
+        var roastPyre = combatState.CreateCard<Roast>(player);
+        await CardPileCmd.Add(coffinNail, PileType.Hand);
+        await CardPileCmd.Add(roastPyre, PileType.Hand);
+        await CardCmd.AutoPlay(ctx, roastPyre, enemy, AutoPlayType.Default);
+        var starCopy = AutoTestAssert.NotNull(pcs.Hand.Cards.OfType<CoffinNail>().FirstOrDefault(), "ShootingStar returned 0-cost copy of Pyred Attack (CoffinNail)");
+        AutoTestAssert.Equal(0, starCopy.EnergyCost.GetWithModifiers(CostModifiers.All), "ShootingStar copy costs 0 until played");
+        AutoTestAssert.True(player.Creature.HasPower<AddCopyNextTurnPower>(), "CoffinNail Exhaust queued upgraded copy for next turn");
+
+        // Second Attack Pyre in the same turn must NOT re-trigger ShootingStarPower(1)!
+        await ClearHandAsync(pcs);
+        var secondAtkFodder = combatState.CreateCard<CollectorStrike>(player);
+        var roastPyre2 = combatState.CreateCard<Roast>(player);
+        await CardPileCmd.Add(secondAtkFodder, PileType.Hand);
+        await CardPileCmd.Add(roastPyre2, PileType.Hand);
+        await CardCmd.AutoPlay(ctx, roastPyre2, enemy, AutoPlayType.Default);
+        AutoTestAssert.True(!pcs.Hand.Cards.Any(c => c is CollectorStrike), "ShootingStarPower(1) did not re-trigger on 2nd Attack Pyre in same turn");
+
+        // 4. ProtectingCall (6 Temp HP + TorchHead Block 2) & TorchHeadCard (0-cost random Torch Head Call) & Whomp (12 dmg + 12 Temp HP)
+        await ClearHandAsync(pcs);
+        var protecting = combatState.CreateCard<ProtectingCall>(player);
+        await CardPileCmd.Add(protecting, PileType.Hand);
+        await CardCmd.AutoPlay(ctx, protecting, null, AutoPlayType.Default);
+        AutoTestAssert.True(player.Creature.GetPowerAmount<Downfall.Core.DownfallTempHpPower>() >= 6, "ProtectingCall granted 6 Temp HP");
+        await CreatureCmd.LoseBlock(ctx, player.Creature, player.Creature.Block, null);
+        var strikeForProt = combatState.CreateCard<CollectorStrike>(player);
+        await CardPileCmd.Add(strikeForProt, PileType.Hand);
+        await CardCmd.AutoPlay(ctx, strikeForProt, enemy, AutoPlayType.Default);
+        AutoTestAssert.Equal(2, player.Creature.Block, "ProtectingCall TorchHead granted 2 Block on Attack");
+
+        var thCard = combatState.CreateCard<TorchHeadCard>(player);
+        await CardPileCmd.Add(thCard, PileType.Hand);
+        await CardCmd.AutoPlay(ctx, thCard, null, AutoPlayType.Default);
+        var generatedCall = AutoTestAssert.NotNull(
+            pcs.Hand.Cards.FirstOrDefault(c => c is BindingCall or ProtectingCall or RagingCall),
+            "TorchHeadCard generated a Torch Head Call into Hand");
+        AutoTestAssert.Equal(0, generatedCall.EnergyCost.GetWithModifiers(CostModifiers.All), "TorchHeadCard Call costs 0 this turn");
+
+        int tempBeforeWhomp = player.Creature.GetPowerAmount<Downfall.Core.DownfallTempHpPower>();
+        var whomp = combatState.CreateCard<Whomp>(player);
+        await CardPileCmd.Add(whomp, PileType.Hand);
+        await CardCmd.AutoPlay(ctx, whomp, enemy, AutoPlayType.Default);
+        AutoTestAssert.Equal(tempBeforeWhomp + 12, player.Creature.GetPowerAmount<Downfall.Core.DownfallTempHpPower>(), "Whomp granted 12 Temp HP");
+
+        // 5. DarkApotheosis (upgrades CombatCollection) + Omen (+1 Strength on Collected play) + HoardersStrike (plays top of Collection!)
+        //    + DragonsTrove (Pyre, draws 2 from Collection + 1 Reserve)
+        await ClearHandAsync(pcs);
+        var cData = CollectorCombatState.Get(combatState).GetPlayer(player);
+        cData.CombatCollection.Clear();
+        var col1 = combatState.CreateCard<JawWormCard>(player);
+        var col2 = combatState.CreateCard<SentryCard>(player);
+        var col3 = combatState.CreateCard<BronzeOrbCard>(player);
+        cData.CombatCollection.AddRange([col1, col2, col3]);
+
+        var darkApoth = combatState.CreateCard<DarkApotheosis>(player);
+        await CardPileCmd.Add(darkApoth, PileType.Hand);
+        await CardCmd.AutoPlay(ctx, darkApoth, null, AutoPlayType.Default);
+        AutoTestAssert.True(cData.CombatCollection.All(c => c.IsUpgraded), "DarkApotheosis upgraded all cards in CombatCollection");
+
+        var omen = combatState.CreateCard<Omen>(player);
+        await CardPileCmd.Add(omen, PileType.Hand);
+        await CardCmd.AutoPlay(ctx, omen, null, AutoPlayType.Default);
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<OmenPower>(), "Omen applied OmenPower(1)");
+
+        int strBeforeHoarder = player.Creature.GetPowerAmount<StrengthPower>();
+        var hoarder = combatState.CreateCard<HoardersStrike>(player);
+        await CardPileCmd.Add(hoarder, PileType.Hand);
+        await CardCmd.AutoPlay(ctx, hoarder, enemy, AutoPlayType.Default);
+        AutoTestAssert.Equal(2, cData.CombatCollection.Count, "HoardersStrike popped top card (JawWormCard+) from CombatCollection");
+        AutoTestAssert.Equal(strBeforeHoarder + 2 + 1, player.Creature.GetPowerAmount<StrengthPower>(), "JawWormCard+ (+2 Str) + Omen (+1 Str) triggered via HoardersStrike");
+
+        int resBeforeTrove = CollectorMechanics.GetReserves(player);
+        var troveFodder = combatState.CreateCard<SunbloomKindling>(player); // Exhaust -> +2 Strength + 2 Embers!
+        var trove = combatState.CreateCard<DragonsTrove>(player);
+        await CardPileCmd.Add(troveFodder, PileType.Hand);
+        await CardPileCmd.Add(trove, PileType.Hand);
+        int strBeforeSunbloom = player.Creature.GetPowerAmount<StrengthPower>();
+        await CardCmd.AutoPlay(ctx, trove, null, AutoPlayType.Default);
+        AutoTestAssert.Equal(strBeforeSunbloom + 2, player.Creature.GetPowerAmount<StrengthPower>(), "SunbloomKindling Exhaust granted +2 Strength");
+        AutoTestAssert.True(pcs.Hand.Cards.Count(c => c is Ember) >= 2, "SunbloomKindling Exhaust added 2 Embers");
+        AutoTestAssert.Equal(0, cData.CombatCollection.Count, "DragonsTrove drew remaining 2 cards from CombatCollection");
+        AutoTestAssert.Equal(resBeforeTrove + 1, CollectorMechanics.GetReserves(player), "DragonsTrove granted +1 Reserve");
+
+        // 6. Darkstorm (1 Blightning to Hand + 2 to Draw) & Blightning (6 Doom + 6 dmg + draw from Collection)
+        await ClearHandAsync(pcs);
+        cData.CombatCollection.Add(combatState.CreateCard<ByrdCard>(player));
+        var darkstorm = combatState.CreateCard<Darkstorm>(player);
+        await CardPileCmd.Add(darkstorm, PileType.Hand);
+        await CardCmd.AutoPlay(ctx, darkstorm, null, AutoPlayType.Default);
+        var blightning = AutoTestAssert.NotNull(pcs.Hand.Cards.OfType<Blightning>().FirstOrDefault(), "Darkstorm added 1 Blightning to Hand");
+        AutoTestAssert.Equal(2, pcs.DrawPile.Cards.Count(c => c is Blightning), "Darkstorm shuffled 2 Blightnings into Draw Pile");
+        int doomBeforeBlight = enemy.GetPowerAmount<CollectorDoomPower>();
+        await CardCmd.AutoPlay(ctx, blightning, enemy, AutoPlayType.Default);
+        AutoTestAssert.Equal(doomBeforeBlight + 6, enemy.GetPowerAmount<CollectorDoomPower>(), "Blightning applied 6 Doom");
+        AutoTestAssert.True(pcs.Hand.Cards.Any(c => c is ByrdCard), "Blightning drew ByrdCard from CombatCollection");
+
+        // 7. ThornWhip (6 AoE + 3 Bruise + Shiv) & ReceiveTribute (Pyre, choose 1 of 2 other-villain Rare cards with Retain)
+        await ClearHandAsync(pcs);
+        var whip = combatState.CreateCard<ThornWhip>(player);
+        await CardPileCmd.Add(whip, PileType.Hand);
+        await CardCmd.AutoPlay(ctx, whip, null, AutoPlayType.Default);
+        AutoTestAssert.Equal(3, enemy.GetPowerAmount<Downfall.Hermit.Powers.BruisePower>(), "ThornWhip applied 3 Bruise");
+        AutoTestAssert.True(pcs.Hand.Cards.Any(c => c is MegaCrit.Sts2.Core.Models.Cards.Shiv), "ThornWhip added Shiv to Hand");
+
+        var tribute = combatState.CreateCard<ReceiveTribute>(player);
+        await CardPileCmd.Add(tribute, PileType.Hand);
+        await CardCmd.AutoPlay(ctx, tribute, null, AutoPlayType.Default);
+        var tributeCard = AutoTestAssert.NotNull(
+            pcs.Hand.Cards.FirstOrDefault(c => c.Rarity == CardRarity.Rare && c is not CollectorCard),
+            "ReceiveTribute added an off-class Downfall Rare card to Hand");
+        AutoTestAssert.True(tributeCard.Keywords.Contains(CardKeyword.Retain), "ReceiveTribute card has Retain");
+
+        // 8. CollectorFiendFire (Exhausts Hand & deals 7 dmg per card Exhausted)
+        await ClearHandAsync(pcs);
+        var ff1 = combatState.CreateCard<CollectorDefend>(player);
+        var ff2 = combatState.CreateCard<CollectorDefend>(player);
+        var fiendFire = combatState.CreateCard<CollectorFiendFire>(player);
+        await CardPileCmd.Add(ff1, PileType.Hand);
+        await CardPileCmd.Add(ff2, PileType.Hand);
+        await CardPileCmd.Add(fiendFire, PileType.Hand);
+        int hpBeforeFiend = enemy.CurrentHp;
+        await CardCmd.AutoPlay(ctx, fiendFire, enemy, AutoPlayType.Default);
+        AutoTestAssert.True(pcs.ExhaustPile.Cards.Contains(ff1) && pcs.ExhaustPile.Cards.Contains(ff2), "CollectorFiendFire Exhausted Hand");
+        AutoTestAssert.True(hpBeforeFiend - enemy.CurrentHp >= 14, $"CollectorFiendFire dealt 2 hits ({hpBeforeFiend - enemy.CurrentHp} dmg)");
+
+        // 9. Pyromancy (CracklePower -> +1 Reserve at start of turn) + DarkLordForm+ (plays YouAreMine+ at start of turn!)
+        //    + StashAway (X=2 -> 2x4 Block + 2 NextTurnReserve!)
+        await ClearHandAsync(pcs);
+        await PowerCmd.Remove<CollectorDoomPower>(enemy);
+        await PowerCmd.Remove<WeakPower>(enemy);
+        await PowerCmd.Remove<VulnerablePower>(enemy);
+        var pyroFodder = combatState.CreateCard<CollectorDefend>(player);
+        var pyro = combatState.CreateCard<Pyromancy>(player);
+        await CardPileCmd.Add(pyroFodder, PileType.Hand);
+        await CardPileCmd.Add(pyro, PileType.Hand);
+        await CardCmd.AutoPlay(ctx, pyro, null, AutoPlayType.Default);
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<CracklePower>(), "Pyromancy applied CracklePower(1)");
+
+        var dlf = combatState.CreateCard<DarkLordForm>(player);
+        CardCmd.Upgrade(dlf);
+        await CardPileCmd.Add(dlf, PileType.Hand);
+        await CardCmd.AutoPlay(ctx, dlf, null, AutoPlayType.Default);
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<DarkLordFormPowerPlus>(), "DarkLordForm+ applied DarkLordFormPowerPlus(1)");
+
+        await CreatureCmd.LoseBlock(ctx, player.Creature, player.Creature.Block, null);
+        // Spend down to 2 Energy and play StashAway manually at X=2!
+        pcs.Energy = 2;
+        var stash = combatState.CreateCard<StashAway>(player);
+        await CardPileCmd.Add(stash, PileType.Hand);
+        AutoTestAssert.True(stash.TryManualPlay(null), "Play StashAway at X=2");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(8, player.Creature.Block, "StashAway at X=2 granted 2 x 4 = 8 Block");
+        AutoTestAssert.Equal(2, player.Creature.GetPowerAmount<NextTurnReservePower>(), "StashAway at X=2 applied NextTurnReservePower(2)");
+
+        await DownfallAutoTestRunner.EndTurnAndWaitForRoundAsync(player, combatState.RoundNumber + 1);
+        // Next turn: NextTurnReserve(2) + Crackle(1) = 3 Reserves! DarkLordForm+ played YouAreMine+ (1 Weak, 1 Vuln, 8 Doom)! CoffinNail+6 returned to Hand!
+        AutoTestAssert.True(CollectorMechanics.GetReserves(player) >= 3, $"Next turn Reserves >= 3 from StashAway(2) + Crackle(1) (got {CollectorMechanics.GetReserves(player)})");
+        AutoTestAssert.True(CollectorMechanics.IsAfflicted(enemy), "DarkLordForm+ played YouAreMine+ making enemy Afflicted");
+        AutoTestAssert.Equal(8, enemy.GetPowerAmount<CollectorDoomPower>(), "DarkLordForm+ YouAreMine+ applied 8 Doom");
+        AutoTestAssert.True(!pcs.DiscardPile.Cards.Any(c => c is YouAreMine), "DarkLordForm+ did not bloat Discard Pile with YouAreMine+");
+        var returnedCoffin = AutoTestAssert.NotNull(pcs.Hand.Cards.OfType<CoffinNail>().FirstOrDefault(), "CoffinNail returned to Hand next turn via AddCopyNextTurnPower");
+        AutoTestAssert.Equal(12m, returnedCoffin.DynamicVars.Damage.BaseValue, "Returned CoffinNail has 6 + 6 = 12 base damage");
+    }
 }

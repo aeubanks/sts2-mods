@@ -11,6 +11,11 @@ using MegaCrit.Sts2.Core.Models;
 namespace Downfall.Collector.Powers;
 
 /// <summary>
+/// Marker interface for cards (e.g. Finger of Death) whose Energy cost must be paid strictly from Reserves.
+/// </summary>
+public interface IReservesOnlyCard;
+
+/// <summary>
 /// Reserves (ReservesPower): Persistent extra Energy stored across turns.
 /// Uses the exact algebraic identity R_new = min(R, (E + R) - spent):
 /// GainReservesAsync adds Amount to both ReservesPower and pcs.Energy so regular Energy is spent first
@@ -44,6 +49,17 @@ public sealed class ReservesPower : CollectorPower
     {
         if (card.Owner != Owner.Player)
             return;
+
+        if (card is IReservesOnlyCard && amount > 0 && Amount > 0 && Owner.IsAlive && !CombatManager.Instance.IsOverOrEnding)
+        {
+            int deduct = Math.Min(amount, Amount);
+            if (deduct >= Amount)
+            {
+                await PowerCmd.Remove(this);
+                return;
+            }
+            await PowerCmd.ModifyAmount(new ThrowingPlayerChoiceContext(), this, -deduct, null, null);
+        }
 
         await ClampToCurrentEnergyAsync();
     }

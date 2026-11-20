@@ -616,5 +616,20 @@
   "DOWNFALL-LANTERN_FLARE_POWER.smartDescription": "At the end of its turn, gains [blue]{Amount}[/blue] [gold]Doom[/gold].",
   "DOWNFALL-SUFFERING_POWER.title": "Suffering",
   "DOWNFALL-SUFFERING_POWER.description": "Whenever you apply [gold]Weak[/gold] or [gold]Vulnerable[/gold] to an enemy, also apply [gold]Doom[/gold] to them.",
-  "DOWNFALL-SUFFERING_POWER.smartDescription": "Whenever you apply [gold]Weak[/gold] or [gold]Vulnerable[/gold] to an enemy, also apply [blue]{Amount}[/blue] [gold]Doom[/gold] to them."
+  "DOWNFALL-SUFFERING_POWER.smartDescription": "Whenever you apply [gold]Weak[/gold] or [gold]Vulnerable[/gold] to an enemy, also apply [blue]{Amount}[/blue] [gold]Doom[/gold] to them.",
+  "DOWNFALL-CRACKLE_POWER.title": "Crackle",
+  "DOWNFALL-CRACKLE_POWER.description": "At the start of your turn, gain [gold]Reserves[/gold].",
+  "DOWNFALL-CRACKLE_POWER.smartDescription": "At the start of your turn, gain [blue]{Amount}[/blue] {Amount:plural:[gold]Reserve[/gold]|[gold]Reserves[/gold]}.",
+  "DOWNFALL-DARK_LORD_FORM_POWER.title": "Dark Lord Form",
+  "DOWNFALL-DARK_LORD_FORM_POWER.description": "At the start of your turn, play [gold]You Are Mine[/gold] on a random enemy.",
+  "DOWNFALL-DARK_LORD_FORM_POWER.smartDescription": "At the start of your turn, play {Amount:plural:[gold]You Are Mine[/gold]|[blue]{}[/blue] copies of [gold]You Are Mine[/gold]} on random enemies.",
+  "DOWNFALL-DARK_LORD_FORM_POWER_PLUS.title": "Dark Lord Form+",
+  "DOWNFALL-DARK_LORD_FORM_POWER_PLUS.description": "At the start of your turn, play [gold]You Are Mine+[/gold] on a random enemy.",
+  "DOWNFALL-DARK_LORD_FORM_POWER_PLUS.smartDescription": "At the start of your turn, play {Amount:plural:[gold]You Are Mine+[/gold]|[blue]{}[/blue] copies of [gold]You Are Mine+[/gold]} on random enemies.",
+  "DOWNFALL-OMEN_POWER.title": "Omen",
+  "DOWNFALL-OMEN_POWER.description": "Whenever you play a [gold]Collected[/gold] card, gain [gold]Strength[/gold].",
+  "DOWNFALL-OMEN_POWER.smartDescription": "Whenever you play a [gold]Collected[/gold] card, gain [blue]{Amount}[/blue] [gold]Strength[/gold].",
+  "DOWNFALL-SHOOTING_STAR_POWER.title": "Shooting Star",
+  "DOWNFALL-SHOOTING_STAR_POWER.description": "The first time you [gold]Pyre[/gold] an Attack each turn, add a copy of it into your [gold]Hand[/gold]. It costs [blue]0[/blue] until played.",
+  "DOWNFALL-SHOOTING_STAR_POWER.smartDescription": "The first {Amount:plural:time|[blue]{}[/blue] times} you [gold]Pyre[/gold] an Attack each turn, add a copy of it into your [gold]Hand[/gold]. It costs [blue]0[/blue] until played."
 }
