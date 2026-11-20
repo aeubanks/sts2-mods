@@ -568,5 +568,20 @@
   "DOWNFALL-CLEAN_CODE_POWER.smartDescription": "Remove all [gold]Compile[/gold] [red]Error[/red] effects from [gold]Encoded[/gold] cards. Lasts for [blue]{Amount}[/blue] more {Amount:plural:[gold]Function[/gold]|[gold]Functions[/gold]}.",
   "DOWNFALL-FREE_FUNCTION_POWER.title": "Free Function",
   "DOWNFALL-FREE_FUNCTION_POWER.description": "The next [gold]Function[/gold] you create costs [blue]0[/blue] until played.",
-  "DOWNFALL-FREE_FUNCTION_POWER.smartDescription": "The next [blue]{Amount}[/blue] {Amount:plural:[gold]Function[/gold] you create costs|[gold]Functions[/gold] you create cost} [blue]0[/blue] until played."
+  "DOWNFALL-FREE_FUNCTION_POWER.smartDescription": "The next [blue]{Amount}[/blue] {Amount:plural:[gold]Function[/gold] you create costs|[gold]Functions[/gold] you create cost} [blue]0[/blue] until played.",
+  "DOWNFALL-COLLECTOR_DOOM_POWER.title": "Doom",
+  "DOWNFALL-COLLECTOR_DOOM_POWER.description": "At the start of its turn, loses HP equal to [gold]Doom[/gold], then removes [gold]Doom[/gold] unless [gold]Afflicted[/gold].",
+  "DOWNFALL-COLLECTOR_DOOM_POWER.smartDescription": "At the start of its turn, loses [blue]{EffectiveDamage}[/blue] HP, removing all [gold]Doom[/gold] unless [gold]Afflicted[/gold].",
+  "DOWNFALL-COLLECTOR_DEMISE_POWER.title": "Demise",
+  "DOWNFALL-COLLECTOR_DEMISE_POWER.description": "Prevents [gold]Doom[/gold] from being removed when it triggers.",
+  "DOWNFALL-COLLECTOR_DEMISE_POWER.smartDescription": "Prevents [gold]Doom[/gold] from being removed the next [blue]{Amount}[/blue] {Amount:plural:time|times} it triggers without being [gold]Afflicted[/gold].",
+  "DOWNFALL-RESERVES_POWER.title": "Reserves",
+  "DOWNFALL-RESERVES_POWER.description": "Extra Energy that persists between turns and is spent after your normal Energy.",
+  "DOWNFALL-RESERVES_POWER.smartDescription": "You have [blue]{Amount}[/blue] {Amount:plural:[gold]Reserve[/gold]|[gold]Reserves[/gold]} stored for this and future turns.",
+  "DOWNFALL-NEXT_TURN_RESERVE_POWER.title": "Next Turn Reserve",
+  "DOWNFALL-NEXT_TURN_RESERVE_POWER.description": "At the start of your next turn, gain [gold]Reserves[/gold].",
+  "DOWNFALL-NEXT_TURN_RESERVE_POWER.smartDescription": "At the start of your next turn, gain [blue]{Amount}[/blue] {Amount:plural:[gold]Reserve[/gold]|[gold]Reserves[/gold]}.",
+  "DOWNFALL-STRENGTH_OVER_TURNS_POWER.title": "Empower",
+  "DOWNFALL-STRENGTH_OVER_TURNS_POWER.description": "At the start of your next turns, gain [gold]Strength[/gold].",
+  "DOWNFALL-STRENGTH_OVER_TURNS_POWER.smartDescription": "At the start of your next [blue]{Amount}[/blue] {Amount:plural:turn|turns}, gain [blue]{StrengthPerTurn}[/blue] [gold]Strength[/gold]."
 }

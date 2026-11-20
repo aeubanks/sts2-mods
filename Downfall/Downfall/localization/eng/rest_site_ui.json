@@ -3,5 +3,9 @@
   "OPTION_DOWNFALL_SOCKET_GEM.description": "Socket a [gold]Gem[/gold] from your deck into an open socket on another card.",
   "OPTION_DOWNFALL_SOCKET_GEM.descriptionDisabled": "Requires a [gold]Gem[/gold] and a card with an open socket in your deck.",
   "OPTION_DOWNFALL_SOCKET_GEM.selectGemPrompt": "Choose a Gem to socket.",
-  "OPTION_DOWNFALL_SOCKET_GEM.selectTargetPrompt": "Choose a card with an open socket."
+  "OPTION_DOWNFALL_SOCKET_GEM.selectTargetPrompt": "Choose a card with an open socket.",
+  "OPTION_DOWNFALL_RELEASE.name": "Release",
+  "OPTION_DOWNFALL_RELEASE.description": "Remove a card from your [gold]Collection[/gold] and gain [blue]40[/blue] Gold.",
+  "OPTION_DOWNFALL_RELEASE.descriptionDisabled": "Requires at least [blue]1[/blue] card in your [gold]Collection[/gold].",
+  "OPTION_DOWNFALL_RELEASE.selectPrompt": "Choose a Collected card to Release for 40 Gold."
 }

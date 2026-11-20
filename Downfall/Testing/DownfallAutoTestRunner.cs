@@ -230,6 +230,8 @@ internal static class DownfallAutoTestRunner
                 ("AutomatonUncommonBatch2InCombat", AutomatonTests.TestUncommonBatch2InCombat),
                 ("AutomatonRareCardsInCombat", AutomatonTests.TestRareCardsInCombat),
                 ("AutomatonRelicsAndPotionsInCombat", AutomatonTests.TestRelicsAndPotionsInCombat),
+                ("CollectorVisualsRuntime", CollectorTests.TestVisualsRuntime),
+                ("CollectorStarterMechanicsAndCollection", CollectorTests.TestStarterMechanicsAndCollection),
             ];
 
             int matchedIndex = 0;
@@ -812,6 +814,25 @@ internal static class DownfallAutoTestRunner
         AutoTestAssert.True(new LocString("cards", "DOWNFALL-FIND_AND_REPLACE.selectionScreenPrompt").Exists(), "Missing FindAndReplace prompt");
         AutoTestAssert.True(new LocString("cards", "DOWNFALL-MUTATOR.selectionScreenPrompt").Exists(), "Missing Mutator prompt");
         AutoTestAssert.True(new LocString("cards", "DOWNFALL-TINKERERS_TOOLBOX.selectionScreenPrompt").Exists(), "Missing TinkerersToolbox prompt");
+        foreach (var collectorTipKey in new[]
+        {
+            "DOWNFALL-COLLECTOR_PYRE",
+            "DOWNFALL-COLLECTOR_AFFLICTED",
+            "DOWNFALL-COLLECTOR_COLLECTED",
+            "DOWNFALL-COLLECTOR_TORCHHEAD",
+            "DOWNFALL-COLLECTOR_COLLECTION_STATUS"
+        })
+        {
+            AutoTestAssert.True(new LocString("gameplay_ui", $"{collectorTipKey}.title").Exists(), $"Missing {collectorTipKey}.title");
+            AutoTestAssert.True(new LocString("gameplay_ui", $"{collectorTipKey}.description").Exists(), $"Missing {collectorTipKey}.description");
+        }
+        AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-COLLECTOR_PYRE.selectPrompt").Exists(), "Missing Collector Pyre selectPrompt");
+        AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-COLLECTIBLE_REWARD.description").Exists(), "Missing CollectibleReward description");
+        AutoTestAssert.True(new LocString("rest_site_ui", "OPTION_DOWNFALL_RELEASE.name").Exists(), "Missing Release rest site name");
+        AutoTestAssert.True(new LocString("rest_site_ui", "OPTION_DOWNFALL_RELEASE.description").Exists(), "Missing Release rest site description");
+        AutoTestAssert.True(new LocString("rest_site_ui", "OPTION_DOWNFALL_RELEASE.descriptionDisabled").Exists(), "Missing Release rest site descriptionDisabled");
+        AutoTestAssert.True(new LocString("rest_site_ui", "OPTION_DOWNFALL_RELEASE.selectPrompt").Exists(), "Missing Release rest site selectPrompt");
+        AutoTestAssert.True(ResourceLoader.Exists("res://images/ui/rest_site/option_downfall_release.png"), "Missing Release rest site icon");
 
         return Task.CompletedTask;
     }

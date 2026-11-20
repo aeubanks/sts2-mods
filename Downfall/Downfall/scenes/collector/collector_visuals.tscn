@@ -1,0 +1,20 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Texture2D" path="res://Downfall/images/collector/char/collector.png" id="1_collector"]
+
+[node name="CollectorVisuals" type="Node2D"]
+
+[node name="Visuals" type="Sprite2D" parent="."]
+unique_name_in_owner = true
+position = Vector2(0, -196)
+texture = ExtResource("1_collector")
+
+[node name="Bounds" type="Control" parent="."]
+unique_name_in_owner = true
+layout_mode = 3
+anchors_preset = 0
+mouse_filter = 2
+offset_left = -150.0
+offset_top = -390.0
+offset_right = 150.0
+offset_bottom = 0.0

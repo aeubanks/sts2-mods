@@ -76,5 +76,17 @@
   "DOWNFALL-BRONZE_CYCLE.title": "Cycle",
   "DOWNFALL-BRONZE_CYCLE.description": "Discard a card, drawing a new card to replace it.",
   "DOWNFALL-BRONZE_BLUR.title": "Blur",
-  "DOWNFALL-BRONZE_BLUR.description": "Do not lose [gold]Block[/gold] at the start of your next turn."
+  "DOWNFALL-BRONZE_BLUR.description": "Do not lose [gold]Block[/gold] at the start of your next turn.",
+  "DOWNFALL-COLLECTOR_PYRE.title": "Pyre",
+  "DOWNFALL-COLLECTOR_PYRE.description": "Requires [gold]Exhausting[/gold] another card from your [gold]Hand[/gold] to play.",
+  "DOWNFALL-COLLECTOR_PYRE.selectPrompt": "Choose a card from your Hand to Pyre (Exhaust).",
+  "DOWNFALL-COLLECTOR_AFFLICTED.title": "Afflicted",
+  "DOWNFALL-COLLECTOR_AFFLICTED.description": "An enemy with both [gold]Weak[/gold] and [gold]Vulnerable[/gold]. [gold]Doom[/gold] is not removed when it triggers on an [gold]Afflicted[/gold] enemy.",
+  "DOWNFALL-COLLECTOR_COLLECTED.title": "Collected",
+  "DOWNFALL-COLLECTOR_COLLECTED.description": "A soul claimed into your [gold]Collection[/gold]. Each turn, you draw a card from your [gold]Collection[/gold]. Collected cards [gold]Exhaust[/gold].",
+  "DOWNFALL-COLLECTOR_TORCHHEAD.title": "Torchhead",
+  "DOWNFALL-COLLECTOR_TORCHHEAD.description": "While you have [gold]Temp HP[/gold], your Torchhead triggers its gained effects whenever you play an Attack.",
+  "DOWNFALL-COLLECTOR_COLLECTION_STATUS.title": "Essence & Collection",
+  "DOWNFALL-COLLECTOR_COLLECTION_STATUS.description": "Essence: [blue]{Essence}[/blue]\nCollected cards: [blue]{Count}[/blue]\nSpend [blue]3[/blue] Essence after combat to claim a [gold]Collected[/gold] card.",
+  "DOWNFALL-COLLECTIBLE_REWARD.description": "Collect [gold]{CardName}[/gold] ([blue]{Cost}[/blue] Essence)"
 }

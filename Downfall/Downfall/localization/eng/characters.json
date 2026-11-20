@@ -133,5 +133,20 @@
   "DOWNFALL-THE_AUTOMATON.goldMonologue": "ALL RESOURCES -> ACQUIRED.",
   "DOWNFALL-THE_AUTOMATON.banter": "ALL WEAPONS -> 100%.",
   "DOWNFALL-THE_AUTOMATON.bestiaryQuote": "The ancient bronze construct guarding the upper City.",
-  "DOWNFALL-THE_AUTOMATON.aromaPrinciple": "Warm oil, ozone, and forged bronze."
+  "DOWNFALL-THE_AUTOMATON.aromaPrinciple": "Warm oil, ozone, and forged bronze.",
+  "DOWNFALL-THE_COLLECTOR.title": "The Collector",
+  "DOWNFALL-THE_COLLECTOR.titleObject": "the Collector",
+  "DOWNFALL-THE_COLLECTOR.shortTitle": "Collector",
+  "DOWNFALL-THE_COLLECTOR.description": "The notorious Sorceress of the City.\nClaims souls and trinkets alike.",
+  "DOWNFALL-THE_COLLECTOR.pronounObject": "her",
+  "DOWNFALL-THE_COLLECTOR.possessiveAdjective": "her",
+  "DOWNFALL-THE_COLLECTOR.pronounPossessive": "hers",
+  "DOWNFALL-THE_COLLECTOR.pronounSubject": "she",
+  "DOWNFALL-THE_COLLECTOR.cardsModifierTitle": "Collector's Cards",
+  "DOWNFALL-THE_COLLECTOR.cardsModifierDescription": "Collector cards can now appear in rewards and shops.",
+  "DOWNFALL-THE_COLLECTOR.eventDeathPrevention": "MY COLLECTION... IS NOT YET COMPLETE.",
+  "DOWNFALL-THE_COLLECTOR.goldMonologue": "Another glittering trinket for my hoard.",
+  "DOWNFALL-THE_COLLECTOR.banter": "YOU ARE MINE!",
+  "DOWNFALL-THE_COLLECTOR.bestiaryQuote": "The spectral sorceress reigning over the City with green pyre and bound souls.",
+  "DOWNFALL-THE_COLLECTOR.aromaPrinciple": "Emerald smoke, old velvet, and smoldering kindling."
 }

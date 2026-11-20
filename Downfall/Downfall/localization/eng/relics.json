@@ -334,5 +334,12 @@
   "DOWNFALL-BRONZE_IDOL.flavor": "An ancient, weaponised antivirus - who knows who made it, and why?",
   "DOWNFALL-DONUS_WASHERS.title": "Donu's Washers",
   "DOWNFALL-DONUS_WASHERS.description": "At the start of combat, gain {Energy:energyIcons()} and [gold]Insert[/gold] [blue]1[/blue] [gold]Void[/gold] into your [gold]Draw Pile[/gold].",
-  "DOWNFALL-DONUS_WASHERS.flavor": "It is rather clear why Donu collects these."
+  "DOWNFALL-DONUS_WASHERS.flavor": "It is rather clear why Donu collects these.",
+  "SEA_GLASS.DOWNFALL-THE_COLLECTOR.title": "Sea Glass (Collector)",
+  "DOWNFALL-EMERALD_TORCH.title": "Emerald Torch",
+  "DOWNFALL-EMERALD_TORCH.description": "Start each combat with [blue]1[/blue] [gold]Reserve[/gold].\nClaim [gold]Essence[/gold] and [gold]Collected[/gold] cards after combat.",
+  "DOWNFALL-EMERALD_TORCH.flavor": "The green flame never fades.",
+  "DOWNFALL-PRISMATIC_TORCH.title": "Prismatic Torch",
+  "DOWNFALL-PRISMATIC_TORCH.description": "Replaces [gold]Emerald Torch[/gold].\nAt the start of each combat, add an [gold]Ember[/gold] to your [gold]Hand[/gold] and gain [blue]1[/blue] [gold]Reserve[/gold]. The first time you [gold]Exhaust[/gold] an [gold]Ember[/gold] each turn, gain [blue]1[/blue] [gold]Reserve[/gold].",
+  "DOWNFALL-PRISMATIC_TORCH.flavor": "A rainbow of pyres dancing upon a single staff."
 }
