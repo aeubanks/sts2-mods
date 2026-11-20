@@ -1,5 +1,6 @@
 using BaseLib.Utils;
 using Downfall.Core;
+using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.GameActions.Multiplayer;
 using MegaCrit.Sts2.Core.HoverTips;
@@ -73,8 +74,12 @@ public abstract class SneckoCard(
 
     protected async Task<bool> TryTriggerOverflowAsync(PlayerChoiceContext choiceContext)
     {
-        if (!IsOverflowActiveNow)
+        if (!IsOverflowActiveNow
+            || !Owner.Creature.IsAlive
+            || CombatManager.Instance.IsOverOrEnding)
+        {
             return false;
+        }
 
         await SneckoMechanics.NotifyOverflowTriggeredAsync(choiceContext, Owner, this);
         return true;
@@ -148,6 +153,7 @@ public abstract class SneckoCard(
         {
             _overflowCaptured = false;
             _overflowWhenPlayed = false;
+            IsTyphoonAutoPlay = false;
         }
         return Task.CompletedTask;
     }
