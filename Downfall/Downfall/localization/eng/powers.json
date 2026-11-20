@@ -472,5 +472,8 @@
   "DOWNFALL-STASIS_ENGINE_POWER.smartDescription": "When you play the 3rd 0-Cost card in a single turn, gain [blue]{Amount}[/blue] Energy and draw [blue]{Amount}[/blue] {Amount:plural:card|cards}.",
   "DOWNFALL-GUARDIAN_STUNNED_POWER.title": "Stunned",
   "DOWNFALL-GUARDIAN_STUNNED_POWER.description": "Skip your next turn.",
-  "DOWNFALL-GUARDIAN_STUNNED_POWER.smartDescription": "Skip your next {Amount:plural:turn|[blue]{}[/blue] turns}."
+  "DOWNFALL-GUARDIAN_STUNNED_POWER.smartDescription": "Skip your next {Amount:plural:turn|[blue]{}[/blue] turns}.",
+  "DOWNFALL-BLOCK_ON_CARD_USE_POWER.title": "Armorer's Tincture",
+  "DOWNFALL-BLOCK_ON_CARD_USE_POWER.description": "Whenever you play a card this turn, gain [gold]Block[/gold].",
+  "DOWNFALL-BLOCK_ON_CARD_USE_POWER.smartDescription": "Whenever you play a card this turn, gain [blue]{Amount}[/blue] [gold]Block[/gold]."
 }

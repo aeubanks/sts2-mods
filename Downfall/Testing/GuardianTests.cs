@@ -11,6 +11,7 @@ using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Commands;
 using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Entities.Players;
+using MegaCrit.Sts2.Core.Entities.Relics;
 using MegaCrit.Sts2.Core.Entities.RestSite;
 using MegaCrit.Sts2.Core.GameActions.Multiplayer;
 using MegaCrit.Sts2.Core.Models;
@@ -1473,6 +1474,197 @@ internal static class GuardianTests
         var rewardCards = addedGemReward.Cards.ToList();
         AutoTestAssert.Equal(1, rewardCards.Count, "GemFinder CardReward offers exactly 1 random Gem");
         AutoTestAssert.True(rewardCards[0] is GuardianCard { IsGem: true }, "GemFinder reward card is a Gem");
+    }
+
+    internal static async Task TestRelicsAndPotionsInCombat()
+    {
+        var (player, runState, combatState) = await DownfallAutoTestRunner.StartCombatAsync<TheGuardian>("GUARDIAN_RELPOT");
+        var ctx = new ThrowingPlayerChoiceContext();
+
+        // 1. Verify Relic Pool composition: 2 Starter (ModeShifter + ModeShifterPlus) + 9 pool relics (no Boss/Event relics)
+        var guardianRelics = ModelDb.RelicPool<GuardianRelicPool>().AllRelics.ToList();
+        AutoTestAssert.True(
+            guardianRelics.All(r => r.Rarity is RelicRarity.Starter or RelicRarity.Common or RelicRarity.Uncommon or RelicRarity.Rare or RelicRarity.Shop),
+            "Guardian relic pool contains only Starter/Common/Uncommon/Rare/Shop relics");
+        AutoTestAssert.Equal(11, guardianRelics.Count, "Guardian relic pool has 2 Starter (ModeShifter + ModeShifterPlus) + 9 pool relics");
+
+        // 2. Obtain all 9 Guardian Relics and verify pickup + [SavedProperty] serialization + Bottled deck index shift!
+        await RelicCmd.Obtain<DefensiveModeMoreBlock>(player);
+        var cryo = await RelicCmd.Obtain<StasisUpgradeRelic>(player);
+
+        var gun = await RelicCmd.Obtain<GemstoneGun>(player);
+        var loadedGems = GuardianGems.ParseCsv(gun.LoadedGemsCsv);
+        AutoTestAssert.Equal(3, loadedGems.Count, "GemstoneGun loaded 3 chosen Gems on pickup");
+        var gunRoundTrip = (GemstoneGun)RelicModel.FromSerializable(gun.ToSerializable());
+        AutoTestAssert.Equal(gun.LoadedGemsCsv, gunRoundTrip.LoadedGemsCsv, "GemstoneGun [SavedProperty] round-trips LoadedGemsCsv");
+
+        int deckBeforeSack = player.Deck.Cards.Count;
+        await RelicCmd.Obtain<SackOfGems>(player);
+        AutoTestAssert.True(player.Deck.Cards.Count > deckBeforeSack, "SackOfGems added chosen Gems to player Deck");
+
+        var pickAxe = await RelicCmd.Obtain<PickAxe>(player);
+        var sentry = await RelicCmd.Obtain<PocketSentry>(player);
+        var codex = await RelicCmd.Obtain<StasisCodex>(player);
+
+        // Pick two distinct deck cards (index >= 1 so we can test removing index 0 shifts BottledDeckIndex by -1!)
+        var removableCard = player.Deck.Cards[0];
+        var deckCard1 = player.Deck.Cards[1];
+        var deckCard2 = player.Deck.Cards[2];
+        // Ensure deckCard1 is an upgradable non-upgraded card so we also verify Cryo Chamber upgrades it on Turn 1 Stasis entry!
+        var freshStrikeForBottle = runState.CreateCard<GuardianStrike>(player);
+        await CardPileCmd.Add(freshStrikeForBottle, PileType.Deck);
+        deckCard1 = freshStrikeForBottle;
+
+        BottledStasis bottledStasis;
+        using (DownfallAutoTestRunner.PreferCards(c => ReferenceEquals(c, deckCard1)))
+        {
+            bottledStasis = await RelicCmd.Obtain<BottledStasis>(player);
+        }
+        BottledAnomaly bottledAnomaly;
+        using (DownfallAutoTestRunner.PreferCards(c => ReferenceEquals(c, deckCard2)))
+        {
+            bottledAnomaly = await RelicCmd.Obtain<BottledAnomaly>(player);
+        }
+        AutoTestAssert.True(bottledStasis.BottledDeckIndex >= 1, "BottledStasis recorded BottledDeckIndex >= 1");
+        AutoTestAssert.True(bottledAnomaly.BottledDeckIndex >= 1, "BottledAnomaly recorded BottledDeckIndex >= 1");
+        AutoTestAssert.True(bottledStasis.BottledDeckIndex != bottledAnomaly.BottledDeckIndex, "BottledAnomaly picked a distinct deck card from BottledStasis");
+
+        // Verify [SavedProperty] round-trip & lower-index deck removal shifts BottledDeckIndex by -1 without disabling!
+        int bsIdxBeforeRemove = bottledStasis.BottledDeckIndex;
+        int baIdxBeforeRemove = bottledAnomaly.BottledDeckIndex;
+        await CardPileCmd.RemoveFromDeck(removableCard);
+        AutoTestAssert.Equal(bsIdxBeforeRemove - 1, bottledStasis.BottledDeckIndex, "Removing lower-index deck card decremented BottledStasis index");
+        AutoTestAssert.Equal(baIdxBeforeRemove - 1, bottledAnomaly.BottledDeckIndex, "Removing lower-index deck card decremented BottledAnomaly index");
+        AutoTestAssert.Equal(RelicStatus.Normal, bottledStasis.Status, "BottledStasis remains Normal after unrelated card removal");
+
+        var bsRoundTrip = (BottledStasis)RelicModel.FromSerializable(bottledStasis.ToSerializable());
+        AutoTestAssert.Equal(bottledStasis.BottledDeckIndex, bsRoundTrip.BottledDeckIndex, "BottledStasis [SavedProperty] round-trips BottledDeckIndex");
+
+        // Verify PickAxe does NOT trigger in non-Elite combat room
+        var initialRoom = AutoTestAssert.NotNull(runState.CurrentRoom as CombatRoom, "Initial CombatRoom");
+        int initialRewardsBefore = initialRoom.ExtraRewards.TryGetValue(player, out var initEx) ? initEx.Count : 0;
+        await pickAxe.AfterCombatVictory(initialRoom);
+        int initialRewardsAfter = initialRoom.ExtraRewards.TryGetValue(player, out var initAfter) ? initAfter.Count : 0;
+        AutoTestAssert.Equal(initialRewardsBefore, initialRewardsAfter, "PickAxe did not trigger in normal Monster room");
+
+        // 3. Enter a REAL fresh RoomType.Elite CombatRoom so ALL combat-entry hooks fire naturally!
+        var eliteEncounter = ModelDb.AllEncounters.First(e => e.RoomType == RoomType.Elite).ToMutable();
+        await RunManager.Instance.EnterRoomDebug(
+            RoomType.Elite,
+            MegaCrit.Sts2.Core.Map.MapPointType.Elite,
+            eliteEncounter,
+            showTransition: false);
+        var eliteRoom = AutoTestAssert.NotNull(runState.CurrentRoom as CombatRoom, "Fresh Elite CombatRoom");
+        AutoTestAssert.Equal(RoomType.Elite, eliteRoom.RoomType, "Fresh room is RoomType.Elite");
+        combatState = AutoTestAssert.NotNull(eliteRoom.CombatState, "Fresh Elite CombatState");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        var pcs = AutoTestAssert.NotNull(player.PlayerCombatState, "Fresh PlayerCombatState");
+        foreach (var enemy in combatState.HittableEnemies)
+            await CreatureCmd.GainMaxHp(enemy, 1500m);
+
+        // Assert Round-1 naturally-triggered state:
+        // (a) StasisUpgradeRelic.BeforeSideTurnStart added +1 Orb Slot (3 -> 4)!
+        AutoTestAssert.Equal(4, pcs.OrbQueue.Capacity, "Cryo Chamber naturally added +1 Stasis slot on Round 1 (3 -> 4)");
+        // (b) BottledStasis.BeforeHandDraw placed deckCard1 into Stasis (upgraded by Cryo Chamber, PlacedBeforeTurnOne=true, did NOT tick on Turn 1 -> cost 1 means TurnsRemaining == 2)!
+        var bsOrb = GuardianMechanics.GetStasisOrbs(player).FirstOrDefault(o => ReferenceEquals(o.StasisCard?.DeckVersion, deckCard1));
+        AutoTestAssert.NotNull(bsOrb, "BottledStasis naturally placed bottled Strike into Stasis on Round 1");
+        AutoTestAssert.True(bsOrb!.PlacedBeforeTurnOne, "BottledStasis StasisOrb marked PlacedBeforeTurnOne=true");
+        AutoTestAssert.Equal(2, bsOrb.TurnsRemaining, "BottledStasis StasisOrb did NOT tick on Turn 1 (remained at 2 turns)");
+        AutoTestAssert.True(bsOrb.StasisCard!.IsUpgraded, "Cryo Chamber naturally upgraded bottled Strike upon entering Stasis");
+        // (c) BottledAnomaly.BeforeHandDraw detached deckCard2 from Draw Pile!
+        bool anomalyInAnyPile = PileType.Draw.GetPile(player).Cards
+            .Concat(PileType.Hand.GetPile(player).Cards)
+            .Concat(PileType.Discard.GetPile(player).Cards)
+            .Any(c => ReferenceEquals(c.DeckVersion, deckCard2));
+        AutoTestAssert.True(!anomalyInAnyPile, "BottledAnomaly naturally removed bottled card from Draw Pile on Round 1");
+        // (d) GemstoneGun.AfterPlayerTurnStart added GemstoneGunCard with 3 Gems to Hand!
+        var gunCard = pcs.Hand.Cards.OfType<GemstoneGunCard>().FirstOrDefault();
+        AutoTestAssert.NotNull(gunCard, "GemstoneGun naturally added GemstoneGunCard to Hand on Round 1");
+        AutoTestAssert.Equal(3, gunCard!.GetSocketedGems().Count, "GemstoneGunCard has all 3 loaded Gems socketed");
+        AutoTestAssert.True(gunCard.TryManualPlay(null), "Play GemstoneGunCard");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(PileType.Exhaust, gunCard.Pile?.Type, "GemstoneGunCard Exhausted after triggering all 3 Gems");
+        // (e) DefensiveModeMoreBlock adds +1 to Brace!
+        int msBefore = player.Creature.GetPowerAmount<ModeShiftPower>();
+        await GuardianMechanics.BraceAsync(ctx, player, 4);
+        AutoTestAssert.Equal(msBefore - 5, player.Creature.GetPowerAmount<ModeShiftPower>(), "DefensiveModeMoreBlock added +1 to Brace (4 -> 5)");
+        // (f) PocketSentry TurnCount == 1 on Turn 1!
+        AutoTestAssert.Equal(1, sentry.TurnCount, "PocketSentry naturally incremented TurnCount to 1 on Round 1");
+        var psRoundTrip = (PocketSentry)RelicModel.FromSerializable(sentry.ToSerializable());
+        AutoTestAssert.Equal(1, psRoundTrip.TurnCount, "PocketSentry [SavedProperty] round-trips TurnCount=1");
+
+        // 4. Advance Round 1 -> Round 2 -> Round 3 naturally:
+        //    - StasisCodex fires on Round 1 BeforeFlush (adds a card to Stasis!)
+        //    - Round 3: BottledAnomaly returns deckCard2 to Hand at 0 cost for the turn!
+        //    - Round 3: PocketSentry fires on Turn 3 (resets TurnCount -> 0, applies 1 Weak to ALL enemies)!
+        await CreatureCmd.GainBlock(player.Creature, 250m, ValueProp.Unpowered, null);
+        await DownfallAutoTestRunner.EndTurnAndWaitForRoundAsync(player, 2);
+        AutoTestAssert.True(GuardianMechanics.GetStasisOrbs(player).Count >= 2, "StasisCodex naturally placed a chosen card into Stasis at Round 1 end");
+        AutoTestAssert.Equal(2, sentry.TurnCount, "PocketSentry naturally incremented TurnCount to 2 on Round 2");
+
+        await CreatureCmd.GainBlock(player.Creature, 250m, ValueProp.Unpowered, null);
+        await DownfallAutoTestRunner.EndTurnAndWaitForRoundAsync(player, 3);
+        AutoTestAssert.Equal(0, sentry.TurnCount, "PocketSentry naturally triggered and reset TurnCount to 0 on Round 3");
+        foreach (var enemy in combatState.HittableEnemies)
+            AutoTestAssert.True(enemy.GetPowerAmount<WeakPower>() >= 1, "PocketSentry naturally applied 1 Weak to enemy on Round 3");
+        var returnedAnomaly = pcs.Hand.Cards.FirstOrDefault(c => ReferenceEquals(c.DeckVersion, deckCard2));
+        AutoTestAssert.NotNull(returnedAnomaly, "BottledAnomaly naturally returned bottled card to Hand on Round 3");
+        AutoTestAssert.Equal(0, returnedAnomaly!.EnergyCost.GetWithModifiers(CostModifiers.All), "BottledAnomaly card costs 0 for Round 3");
+
+        // 5. PickAxe adds 1-Gem CardReward on Elite victory!
+        int eliteRewardsBefore = eliteRoom.ExtraRewards.TryGetValue(player, out var elEx) ? elEx.Count : 0;
+        await pickAxe.AfterCombatVictory(eliteRoom);
+        int eliteRewardsAfter = eliteRoom.ExtraRewards.TryGetValue(player, out var elAfter) ? elAfter.Count : 0;
+        AutoTestAssert.Equal(eliteRewardsBefore + 1, eliteRewardsAfter, "PickAxe added 1 extra Gem CardReward in Elite room");
+        var pickReward = AutoTestAssert.NotNull(elAfter!.LastOrDefault() as MegaCrit.Sts2.Core.Rewards.CardReward, "PickAxe reward is CardReward");
+        AutoTestAssert.Equal(1, pickReward.Cards.Count(), "PickAxe reward offers 1 random Gem");
+
+        // 6. All 3 remaining Potions: StasisDiscoveryPotion, AcceleratePotion, BlockOnCardUsePotion!
+        await ClearHandAndRefillEnergy(player, pcs);
+        foreach (var pot in player.Potions.ToList())
+            await PotionCmd.Discard(pot);
+        foreach (var orb in GuardianMechanics.GetStasisOrbs(player))
+            await GuardianMechanics.EvokeSpecificOrbAsync(ctx, player, orb);
+        await ClearHandAndRefillEnergy(player, pcs);
+
+        var discPot = (Downfall.Guardian.Potions.StasisDiscoveryPotion)ModelDb.Potion<Downfall.Guardian.Potions.StasisDiscoveryPotion>().ToMutable();
+        await PotionCmd.TryToProcure(discPot, player);
+        discPot.EnqueueManualUse(null);
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(3, GuardianMechanics.GetStasisOrbs(player).Count, "StasisDiscoveryPotion placed 3 chosen cards into Stasis");
+
+        foreach (var orb in GuardianMechanics.GetStasisOrbs(player))
+            await GuardianMechanics.EvokeSpecificOrbAsync(ctx, player, orb);
+        await ClearHandAndRefillEnergy(player, pcs);
+        var waitCard = combatState.CreateCard<RollAttack>(player); // cost 2 -> 3 turns
+        var waitOrb = await GuardianMechanics.PlaceInStasisAsync(ctx, player, waitCard);
+        AutoTestAssert.Equal(3, waitOrb!.TurnsRemaining, "RollAttack starts at 3 turns in Stasis");
+        var accPot = (Downfall.Guardian.Potions.AcceleratePotion)ModelDb.Potion<Downfall.Guardian.Potions.AcceleratePotion>().ToMutable();
+        await PotionCmd.TryToProcure(accPot, player);
+        accPot.EnqueueManualUse(null);
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(1, waitOrb.TurnsRemaining, "AcceleratePotion Accelerated Stasis card twice (3 -> 1)");
+
+        var enemy1 = combatState.HittableEnemies[0];
+        await CreatureCmd.LoseBlock(ctx, player.Creature, player.Creature.Block, null);
+        var blockPot = (Downfall.Guardian.Potions.BlockOnCardUsePotion)ModelDb.Potion<Downfall.Guardian.Potions.BlockOnCardUsePotion>().ToMutable();
+        await PotionCmd.TryToProcure(blockPot, player);
+        blockPot.EnqueueManualUse(null);
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(4, player.Creature.GetPowerAmount<BlockOnCardUsePower>(), "BlockOnCardUsePotion applied BlockOnCardUsePower(4)");
+        var shiv = combatState.CreateCard<CrystalShiv>(player);
+        await CardPileCmd.Add(shiv, PileType.Hand);
+        AutoTestAssert.True(shiv.TryManualPlay(enemy1), "Play CrystalShiv with BlockOnCardUsePower(4)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(4, player.Creature.Block, "BlockOnCardUsePower granted 4 Block on card play");
+        await CreatureCmd.GainBlock(player.Creature, 250m, ValueProp.Unpowered, null);
+        await DownfallAutoTestRunner.EndTurnAndWaitForRoundAsync(player, 4);
+        AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<BlockOnCardUsePower>(), "BlockOnCardUsePower expired at end of turn");
+
+        // 7. Verify removing the bottled card itself from Deck disables BottledStasis cleanly!
+        await CardPileCmd.RemoveFromDeck(deckCard1);
+        AutoTestAssert.Equal(-1, bottledStasis.BottledDeckIndex, "Removing bottled card reset BottledDeckIndex to -1");
+        AutoTestAssert.Equal(RelicStatus.Disabled, bottledStasis.Status, "Removing bottled card set BottledStasis Status=Disabled");
     }
 
     internal static async Task ClearHandAndRefillEnergy(Player player, PlayerCombatState pcs)

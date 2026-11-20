@@ -47,5 +47,11 @@
   "DOWNFALL-THREE_ZERO_POTION.title": "Ooze-Infused Drink",
   "DOWNFALL-THREE_ZERO_POTION.description": "Add [blue]{Cards}[/blue] random [blue]0[/blue]-cost cards to your [gold]Hand[/gold].",
   "DOWNFALL-DEFENSIVE_MODE_POTION.title": "Polishing Oil",
-  "DOWNFALL-DEFENSIVE_MODE_POTION.description": "Gain [blue]{Block}[/blue] [gold]Block[/gold] and enter [gold]Defensive Mode[/gold] for [blue]1[/blue] turn."
+  "DOWNFALL-DEFENSIVE_MODE_POTION.description": "Gain [blue]{Block}[/blue] [gold]Block[/gold] and enter [gold]Defensive Mode[/gold] for [blue]1[/blue] turn.",
+  "DOWNFALL-ACCELERATE_POTION.title": "Emergency Potion",
+  "DOWNFALL-ACCELERATE_POTION.description": "[gold]Accelerate[/gold] ALL cards in [gold]Stasis[/gold] [blue]{AccelerateCount}[/blue] times.",
+  "DOWNFALL-BLOCK_ON_CARD_USE_POTION.title": "Armorer's Tincture",
+  "DOWNFALL-BLOCK_ON_CARD_USE_POTION.description": "Gain [blue]{BlockOnCardUsePower}[/blue] [gold]Block[/gold] each time you play a card this turn.",
+  "DOWNFALL-STASIS_DISCOVERY_POTION.title": "Quantum Elixir",
+  "DOWNFALL-STASIS_DISCOVERY_POTION.description": "Gain [gold]Stasis[/gold] slots until you have [blue]{Count}[/blue].\nRepeat [blue]{Count}[/blue] times: choose [blue]1[/blue] of [blue]3[/blue] cards to place into [gold]Stasis[/gold]."
 }

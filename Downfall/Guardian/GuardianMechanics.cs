@@ -37,9 +37,10 @@ internal interface IModeShiftTriggerListener
     Task OnModeShiftTriggeredAsync(PlayerChoiceContext choiceContext, Player player);
 }
 
-internal interface IDefensiveModeBlockBonusProvider
+internal interface IBraceBonusProvider
 {
-    int ExtraDefensiveModeBlock { get; }
+    int ExtraBraceAmount { get; }
+    void OnBraceBonusApplied() { }
 }
 
 internal static class GuardianMechanics
@@ -101,11 +102,6 @@ internal static class GuardianMechanics
             card.RemoveFromCurrentPile();
         }
 
-        if (card.IsUpgradable && player.Relics.OfType<IStasisUpgradeProvider>().Any(p => p.ShouldUpgradeOnStasis))
-        {
-            CardCmd.Upgrade(card);
-        }
-
         var orb = (StasisOrb)ModelDb.Orb<StasisOrb>().ToMutable();
         orb.InitializeCard(card, isSelfStasis, placedBeforeTurnOne);
 
@@ -120,6 +116,11 @@ internal static class GuardianMechanics
                 await CardPileCmd.Add(card, fallback);
             }
             return null;
+        }
+
+        if (card.IsUpgradable && player.Relics.OfType<IStasisUpgradeProvider>().Any(p => p.ShouldUpgradeOnStasis))
+        {
+            CardCmd.Upgrade(card);
         }
 
         if (card is IInStasisCard inStasis)
@@ -231,6 +232,17 @@ internal static class GuardianMechanics
         if (amount <= 0 || !player.Creature.IsAlive || CombatManager.Instance.IsOverOrEnding)
             return;
 
+        int bonus = 0;
+        foreach (var provider in player.Relics.OfType<IBraceBonusProvider>())
+        {
+            if (provider.ExtraBraceAmount > 0)
+            {
+                bonus += provider.ExtraBraceAmount;
+                provider.OnBraceBonusApplied();
+            }
+        }
+        int totalAmount = amount + bonus;
+
         var modeShift = player.Creature.GetPower<ModeShiftPower>();
         if (modeShift is null)
         {
@@ -240,7 +252,7 @@ internal static class GuardianMechanics
 
         if (modeShift is not null)
         {
-            await modeShift.ReduceAsync(choiceContext, amount);
+            await modeShift.ReduceAsync(choiceContext, totalAmount);
         }
     }
 
@@ -256,8 +268,7 @@ internal static class GuardianMechanics
 
         if (baseBlock > 0)
         {
-            int bonusBlock = player.Relics.OfType<IDefensiveModeBlockBonusProvider>().Sum(r => r.ExtraDefensiveModeBlock);
-            await CreatureCmd.GainBlock(player.Creature, baseBlock + bonusBlock, ValueProp.Unpowered, null);
+            await CreatureCmd.GainBlock(player.Creature, baseBlock, ValueProp.Unpowered, null);
         }
 
         if (!player.Creature.IsAlive || CombatManager.Instance.IsOverOrEnding)
@@ -337,6 +348,43 @@ internal static class GuardianMechanics
         if (ResourceLoader.Load<Texture2D>(path) is { } texture)
         {
             sprite.Texture = texture;
+        }
+    }
+
+    internal static async Task ChooseAndPlaceRandomCardInStasisAsync(
+        PlayerChoiceContext choiceContext,
+        Player player,
+        int choiceCount = 3,
+        bool canSkip = false)
+    {
+        if (!player.Creature.IsAlive
+            || CombatManager.Instance.IsOverOrEnding
+            || player.Creature.CombatState is not { } combatState
+            || !CanPlaceInStasis(player))
+        {
+            return;
+        }
+
+        var pool = player.Character.CardPool
+            .GetUnlockedCards(player.UnlockState, player.RunState.CardMultiplayerConstraint)
+            .Where(c => c.CanBeGeneratedInCombat && c.Rarity is CardRarity.Common or CardRarity.Uncommon or CardRarity.Rare)
+            .ToList();
+        if (pool.Count == 0)
+            return;
+
+        var rng = player.RunState.Rng.CombatCardGeneration;
+        var choices = new List<CardModel>(Math.Min(choiceCount, pool.Count));
+        for (int i = 0; i < choiceCount && pool.Count > 0; i++)
+        {
+            int idx = rng.NextInt(pool.Count);
+            choices.Add(combatState.CreateCard(pool[idx], player));
+            pool.RemoveAt(idx);
+        }
+
+        var chosen = await CardSelectCmd.FromChooseACardScreen(choiceContext, choices, player, canSkip: canSkip);
+        if (chosen is not null && player.Creature.IsAlive && !CombatManager.Instance.IsOverOrEnding)
+        {
+            await PlaceInStasisAsync(choiceContext, player, chosen);
         }
     }
 

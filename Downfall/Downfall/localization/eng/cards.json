@@ -1179,5 +1179,7 @@
   "DOWNFALL-PACKAGE_WALKER.title": "Package: Orbwalker",
   "DOWNFALL-PACKAGE_WALKER.description": "Add an [gold]Orbwalk{IfUpgraded:show:+|}[/gold], [gold]Walker Claw{IfUpgraded:show:+|}[/gold], and [gold]Incinerate{IfUpgraded:show:+|}[/gold] to your [gold]Hand[/gold].",
   "DOWNFALL-PACKAGE_DEFECT.title": "Package: Defect",
-  "DOWNFALL-PACKAGE_DEFECT.description": "Add a [gold]Reroute{IfUpgraded:show:+|}[/gold], [gold]Preprogram{IfUpgraded:show:+|}[/gold], and [gold]Time Capacitor{IfUpgraded:show:+|}[/gold] to your [gold]Hand[/gold]."
+  "DOWNFALL-PACKAGE_DEFECT.description": "Add a [gold]Reroute{IfUpgraded:show:+|}[/gold], [gold]Preprogram{IfUpgraded:show:+|}[/gold], and [gold]Time Capacitor{IfUpgraded:show:+|}[/gold] to your [gold]Hand[/gold].",
+  "DOWNFALL-GEMSTONE_GUN_CARD.title": "Gemstone Gun",
+  "DOWNFALL-GEMSTONE_GUN_CARD.description": "Trigger all socketed [gold]Gems[/gold].{SocketText}"
 }
