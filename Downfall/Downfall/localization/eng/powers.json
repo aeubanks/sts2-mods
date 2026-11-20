@@ -592,5 +592,20 @@
   "DOWNFALL-LOSE_HP_NEXT_TURN_POWER.smartDescription": "At the end of its turn, loses [blue]{Amount}[/blue] HP.",
   "DOWNFALL-ADD_COPY_NEXT_TURN_POWER.title": "Gaining Card",
   "DOWNFALL-ADD_COPY_NEXT_TURN_POWER.description": "At the start of your next turn, add copies of the stored cards into your [gold]Hand[/gold].",
-  "DOWNFALL-ADD_COPY_NEXT_TURN_POWER.smartDescription": "At the start of your next turn, add [gold]{CardNames}[/gold] into your [gold]Hand[/gold]."
+  "DOWNFALL-ADD_COPY_NEXT_TURN_POWER.smartDescription": "At the start of your next turn, add [gold]{CardNames}[/gold] into your [gold]Hand[/gold].",
+  "DOWNFALL-TORCH_HEAD_POWER.title": "Torch Head",
+  "DOWNFALL-TORCH_HEAD_POWER.description": "Whenever you play an Attack while you have [gold]Temp HP[/gold], Torch Head triggers its accumulated effects.",
+  "DOWNFALL-TORCH_HEAD_POWER.smartDescription": "Whenever you play an Attack while you have [gold]Temp HP[/gold], Torch Head:\n{EffectsText}",
+  "DOWNFALL-CANT_TOUCH_THIS_POWER.title": "Can't Touch This",
+  "DOWNFALL-CANT_TOUCH_THIS_POWER.description": "Whenever you fully block an attack, apply [gold]Doom[/gold] to the attacker.",
+  "DOWNFALL-CANT_TOUCH_THIS_POWER.smartDescription": "Whenever you fully block an attack, apply [blue]{Amount}[/blue] [gold]Doom[/gold] to the attacker.",
+  "DOWNFALL-NEXT_COLLECTED_TWICE_POWER.title": "Double Up",
+  "DOWNFALL-NEXT_COLLECTED_TWICE_POWER.description": "Your next [gold]Collected[/gold] card played this turn is played twice.",
+  "DOWNFALL-NEXT_COLLECTED_TWICE_POWER.smartDescription": "Your next {Amount:plural:[gold]Collected[/gold] card|[blue]{}[/blue] [gold]Collected[/gold] cards} played this turn {Amount:plural:is|are} played twice.",
+  "DOWNFALL-FEEL_MY_PAIN_POWER.title": "Feel My Pain",
+  "DOWNFALL-FEEL_MY_PAIN_POWER.description": "Whenever you [gold]Exhaust[/gold] a card, a random enemy loses HP.",
+  "DOWNFALL-FEEL_MY_PAIN_POWER.smartDescription": "Whenever you [gold]Exhaust[/gold] a card, a random enemy loses [blue]{Amount}[/blue] HP.",
+  "DOWNFALL-HEAL_IF_DIE_THIS_TURN_POWER.title": "Finalized",
+  "DOWNFALL-HEAL_IF_DIE_THIS_TURN_POWER.description": "When this enemy dies, heal HP.",
+  "DOWNFALL-HEAL_IF_DIE_THIS_TURN_POWER.smartDescription": "When this enemy dies, heal [blue]{Amount}[/blue] HP."
 }

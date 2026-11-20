@@ -509,4 +509,212 @@ internal static class CollectorTests
         AutoTestAssert.True(pcs.Hand.Cards.Any(c => c is Roast), "AddCopyNextTurnPower added copy of second Pyred card (Roast) into Hand next turn");
         AutoTestAssert.True(!player.Creature.HasPower<AddCopyNextTurnPower>(), "AddCopyNextTurnPower removed itself after triggering");
     }
+
+    public static async Task TestUncommonBatch1InCombat()
+    {
+        var (player, _, combatState) = await DownfallAutoTestRunner.StartCombatAsync<TheCollector>("COLLECTOR_10C1");
+        var pcs = AutoTestAssert.NotNull(player.PlayerCombatState, "PlayerCombatState");
+        var enemy = AutoTestAssert.NotNull(combatState.HittableEnemies.FirstOrDefault(), "Enemy");
+        var ctx = new BlockingPlayerChoiceContext();
+
+        await CreatureCmd.SetMaxAndCurrentHp(enemy, 1000m);
+
+        static async Task ClearHandAsync(PlayerCombatState p)
+        {
+            foreach (var c in p.Hand.Cards.ToList())
+                await CardPileCmd.Add(c, PileType.Discard);
+        }
+
+        // 1. Billow (18 Block + CollectorBellow next turn reading LastTurnUnusedBlock!) + CantTouchThis (2 Dex + Doom on full block!)
+        await ClearHandAsync(pcs);
+        pcs.Energy = 10;
+        var cantTouch = combatState.CreateCard<CantTouchThis>(player);
+        await CardPileCmd.Add(cantTouch, PileType.Hand);
+        await CardCmd.AutoPlay(ctx, cantTouch, null, AutoPlayType.Default);
+        AutoTestAssert.Equal(2, player.Creature.GetPowerAmount<DexterityPower>(), "CantTouchThis granted 2 Dexterity");
+        AutoTestAssert.Equal(2, player.Creature.GetPowerAmount<CantTouchThisPower>(), "CantTouchThis applied CantTouchThisPower(2)");
+
+        var billow = combatState.CreateCard<Billow>(player);
+        await CardPileCmd.Add(billow, PileType.Hand);
+        await CardCmd.AutoPlay(ctx, billow, null, AutoPlayType.Default);
+        AutoTestAssert.Equal(20, player.Creature.Block, "Billow granted 18 + 2 (Dex) = 20 Block");
+
+        // Simulate enemy attack fully blocked by player's 20 Block -> CantTouchThisPower applies 2 Doom!
+        await CreatureCmd.Damage(ctx, player.Creature, 5m, ValueProp.Move, enemy);
+        AutoTestAssert.Equal(2, enemy.GetPowerAmount<CollectorDoomPower>(), "CantTouchThisPower applied 2 Doom on fully blocked attack");
+
+        // End turn -> next turn receives CollectorBellow in Hand, and LastTurnUnusedBlock > 0 -> Bellow applies Doom!
+        await PowerCmd.Remove<CollectorDoomPower>(enemy);
+        await DownfallAutoTestRunner.EndTurnAndWaitForRoundAsync(player, combatState.RoundNumber + 1);
+        var bellow = AutoTestAssert.NotNull(pcs.Hand.Cards.OfType<CollectorBellow>().FirstOrDefault(), "Billow added CollectorBellow to Hand next turn");
+        int unusedBlock = CollectorCombatState.Get(combatState).GetPlayer(player).LastTurnUnusedBlock;
+        AutoTestAssert.True(unusedBlock > 0, $"LastTurnUnusedBlock > 0 after Billow ({unusedBlock})");
+        int doomBeforeBellow = enemy.GetPowerAmount<CollectorDoomPower>();
+        await CardCmd.AutoPlay(ctx, bellow, enemy, AutoPlayType.Default);
+        AutoTestAssert.Equal(doomBeforeBellow + unusedBlock, enemy.GetPowerAmount<CollectorDoomPower>(), $"CollectorBellow applied {unusedBlock} Doom");
+
+        // 2. BindingCall (6 Temp HP + TorchHeadPower RandomDoom 2 -> Attack applies +2 Doom while Temp HP > 0!)
+        //    Also verify CantTouchThisPower does NOT false-trigger when 0 Block + Temp HP absorbs a hit!
+        await PowerCmd.Remove<CollectorDoomPower>(enemy);
+        pcs.Energy = 10;
+        var bindingCall = combatState.CreateCard<BindingCall>(player);
+        await CardPileCmd.Add(bindingCall, PileType.Hand);
+        await CardCmd.AutoPlay(ctx, bindingCall, null, AutoPlayType.Default);
+        AutoTestAssert.True(player.Creature.GetPowerAmount<Downfall.Core.DownfallTempHpPower>() >= 6, "BindingCall granted 6 Temp HP");
+        AutoTestAssert.True(player.Creature.HasPower<TorchHeadPower>(), "BindingCall applied TorchHeadPower");
+
+        await CreatureCmd.LoseBlock(ctx, player.Creature, player.Creature.Block, null);
+        await CreatureCmd.Damage(ctx, player.Creature, 2m, ValueProp.Move, enemy);
+        AutoTestAssert.Equal(0, enemy.GetPowerAmount<CollectorDoomPower>(), "CantTouchThisPower did NOT trigger when hit absorbed by Temp HP with 0 Block");
+
+        var attackForTorch = combatState.CreateCard<CollectorStrike>(player);
+        await CardPileCmd.Add(attackForTorch, PileType.Hand);
+        await CardCmd.AutoPlay(ctx, attackForTorch, enemy, AutoPlayType.Default);
+        AutoTestAssert.Equal(2, enemy.GetPowerAmount<CollectorDoomPower>(), "TorchHeadPower applied 2 Doom on Attack while Temp HP > 0");
+
+        // 3. BlackBindings (2 Weak, then 2 Doom per unique debuff: Weak + Doom = 2 -> +4 Doom -> 6 total!)
+        var bindings = combatState.CreateCard<BlackBindings>(player);
+        await CardPileCmd.Add(bindings, PileType.Hand);
+        await CardCmd.AutoPlay(ctx, bindings, enemy, AutoPlayType.Default);
+        AutoTestAssert.Equal(2, enemy.GetPowerAmount<WeakPower>(), "BlackBindings applied 2 Weak");
+        AutoTestAssert.Equal(6, enemy.GetPowerAmount<CollectorDoomPower>(), "BlackBindings applied 2 x 2 = 4 Doom (2 -> 6)");
+
+        // 4. CursedWail (9 temp Strength loss + 1 permanent Strength loss on Afflicted!)
+        await PowerCmd.Apply<VulnerablePower>(ctx, enemy, 2m, player.Creature, null);
+        AutoTestAssert.True(CollectorMechanics.IsAfflicted(enemy), "Enemy is Afflicted before CursedWail");
+        int strBeforeWail = enemy.GetPowerAmount<StrengthPower>();
+        var wail = combatState.CreateCard<CursedWail>(player);
+        await CardPileCmd.Add(wail, PileType.Hand);
+        await CardCmd.AutoPlay(ctx, wail, null, AutoPlayType.Default);
+        AutoTestAssert.Equal(strBeforeWail - 10, enemy.GetPowerAmount<StrengthPower>(), "CursedWail reduced Strength by 9 (temp) + 1 (Afflicted perm) = 10");
+        AutoTestAssert.True(enemy.HasPower<DarkShacklesPower>(), "CursedWail applied DarkShacklesPower for temporary Strength loss");
+
+        // 5. Bonfire (Pyre, Block + NextTurnReserve 1) & DarkwoodKindling+ (Unplayable, Retain, Exhaust -> NextTurnReserve 2)
+        await ClearHandAsync(pcs);
+        var darkwood = combatState.CreateCard<DarkwoodKindling>(player);
+        darkwood.UpgradeInternal();
+        AutoTestAssert.True(!darkwood.CanPlay() && darkwood.Keywords.Contains(CardKeyword.Retain), "DarkwoodKindling+ is Unplayable + Retain");
+        var bonfire = combatState.CreateCard<Bonfire>(player);
+        await CardPileCmd.Add(darkwood, PileType.Hand);
+        await CardPileCmd.Add(bonfire, PileType.Hand);
+        await CardCmd.AutoPlay(ctx, bonfire, null, AutoPlayType.Default);
+        AutoTestAssert.Equal(3, player.Creature.GetPowerAmount<NextTurnReservePower>(), "Bonfire Pyring DarkwoodKindling gave 1 + 2 = 3 NextTurnReserve");
+
+        // 6. BrainDrain+ (7 HP loss + upgraded Collected card in Hand) & DoubleTrouble (NextCollectedTwicePower plays Collectible twice!)
+        await ClearHandAsync(pcs);
+        int hpBeforeDrain = enemy.CurrentHp;
+        var drain = combatState.CreateCard<BrainDrain>(player);
+        drain.UpgradeInternal();
+        await CardPileCmd.Add(drain, PileType.Hand);
+        await CardCmd.AutoPlay(ctx, drain, enemy, AutoPlayType.Default);
+        AutoTestAssert.Equal(hpBeforeDrain - 7, enemy.CurrentHp, "BrainDrain+ dealt 7 HP loss");
+        var drainedCard = AutoTestAssert.NotNull(pcs.Hand.Cards.OfType<CollectibleCard>().FirstOrDefault(), "BrainDrain+ added CollectibleCard to Hand");
+        AutoTestAssert.True(drainedCard.IsUpgraded, "BrainDrain+ upgraded generated CollectibleCard");
+
+        var doubleTrouble = combatState.CreateCard<DoubleTrouble>(player);
+        await CardPileCmd.Add(doubleTrouble, PileType.Hand);
+        await CardCmd.AutoPlay(ctx, doubleTrouble, null, AutoPlayType.Default);
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<NextCollectedTwicePower>(), "DoubleTrouble applied NextCollectedTwicePower(1)");
+
+        var jawCollectible = combatState.CreateCard<JawWormCard>(player); // 12 Block + 1 Strength
+        await CardPileCmd.Add(jawCollectible, PileType.Hand);
+        int strBeforeDoubleJaw = player.Creature.GetPowerAmount<StrengthPower>();
+        AutoTestAssert.True(jawCollectible.TryManualPlay(null), "Play JawWormCard with DoubleTrouble active");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<NextCollectedTwicePower>(), "NextCollectedTwicePower consumed on Collectible play");
+        AutoTestAssert.Equal(strBeforeDoubleJaw + 2, player.Creature.GetPowerAmount<StrengthPower>(), "DoubleTrouble played JawWormCard twice (+2 Strength)");
+
+        // 7. Empower (X-cost: X=3 for 2 turns) stacked with CultistCard (3 turns of +1) -> next turn +4, turn after +4, 3rd turn +1!
+        await ClearHandAsync(pcs);
+        var cultist = combatState.CreateCard<CultistCard>(player);
+        var cultistFodder = combatState.CreateCard<CollectorDefend>(player);
+        await CardPileCmd.Add(cultistFodder, PileType.Hand);
+        await CardPileCmd.Add(cultist, PileType.Hand);
+        await CardCmd.AutoPlay(ctx, cultist, null, AutoPlayType.Default);
+
+        pcs.Energy = 3;
+        var empower = combatState.CreateCard<Empower>(player);
+        await CardPileCmd.Add(empower, PileType.Hand);
+        AutoTestAssert.True(empower.TryManualPlay(null), "Play Empower at X=3");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(3, player.Creature.GetPowerAmount<StrengthOverTurnsPower>(), "Overlapping Cultist(3) + Empower(2) kept 3 turns remaining");
+        int strBeforeEmp = player.Creature.GetPowerAmount<StrengthPower>();
+        await DownfallAutoTestRunner.EndTurnAndWaitForRoundAsync(player, combatState.RoundNumber + 1);
+        AutoTestAssert.Equal(strBeforeEmp + 4, player.Creature.GetPowerAmount<StrengthPower>(), "Turn 1 of Cultist(+1) + Empower(+3) granted +4 Strength");
+        await DownfallAutoTestRunner.EndTurnAndWaitForRoundAsync(player, combatState.RoundNumber + 1);
+        AutoTestAssert.Equal(strBeforeEmp + 8, player.Creature.GetPowerAmount<StrengthPower>(), "Turn 2 of Cultist(+1) + Empower(+3) granted +4 Strength");
+        await DownfallAutoTestRunner.EndTurnAndWaitForRoundAsync(player, combatState.RoundNumber + 1);
+        AutoTestAssert.Equal(strBeforeEmp + 9, player.Creature.GetPowerAmount<StrengthPower>(), "Turn 3 of Cultist(+1) granted +1 Strength");
+        AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<StrengthOverTurnsPower>(), "StrengthOverTurnsPower removed cleanly after final turn");
+
+        // 8. FeelMyPain (4 HP loss per Exhaust) + Extricate ("Sever Soul": Exhaust non-Attacks in Hand + 16 dmg)
+        await ClearHandAsync(pcs);
+        pcs.Energy = 10;
+        var fmp = combatState.CreateCard<FeelMyPain>(player);
+        await CardPileCmd.Add(fmp, PileType.Hand);
+        await CardCmd.AutoPlay(ctx, fmp, null, AutoPlayType.Default);
+        AutoTestAssert.Equal(4, player.Creature.GetPowerAmount<FeelMyPainPower>(), "FeelMyPain applied FeelMyPainPower(4)");
+
+        var extSkill1 = combatState.CreateCard<CollectorDefend>(player);
+        var extSkill2 = combatState.CreateCard<CollectorDefend>(player);
+        var extAtk = combatState.CreateCard<CollectorStrike>(player);
+        var extricate = combatState.CreateCard<Extricate>(player);
+        await CardPileCmd.Add(extSkill1, PileType.Hand);
+        await CardPileCmd.Add(extSkill2, PileType.Hand);
+        await CardPileCmd.Add(extAtk, PileType.Hand);
+        await CardPileCmd.Add(extricate, PileType.Hand);
+        int hpBeforeExt = enemy.CurrentHp;
+        await CardCmd.AutoPlay(ctx, extricate, enemy, AutoPlayType.Default);
+        AutoTestAssert.True(pcs.ExhaustPile.Cards.Contains(extSkill1) && pcs.ExhaustPile.Cards.Contains(extSkill2), "Extricate Exhausted all non-Attacks in Hand");
+        AutoTestAssert.True(pcs.Hand.Cards.Contains(extAtk), "Extricate kept Attack in Hand");
+        AutoTestAssert.True(hpBeforeExt - enemy.CurrentHp >= 16 + 8, $"Extricate + FeelMyPain(2 exhausts) dealt damage + 8 HP loss ({hpBeforeExt - enemy.CurrentHp})");
+
+        // 9. FlameLash (Pyre 10-dmg AshenStrike -> base damage 8 -> 18!) & FleetingEmbers (Pyre + 5 Block + 2 Embers!)
+        await ClearHandAsync(pcs);
+        var lashFodder = combatState.CreateCard<AshenStrike>(player); // 10 base damage
+        var flameLash = combatState.CreateCard<FlameLash>(player);
+        await CardPileCmd.Add(lashFodder, PileType.Hand);
+        await CardPileCmd.Add(flameLash, PileType.Hand);
+        await CardCmd.AutoPlay(ctx, flameLash, enemy, AutoPlayType.Default);
+        AutoTestAssert.Equal(18m, flameLash.DynamicVars.Damage.BaseValue, "FlameLash added Pyred AshenStrike's 10 base damage (8 -> 18)");
+
+        await ClearHandAsync(pcs);
+        var feFodder = combatState.CreateCard<CollectorDefend>(player);
+        var fleeting = combatState.CreateCard<FleetingEmbers>(player);
+        await CardPileCmd.Add(feFodder, PileType.Hand);
+        await CardPileCmd.Add(fleeting, PileType.Hand);
+        await CardCmd.AutoPlay(ctx, fleeting, null, AutoPlayType.Default);
+        AutoTestAssert.Equal(2, pcs.Hand.Cards.Count(c => c is Ember), "FleetingEmbers added 2 Embers into Hand");
+
+        // 10. GreenpyreLocus (1 to Hand + 2 copies to CombatCollection) & Forgery (8 dmg + pick copy from CombatCollection!)
+        await ClearHandAsync(pcs);
+        var cData = CollectorCombatState.Get(combatState).GetPlayer(player);
+        cData.CombatCollection.Clear();
+        var locus = combatState.CreateCard<GreenpyreLocus>(player);
+        await CardPileCmd.Add(locus, PileType.Hand);
+        await CardCmd.AutoPlay(ctx, locus, null, AutoPlayType.Default);
+        AutoTestAssert.Equal(1, pcs.Hand.Cards.Count(c => c is CollectibleCard), "GreenpyreLocus added 1 chosen Collectible to Hand");
+        AutoTestAssert.Equal(2, cData.CombatCollection.Count, "GreenpyreLocus added 2 copies to CombatCollection");
+        var drawnLocusCopy = await CollectorMechanics.DrawFromCollectionAsync(ctx, player);
+        AutoTestAssert.True(drawnLocusCopy is CollectibleCard && pcs.Hand.Cards.Contains(drawnLocusCopy),
+            "GreenpyreLocus CombatCollection copy drew cleanly into Hand");
+
+        await ClearHandAsync(pcs);
+        var forgery = combatState.CreateCard<Forgery>(player);
+        await CardPileCmd.Add(forgery, PileType.Hand);
+        await CardCmd.AutoPlay(ctx, forgery, enemy, AutoPlayType.Default);
+        AutoTestAssert.Equal(1, pcs.Hand.Cards.Count(c => c is CollectibleCard), "Forgery added copy of chosen card from CombatCollection to Hand");
+
+        // 11. Finalize (24 Doom + HealIfDieThisTurnPower(6) -> killing enemy heals Collector by 6 HP!)
+        await CreatureCmd.Damage(ctx, player.Creature, 20m, ValueProp.Unblockable | ValueProp.Unpowered, null, null);
+        int playerHpBeforeFinalizeKill = player.Creature.CurrentHp;
+        var finalize = combatState.CreateCard<Finalize>(player);
+        await CardPileCmd.Add(finalize, PileType.Hand);
+        await CardCmd.AutoPlay(ctx, finalize, enemy, AutoPlayType.Default);
+        AutoTestAssert.Equal(6, enemy.GetPowerAmount<HealIfDieThisTurnPower>(), "Finalize applied HealIfDieThisTurnPower(6)");
+        AutoTestAssert.True(enemy.GetPowerAmount<CollectorDoomPower>() >= 24, "Finalize applied 24 Doom");
+
+        await CreatureCmd.Damage(ctx, enemy, enemy.CurrentHp + 50, ValueProp.Unblockable | ValueProp.Unpowered, player.Creature);
+        AutoTestAssert.Equal(playerHpBeforeFinalizeKill + 6, player.Creature.CurrentHp, "HealIfDieThisTurnPower healed Collector by 6 HP on enemy death");
+    }
 }

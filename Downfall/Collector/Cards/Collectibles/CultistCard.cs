@@ -28,8 +28,7 @@ public sealed class CultistCard() : CollectibleCard(1, CardType.Power, TargetTyp
         if (!Owner.Creature.IsAlive || CombatManager.Instance.IsOverOrEnding)
             return;
 
-        var power = await PowerCmd.Apply<StrengthOverTurnsPower>(choiceContext, Owner.Creature, 3m, Owner.Creature, this);
-        power?.AddStrengthPerTurn(1);
+        await StrengthOverTurnsPower.ApplyAsync(choiceContext, Owner.Creature, turns: 3, strengthPerTurn: 1, this);
     }
 
     protected override void OnUpgrade()
