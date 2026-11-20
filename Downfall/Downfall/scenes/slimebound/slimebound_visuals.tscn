@@ -6,7 +6,7 @@
 
 [node name="Visuals" type="Sprite2D" parent="."]
 unique_name_in_owner = true
-position = Vector2(0, -186)
+position = Vector2(0, -165)
 texture = ExtResource("1_slimebound")
 
 [node name="Bounds" type="Control" parent="."]
