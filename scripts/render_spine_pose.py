@@ -110,9 +110,13 @@ def render_spine_pose(
             "length": b.get("length", 0.0),
             "transform": b.get("transform", "normal"),
             "inheritRotation": b.get("inheritRotation", True),
+            "inheritScale": b.get("inheritScale", True),
         }
         bones_by_name[bd["name"]] = bd
         bone_list.append(bd)
+
+    slots_list = [dict(s) for s in skel.get("slots", [])]
+    slots_by_name = {s["name"]: s for s in slots_list}
 
     if anim_name:
         anim = skel.get("animations", {}).get(anim_name)
@@ -132,6 +136,39 @@ def render_spine_pose(
                 if sc_t and sc_t[0].get("time", 0.0) == 0.0:
                     b["scaleX"] *= sc_t[0].get("x", 1.0)
                     b["scaleY"] *= sc_t[0].get("y", 1.0)
+            for sn, tracks in anim.get("slots", {}).items():
+                sl = slots_by_name.get(sn)
+                if not sl:
+                    continue
+                att_tr = tracks.get("attachment")
+                if att_tr and att_tr[0].get("time", 0.0) == 0.0:
+                    sl["attachment"] = att_tr[0].get("name")
+                col_tr = tracks.get("color")
+                if col_tr and col_tr[0].get("time", 0.0) == 0.0:
+                    sl["color"] = col_tr[0].get("color", "ffffffff")
+            do_tr = anim.get("drawOrder")
+            if do_tr and do_tr[0].get("time", 0.0) == 0.0 and do_tr[0].get("offsets"):
+                n_sl = len(slots_list)
+                name_to_idx = {s["name"]: i for i, s in enumerate(slots_list)}
+                draw_order = [None] * n_sl
+                unchanged = []
+                orig_i = 0
+                for off in do_tr[0]["offsets"]:
+                    si = name_to_idx.get(off["slot"])
+                    if si is None:
+                        continue
+                    while orig_i < si:
+                        unchanged.append(orig_i)
+                        orig_i += 1
+                    draw_order[orig_i + off["offset"]] = slots_list[orig_i]
+                    orig_i += 1
+                while orig_i < n_sl:
+                    unchanged.append(orig_i)
+                    orig_i += 1
+                for i in range(n_sl - 1, -1, -1):
+                    if draw_order[i] is None:
+                        draw_order[i] = slots_list[unchanged.pop()]
+                slots_list = draw_order
 
     def update_world():
         for b in bone_list:
@@ -146,8 +183,17 @@ def render_spine_pose(
             else:
                 b["wx"] = p["a"] * b["x"] + p["b"] * b["y"] + p["wx"]
                 b["wy"] = p["c"] * b["x"] + p["d"] * b["y"] + p["wy"]
-                if b["transform"] == "noRotationOrReflection" or not b["inheritRotation"]:
+                if b["transform"] == "noRotationOrReflection":
                     b["a"], b["b"], b["c"], b["d"] = la, lb, lc, ld
+                elif not b["inheritRotation"]:
+                    if b["inheritScale"]:
+                        det = p["a"] * p["d"] - p["b"] * p["c"]
+                        psx = math.hypot(p["a"], p["c"]) * (-1.0 if det < 0 else 1.0)
+                        psy = math.hypot(p["b"], p["d"])
+                        b["a"], b["b"] = psx * la, psx * lb
+                        b["c"], b["d"] = psy * lc, psy * ld
+                    else:
+                        b["a"], b["b"], b["c"], b["d"] = la, lb, lc, ld
                 else:
                     b["a"] = p["a"] * la + p["b"] * lc
                     b["b"] = p["a"] * lb + p["b"] * ld
@@ -199,7 +245,6 @@ def render_spine_pose(
     skin_lookup = {s["name"]: s.get("attachments", {}) for s in skins_raw} if isinstance(skins_raw, list) else skins_raw
     path_skin = skin_lookup.get(skin_name, skin_lookup.get("default", {}))
     default_path_skin = skin_lookup.get("default", {})
-    slots_by_name = {s["name"]: s for s in skel.get("slots", [])}
 
     for pc in skel.get("path", []):
         slot = slots_by_name.get(pc.get("target"))
@@ -324,8 +369,17 @@ def render_spine_pose(
                 lc, ld = s * b["scaleX"], c * b["scaleY"]
                 b["wx"] = p["a"] * b["x"] + p["b"] * b["y"] + p["wx"]
                 b["wy"] = p["c"] * b["x"] + p["d"] * b["y"] + p["wy"]
-                if b["transform"] == "noRotationOrReflection" or not b["inheritRotation"]:
+                if b["transform"] == "noRotationOrReflection":
                     b["a"], b["b"], b["c"], b["d"] = la, lb, lc, ld
+                elif not b["inheritRotation"]:
+                    if b["inheritScale"]:
+                        det = p["a"] * p["d"] - p["b"] * p["c"]
+                        psx = math.hypot(p["a"], p["c"]) * (-1.0 if det < 0 else 1.0)
+                        psy = math.hypot(p["b"], p["d"])
+                        b["a"], b["b"] = psx * la, psx * lb
+                        b["c"], b["d"] = psy * lc, psy * ld
+                    else:
+                        b["a"], b["b"], b["c"], b["d"] = la, lb, lc, ld
                 else:
                     b["a"] = p["a"] * la + p["b"] * lc
                     b["b"] = p["a"] * lb + p["b"] * ld
@@ -354,7 +408,7 @@ def render_spine_pose(
     default_skin = skin_map.get("default", {})
 
     skip_set = set(skip_slots)
-    for slot in skel.get("slots", []):
+    for slot in slots_list:
         sname = slot["name"]
         if sname in skip_set:
             continue
