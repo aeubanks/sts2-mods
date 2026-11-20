@@ -4,6 +4,7 @@ using MegaCrit.Sts2.Core.Commands;
 using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.GameActions.Multiplayer;
 using MegaCrit.Sts2.Core.HoverTips;
+using MegaCrit.Sts2.Core.Localization;
 using MegaCrit.Sts2.Core.Localization.DynamicVars;
 using MegaCrit.Sts2.Core.Models.Powers;
 using MegaCrit.Sts2.Core.ValueProps;
@@ -15,22 +16,38 @@ public sealed class GremlinDance()
 {
     private ICombatState? ActiveCombatState => CombatState ?? Owner?.Creature.CombatState;
 
-    private bool IsMadActive =>
-        IsMutable
-        && ActiveCombatState is { } cs
-        && Owner is not null
-        && !GremlinMob.IsNob(cs, Owner)
-        && GremlinMob.GetActiveKind(cs, Owner) == GremlinKind.Mad;
+    private (bool InCombat, bool IsNob, GremlinKind Kind) GetActiveMode()
+    {
+        if (!IsMutable
+            || Owner is null
+            || ActiveCombatState is null
+            || !CombatManager.Instance.IsInProgress
+            || Pile?.Type == PileType.Deck
+            || !GremlinMob.TryGetCombatModeReadOnly(Owner, out bool isNob, out var kind))
+        {
+            return (false, false, GremlinKind.Mad);
+        }
 
-    public override TargetType TargetType =>
-        IsMadActive ? TargetType.AllEnemies : TargetType.AnyEnemy;
+        return (true, isNob, kind);
+    }
 
-    public override bool GainsBlock =>
-        IsMutable
-        && ActiveCombatState is { } cs
-        && Owner is not null
-        && !GremlinMob.IsNob(cs, Owner)
-        && GremlinMob.GetActiveKind(cs, Owner) == GremlinKind.Shield;
+    public override TargetType TargetType
+    {
+        get
+        {
+            var (inCombat, isNob, kind) = GetActiveMode();
+            return inCombat && !isNob && kind == GremlinKind.Mad ? TargetType.AllEnemies : TargetType.AnyEnemy;
+        }
+    }
+
+    public override bool GainsBlock
+    {
+        get
+        {
+            var (inCombat, isNob, kind) = GetActiveMode();
+            return inCombat && !isNob && kind == GremlinKind.Shield;
+        }
+    }
 
     protected override IEnumerable<DynamicVar> CanonicalVars =>
     [
@@ -39,10 +56,40 @@ public sealed class GremlinDance()
         new DynamicVar("Bonus", 2m)
     ];
 
-    protected override IEnumerable<IHoverTip> ExtraHoverTips =>
-    [
-        HoverTipFactory.FromPower<WizPower>()
-    ];
+    protected override IEnumerable<IHoverTip> ExtraHoverTips
+    {
+        get
+        {
+            var (inCombat, isNob, kind) = GetActiveMode();
+            if (!inCombat)
+                yield break;
+
+            if (isNob || kind == GremlinKind.Fat)
+            {
+                yield return HoverTipFactory.FromPower<StrengthPower>();
+            }
+            else if (kind == GremlinKind.Shield)
+            {
+                yield return HoverTipFactory.Static(StaticHoverTip.Block);
+            }
+            else if (kind == GremlinKind.Wizard)
+            {
+                yield return HoverTipFactory.FromPower<WizPower>();
+            }
+        }
+    }
+
+    protected override void AddExtraArgsToDescription(LocString description)
+    {
+        var (inCombat, isNob, kind) = GetActiveMode();
+        description.Add("IsMad", inCombat && !isNob && kind == GremlinKind.Mad);
+        description.Add("IsFat", inCombat && !isNob && kind == GremlinKind.Fat);
+        description.Add("IsShield", inCombat && !isNob && kind == GremlinKind.Shield);
+        description.Add("IsSneaky", inCombat && !isNob && kind == GremlinKind.Sneaky);
+        description.Add("IsWizard", inCombat && !isNob && kind == GremlinKind.Wizard);
+        description.Add("IsNob", inCombat && isNob);
+        description.Add("IsNeutral", !inCombat);
+    }
 
     protected override async Task OnPlay(PlayerChoiceContext choiceContext, CardPlay cardPlay)
     {

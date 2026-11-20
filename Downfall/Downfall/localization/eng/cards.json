@@ -339,7 +339,7 @@
   "DOWNFALL-TAG_TEAM.description": "[gold]Swap[/gold] to a living Gremlin of your choice.",
   "DOWNFALL-TAG_TEAM.selectionScreenPrompt": "Choose a Gremlin to Swap to.",
   "DOWNFALL-GREMLIN_DANCE.title": "Gremlin Dance",
-  "DOWNFALL-GREMLIN_DANCE.description": "Deal {Damage:diff()} damage.\nBonus effect based on your active Gremlin ({Block:diff()} [gold]Block[/gold] / [blue]{Bonus}[/blue]).",
+  "DOWNFALL-GREMLIN_DANCE.description": "Deal {Damage:diff()} damage{IsMad: to ALL enemies.|.}{IsFat:\nEnemy loses [blue]{Bonus}[/blue] [gold]Strength[/gold] this turn.|}{IsShield:\nGain {Block:diff()} [gold]Block[/gold].|}{IsSneaky:\nDraw [blue]{Bonus}[/blue] cards.|}{IsWizard:\nGain [blue]{Bonus}[/blue] [gold]Wiz[/gold].|}{IsNob:\nGain [blue]{Bonus}[/blue] [gold]Strength[/gold].|}{IsNeutral:\nHas a bonus effect based on your active Gremlin.|}",
   "DOWNFALL-WARD.title": "Ward",
   "DOWNFALL-WARD.description": "Gain {Block:diff()} [gold]Block[/gold].",
   "DOWNFALL-MAD_GREMLIN_CHOICE.title": "Mad Gremlin",

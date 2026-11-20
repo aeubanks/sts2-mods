@@ -137,6 +137,21 @@ internal static class GremlinMob
         return TryDecodeState(saved, maxHp, out var decoded) ? decoded : null;
     }
 
+    public static bool TryGetCombatModeReadOnly(Player? player, out bool isNob, out GremlinKind kind)
+    {
+        if (player is not null
+            && TryGetStateReadOnly(player, Math.Max(1, player.Creature.MaxHp)) is { } state)
+        {
+            isNob = state.IsNob;
+            kind = state.Order[0];
+            return true;
+        }
+
+        isNob = false;
+        kind = GremlinKind.Mad;
+        return false;
+    }
+
     public static HoverTip BuildSingleGremlinHoverTip(Player player, GremlinKind kind)
     {
         int maxHp = Math.Max(1, player.Creature.MaxHp);
@@ -672,6 +687,7 @@ internal static class GremlinMob
 
         await RemoveActiveGremlinPowersAsync(player);
         await ApplyActiveGremlinPowerAsync(player, next, choiceContext);
+        player.PlayerCombatState?.RecalculateCardValues();
         UpdateCombatVisuals(player);
 
         foreach (var listener in player.Creature.Powers.OfType<IGremlinSwapListener>().ToList())
@@ -811,6 +827,7 @@ internal static class GremlinMob
         var state = GetOrCreateState(player);
         state.IsNob = true;
         await RemoveActiveGremlinPowersAsync(player);
+        player.PlayerCombatState?.RecalculateCardValues();
         UpdateCombatVisuals(player);
     }
 
@@ -824,6 +841,7 @@ internal static class GremlinMob
         if (player.Creature.IsAlive && !CombatManager.Instance.IsOverOrEnding)
         {
             await ApplyActiveGremlinPowerAsync(player, state.Order[0], choiceContext);
+            player.PlayerCombatState?.RecalculateCardValues();
             UpdateCombatVisuals(player);
         }
     }

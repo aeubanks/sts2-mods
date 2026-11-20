@@ -185,6 +185,27 @@ internal static class GremlinTests
         await ResetHandAndEnergy();
         var shieldDance = combatState.CreateCard<GremlinDance>(player);
         await CardPileCmd.Add(shieldDance, PileType.Hand);
+        // Verify canonical (out-of-combat) neutral description & upgraded description as well as Shield mode!
+        var canonicalDance = ModelDb.Card<GremlinDance>();
+        string neutralDesc = canonicalDance.GetDescriptionForPile(PileType.None);
+        AutoTestAssert.True(neutralDesc.Contains("active Gremlin") && !neutralDesc.Contains("Block"),
+            $"Canonical GremlinDance shows neutral description (got '{neutralDesc}')");
+        AutoTestAssert.Equal(0, canonicalDance.HoverTips.Count(), "Canonical GremlinDance has 0 HoverTips");
+        var upgradedNeutral = (GremlinDance)canonicalDance.ToMutable();
+        CardCmd.Upgrade(upgradedNeutral);
+        string neutralUpg = upgradedNeutral.GetDescriptionForUpgradePreview();
+        AutoTestAssert.True(neutralUpg.Contains("9") && !neutralUpg.Contains('{'),
+            $"Upgraded neutral GremlinDance preview shows 9 damage cleanly (got '{neutralUpg}')");
+
+        string shieldDanceDesc = shieldDance.GetDescriptionForPile(PileType.Hand);
+        AutoTestAssert.True(shieldDanceDesc.Contains("Block") && !shieldDanceDesc.Contains("Draw"),
+            $"Shield GremlinDance description shows Block (got '{shieldDanceDesc}')");
+        AutoTestAssert.Equal(1, shieldDance.HoverTips.Count(), "Shield GremlinDance has 1 HoverTip (Block)");
+        var upgradedShieldDance = combatState.CreateCard<GremlinDance>(player);
+        CardCmd.Upgrade(upgradedShieldDance);
+        string shieldUpg = upgradedShieldDance.GetDescriptionForUpgradePreview();
+        AutoTestAssert.True(shieldUpg.Contains("9") && shieldUpg.Contains("Block") && !shieldUpg.Contains('{'),
+            $"Upgraded Shield GremlinDance preview shows 9 Block cleanly (got '{shieldUpg}')");
         e1Hp = enemy1.CurrentHp;
         AutoTestAssert.True(shieldDance.TryManualPlay(enemy1), "Play Shield GremlinDance");
         await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
@@ -205,8 +226,34 @@ internal static class GremlinTests
         await ResetHandAndEnergy();
         for (int i = 0; i < 4; i++)
             await CardPileCmd.Add(combatState.CreateCard<GremlinDefend>(player), PileType.Draw, CardPilePosition.Top);
+        // Live GremlinDance instance updates dynamically across Mad / Fat / Wizard / Nob modes!
+        var liveDance = combatState.CreateCard<GremlinDance>(player);
+        await CardPileCmd.Add(liveDance, PileType.Hand);
+        AutoTestAssert.True(liveDance.GetDescriptionForPile(PileType.Hand).Contains("Draw"), "Live GremlinDance starts in Sneaky Draw mode");
+        await GremlinMob.SwapToSpecificAsync(player, combatState, GremlinKind.Mad, ctx);
+        AutoTestAssert.True(liveDance.GetDescriptionForPile(PileType.Hand).Contains("ALL enemies"), "Live GremlinDance switched to Mad ALL enemies mode");
+        AutoTestAssert.Equal(TargetType.AllEnemies, liveDance.TargetType, "Live GremlinDance TargetType updated to AllEnemies");
+        AutoTestAssert.Equal(0, liveDance.HoverTips.Count(), "Mad GremlinDance has 0 HoverTips");
+        await GremlinMob.SwapToSpecificAsync(player, combatState, GremlinKind.Fat, ctx);
+        AutoTestAssert.True(liveDance.GetDescriptionForPile(PileType.Hand).Contains("Strength"), "Live GremlinDance switched to Fat Strength-loss mode");
+        AutoTestAssert.Equal(1, liveDance.HoverTips.Count(), "Fat GremlinDance has 1 HoverTip (Strength)");
+        await GremlinMob.SwapToSpecificAsync(player, combatState, GremlinKind.Wizard, ctx);
+        AutoTestAssert.True(liveDance.GetDescriptionForPile(PileType.Hand).Contains("Wiz"), "Live GremlinDance switched to Wizard Wiz mode");
+        AutoTestAssert.Equal(1, liveDance.HoverTips.Count(), "Wizard GremlinDance has 1 HoverTip (Wiz)");
+        await GremlinMob.EnterNobAsync(player, combatState, ctx);
+        string nobDanceDesc = liveDance.GetDescriptionForPile(PileType.Hand);
+        AutoTestAssert.True(nobDanceDesc.Contains("Gain") && nobDanceDesc.Contains("Strength"), $"Nob GremlinDance shows Gain Strength (got '{nobDanceDesc}')");
+        AutoTestAssert.Equal(1, liveDance.HoverTips.Count(), "Nob GremlinDance has 1 HoverTip (Strength)");
+        await GremlinMob.RevertNobAsync(player, combatState, ctx);
+        await GremlinMob.SwapToSpecificAsync(player, combatState, GremlinKind.Sneaky, ctx);
+        await CardPileCmd.Add(liveDance, PileType.Discard);
+
         var sneakyDance = combatState.CreateCard<GremlinDance>(player);
         await CardPileCmd.Add(sneakyDance, PileType.Hand);
+        string sneakyDanceDesc = sneakyDance.GetDescriptionForPile(PileType.Hand);
+        AutoTestAssert.True(sneakyDanceDesc.Contains("Draw") && !sneakyDanceDesc.Contains("Block") && !sneakyDanceDesc.Contains("Wiz"),
+            $"Sneaky GremlinDance description shows Draw only (got '{sneakyDanceDesc}')");
+        AutoTestAssert.Equal(0, sneakyDance.HoverTips.Count(), "Sneaky GremlinDance has no spurious Wiz/Block tooltip");
         AutoTestAssert.True(sneakyDance.TryManualPlay(enemy1), "Play Sneaky GremlinDance");
         await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
         AutoTestAssert.Equal(2, pcs.Hand.Cards.Count, "Sneaky GremlinDance drew 2 cards");
