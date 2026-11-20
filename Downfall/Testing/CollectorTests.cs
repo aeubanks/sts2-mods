@@ -293,4 +293,220 @@ internal static class CollectorTests
         AutoTestAssert.True(CollectorMechanics.IsAfflicted(enemy), "OuroborosCard applied Weak + Vulnerable (Afflicted)");
         AutoTestAssert.True(player.Creature.GetPowerAmount<Downfall.Core.DownfallTempHpPower>() >= 3, "OuroborosCard granted 3 Temp HP");
     }
+
+    public static async Task TestCommonCardsInCombat()
+    {
+        var (player, _, combatState) = await DownfallAutoTestRunner.StartCombatAsync<TheCollector>("COLLECTOR_10B");
+        var pcs = AutoTestAssert.NotNull(player.PlayerCombatState, "PlayerCombatState");
+        var enemy = AutoTestAssert.NotNull(combatState.HittableEnemies.FirstOrDefault(), "Enemy");
+        var ctx = new BlockingPlayerChoiceContext();
+
+        await CreatureCmd.SetMaxAndCurrentHp(enemy, 1000m);
+
+        static async Task ClearHandAsync(PlayerCombatState p)
+        {
+            foreach (var c in p.Hand.Cards.ToList())
+                await CardPileCmd.Add(c, PileType.Discard);
+        }
+
+        // 1. Arrogance -> Block + NextAttackAppliesDoomPower -> next Attack applies Doom & clears power!
+        await ClearHandAsync(pcs);
+        pcs.Energy = 10;
+        var arrogance = combatState.CreateCard<Arrogance>(player);
+        await CardPileCmd.Add(arrogance, PileType.Hand);
+        await CardCmd.AutoPlay(ctx, arrogance, null, AutoPlayType.Default);
+        AutoTestAssert.Equal(7, player.Creature.Block, "Arrogance granted 7 Block");
+        AutoTestAssert.Equal(4, player.Creature.GetPowerAmount<NextAttackAppliesDoomPower>(), "Arrogance applied NextAttackAppliesDoomPower(4)");
+
+        var ashen = combatState.CreateCard<AshenStrike>(player);
+        await CardPileCmd.Add(ashen, PileType.Hand);
+        await CardCmd.AutoPlay(ctx, ashen, enemy, AutoPlayType.Default);
+        AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<NextAttackAppliesDoomPower>(), "NextAttackAppliesDoomPower consumed on Attack");
+        AutoTestAssert.Equal(4, enemy.GetPowerAmount<CollectorDoomPower>(), "NextAttackAppliesDoomPower applied 4 Doom on Attack");
+        AutoTestAssert.True(pcs.Hand.Cards.Any(c => c is Ember), "AshenStrike added an Ember to Hand");
+
+        // 2. BramblesparKindling+ (Unplayable, Exhaust -> BurningStrike+) & IronbarkKindling+ (Unplayable, Retain, Exhaust -> 9 Block)
+        var bramble = combatState.CreateCard<BramblesparKindling>(player);
+        bramble.UpgradeInternal();
+        AutoTestAssert.True(!bramble.CanPlay(), "BramblesparKindling is Unplayable");
+        await CardPileCmd.Add(bramble, PileType.Hand);
+        await CardCmd.Exhaust(ctx, bramble);
+        var burningStrike = AutoTestAssert.NotNull(pcs.Hand.Cards.OfType<BurningStrike>().FirstOrDefault(), "BramblesparKindling+ Exhaust added BurningStrike+ to Hand");
+        AutoTestAssert.True(burningStrike.IsUpgraded, "BurningStrike from BramblesparKindling+ is upgraded");
+        int hpBeforeBurn = enemy.CurrentHp;
+        await CardCmd.AutoPlay(ctx, burningStrike, enemy, AutoPlayType.Default);
+        AutoTestAssert.True(enemy.CurrentHp < hpBeforeBurn, "BurningStrike+ dealt damage");
+
+        var ironbark = combatState.CreateCard<IronbarkKindling>(player);
+        ironbark.UpgradeInternal();
+        AutoTestAssert.True(!ironbark.CanPlay(), "IronbarkKindling is Unplayable");
+        AutoTestAssert.True(ironbark.Keywords.Contains(CardKeyword.Retain), "IronbarkKindling+ has Retain");
+        int blockBeforeIron = player.Creature.Block;
+        await CardPileCmd.Add(ironbark, PileType.Hand);
+        await CardCmd.Exhaust(ctx, ironbark);
+        AutoTestAssert.Equal(blockBeforeIron + 9, player.Creature.Block, "IronbarkKindling Exhaust granted 9 Block");
+
+        // 3. CollectorCondemn (Vulnerable + Doom) & CollectorSuckerPunch (dmg + Weak) & ItMattersNot (Block + +1 Weak/Vuln)
+        await PowerCmd.Remove<CollectorDoomPower>(enemy);
+        var condemn = combatState.CreateCard<CollectorCondemn>(player);
+        await CardPileCmd.Add(condemn, PileType.Hand);
+        await CardCmd.AutoPlay(ctx, condemn, enemy, AutoPlayType.Default);
+        AutoTestAssert.Equal(1, enemy.GetPowerAmount<VulnerablePower>(), "Condemn applied 1 Vulnerable");
+        AutoTestAssert.Equal(5, enemy.GetPowerAmount<CollectorDoomPower>(), "Condemn applied 5 Doom");
+
+        var sucker = combatState.CreateCard<CollectorSuckerPunch>(player);
+        await CardPileCmd.Add(sucker, PileType.Hand);
+        await CardCmd.AutoPlay(ctx, sucker, enemy, AutoPlayType.Default);
+        AutoTestAssert.Equal(1, enemy.GetPowerAmount<WeakPower>(), "CollectorSuckerPunch applied 1 Weak");
+
+        int blockBeforeImn = player.Creature.Block;
+        var imn = combatState.CreateCard<ItMattersNot>(player);
+        await CardPileCmd.Add(imn, PileType.Hand);
+        await CardCmd.AutoPlay(ctx, imn, null, AutoPlayType.Default);
+        AutoTestAssert.Equal(blockBeforeImn + 13, player.Creature.Block, "ItMattersNot granted 13 Block");
+        AutoTestAssert.Equal(2, enemy.GetPowerAmount<WeakPower>(), "ItMattersNot increased Weak 1 -> 2");
+        AutoTestAssert.Equal(2, enemy.GetPowerAmount<VulnerablePower>(), "ItMattersNot increased Vulnerable 1 -> 2");
+
+        // 4. InevitableDemise -> damage + CollectorDemisePower(1)
+        var demiseCard = combatState.CreateCard<InevitableDemise>(player);
+        await CardPileCmd.Add(demiseCard, PileType.Hand);
+        await CardCmd.AutoPlay(ctx, demiseCard, enemy, AutoPlayType.Default);
+        AutoTestAssert.Equal(1, enemy.GetPowerAmount<CollectorDemisePower>(), "InevitableDemise applied CollectorDemisePower(1)");
+
+        // 5. Invigorate+ ("Flash") -> Pyre + Choose Trip+ or Blind+!
+        await ClearHandAsync(pcs);
+        var invFodder = combatState.CreateCard<CollectorDefend>(player);
+        var inv = combatState.CreateCard<Invigorate>(player);
+        inv.UpgradeInternal();
+        await CardPileCmd.Add(invFodder, PileType.Hand);
+        await CardPileCmd.Add(inv, PileType.Hand);
+        using (DownfallAutoTestRunner.PreferCards(c => c is CollectorTrip))
+        {
+            await CardCmd.AutoPlay(ctx, inv, null, AutoPlayType.Default);
+        }
+        var trip = AutoTestAssert.NotNull(pcs.Hand.Cards.OfType<CollectorTrip>().FirstOrDefault(), "Invigorate+ added CollectorTrip+ to Hand");
+        AutoTestAssert.True(trip.IsUpgraded, "CollectorTrip from Invigorate+ is upgraded");
+        AutoTestAssert.Equal(TargetType.AllEnemies, trip.TargetType, "CollectorTrip+ targets AllEnemies");
+        int vulnBeforeTrip = enemy.GetPowerAmount<VulnerablePower>();
+        await CardCmd.AutoPlay(ctx, trip, null, AutoPlayType.Default);
+        AutoTestAssert.Equal(vulnBeforeTrip + 2, enemy.GetPowerAmount<VulnerablePower>(), "CollectorTrip+ applied 2 Vulnerable to all enemies");
+
+        var blind = combatState.CreateCard<CollectorBlind>(player);
+        int weakBeforeBlind = enemy.GetPowerAmount<WeakPower>();
+        await CardPileCmd.Add(blind, PileType.Hand);
+        await CardCmd.AutoPlay(ctx, blind, enemy, AutoPlayType.Default);
+        AutoTestAssert.Equal(weakBeforeBlind + 2, enemy.GetPowerAmount<WeakPower>(), "CollectorBlind applied 2 Weak");
+
+        // 6. JadedJabs (Pyre 2-cost YouAreMine -> 2 + 1 = 3 Shivs!)
+        await ClearHandAsync(pcs);
+        var jabFodder = combatState.CreateCard<YouAreMine>(player); // cost 2
+        var jabs = combatState.CreateCard<JadedJabs>(player);
+        await CardPileCmd.Add(jabFodder, PileType.Hand);
+        await CardPileCmd.Add(jabs, PileType.Hand);
+        await CardCmd.AutoPlay(ctx, jabs, enemy, AutoPlayType.Default);
+        int shivCount = pcs.Hand.Cards.Count(c => c is MegaCrit.Sts2.Core.Models.Cards.Shiv);
+        AutoTestAssert.Equal(3, shivCount, "JadedJabs Pyring 2-cost card added 2 + 1 = 3 Shivs");
+
+        // 7. MysteryWeaving (9 Block - 2 * other cards in Hand!)
+        await ClearHandAsync(pcs);
+        await CreatureCmd.LoseBlock(ctx, player.Creature, player.Creature.Block, null);
+        var mw1 = combatState.CreateCard<CollectorStrike>(player);
+        var mw2 = combatState.CreateCard<CollectorStrike>(player);
+        var mystery = combatState.CreateCard<MysteryWeaving>(player);
+        await CardPileCmd.Add(mw1, PileType.Hand);
+        await CardPileCmd.Add(mw2, PileType.Hand);
+        await CardPileCmd.Add(mystery, PileType.Hand);
+        await CardCmd.AutoPlay(ctx, mystery, null, AutoPlayType.Default);
+        AutoTestAssert.Equal(5, player.Creature.Block, "MysteryWeaving with 2 other cards in Hand granted 9 - 4 = 5 Block");
+
+        // 8. Roast (0 cost Pyre 4 dmg) & SpiritLeech (13 dmg + 11 Block when Afflicted!)
+        await ClearHandAsync(pcs);
+        await CreatureCmd.LoseBlock(ctx, player.Creature, player.Creature.Block, null);
+        var roastFodder = combatState.CreateCard<CollectorDefend>(player);
+        var roast = combatState.CreateCard<Roast>(player);
+        await CardPileCmd.Add(roastFodder, PileType.Hand);
+        await CardPileCmd.Add(roast, PileType.Hand);
+        int hpBeforeRoast = enemy.CurrentHp;
+        await CardCmd.AutoPlay(ctx, roast, enemy, AutoPlayType.Default);
+        AutoTestAssert.True(enemy.CurrentHp < hpBeforeRoast, "Roast dealt damage");
+        AutoTestAssert.True(pcs.ExhaustPile.Cards.Contains(roastFodder), "Roast Pyred fodder card");
+
+        var leech = combatState.CreateCard<SpiritLeech>(player);
+        await CardPileCmd.Add(leech, PileType.Hand);
+        AutoTestAssert.True(CollectorMechanics.IsAfflicted(enemy), "Enemy is Afflicted before SpiritLeech");
+        await CardCmd.AutoPlay(ctx, leech, enemy, AutoPlayType.Default);
+        AutoTestAssert.Equal(11, player.Creature.Block, "SpiritLeech granted 11 Block against Afflicted enemy");
+
+        // 9. ScorchingRay (X-cost: 3 Energy -> 3 hits of 8 dmg!)
+        await ClearHandAsync(pcs);
+        await PowerCmd.Remove<VulnerablePower>(enemy);
+        pcs.Energy = 3;
+        int hpBeforeRay = enemy.CurrentHp;
+        var ray = combatState.CreateCard<ScorchingRay>(player);
+        await CardPileCmd.Add(ray, PileType.Hand);
+        AutoTestAssert.True(ray.TryManualPlay(null), "Play ScorchingRay at X=3");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(hpBeforeRay - 24, enemy.CurrentHp, "ScorchingRay at X=3 dealt 3 x 8 = 24 damage");
+
+        // 10. Wildfire (4 dmg per unique Debuff on enemy! Enemy has Weak + Doom + Demise = 3 debuffs -> 12 dmg!)
+        pcs.Energy = 10;
+        int debuffs = enemy.Powers.Count(p => p.Type == MegaCrit.Sts2.Core.Entities.Powers.PowerType.Debuff);
+        AutoTestAssert.True(debuffs >= 2, $"Enemy has at least 2 debuffs before Wildfire ({debuffs})");
+        int hpBeforeWildfire = enemy.CurrentHp;
+        var wildfire = combatState.CreateCard<Wildfire>(player);
+        await CardPileCmd.Add(wildfire, PileType.Hand);
+        await CardCmd.AutoPlay(ctx, wildfire, enemy, AutoPlayType.Default);
+        AutoTestAssert.Equal(hpBeforeWildfire - debuffs * 4, enemy.CurrentHp, $"Wildfire dealt {debuffs} x 4 = {debuffs * 4} damage");
+
+        // 11. Torchbearer (10 Temp HP, Exhaust) & Misdirect (2 Block + NextTurnReserve 1)
+        int tempBefore = player.Creature.GetPowerAmount<Downfall.Core.DownfallTempHpPower>();
+        var torchbearer = combatState.CreateCard<Torchbearer>(player);
+        await CardPileCmd.Add(torchbearer, PileType.Hand);
+        await CardCmd.AutoPlay(ctx, torchbearer, null, AutoPlayType.Default);
+        AutoTestAssert.Equal(tempBefore + 10, player.Creature.GetPowerAmount<Downfall.Core.DownfallTempHpPower>(), "Torchbearer granted 10 Temp HP");
+        AutoTestAssert.True(pcs.ExhaustPile.Cards.Contains(torchbearer), "Torchbearer Exhausted");
+
+        var misdirect = combatState.CreateCard<Misdirect>(player);
+        await CardPileCmd.Add(misdirect, PileType.Hand);
+        await CardCmd.AutoPlay(ctx, misdirect, null, AutoPlayType.Default);
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<NextTurnReservePower>(), "Misdirect applied NextTurnReservePower(1)");
+
+        // 12. SapStrength ("Deathmark": 7 dmg -> LoseHpNextTurnPower(14) triggers at end of enemy turn!)
+        //     & SomberShield (Pyre CollectorStrike -> AddCopyNextTurnPower adds CollectorStrike next turn!)
+        await PowerCmd.Remove<CollectorDoomPower>(enemy);
+        await ClearHandAsync(pcs);
+        var sap = combatState.CreateCard<SapStrength>(player);
+        await CardPileCmd.Add(sap, PileType.Hand);
+        await CardCmd.AutoPlay(ctx, sap, enemy, AutoPlayType.Default);
+        AutoTestAssert.Equal(14, enemy.GetPowerAmount<LoseHpNextTurnPower>(), "SapStrength applied LoseHpNextTurnPower(14) = 2x7 unblocked damage");
+
+        var somberFodder1 = combatState.CreateCard<AshenStrike>(player);
+        var somber1 = combatState.CreateCard<SomberShield>(player);
+        await CardPileCmd.Add(somberFodder1, PileType.Hand);
+        await CardPileCmd.Add(somber1, PileType.Hand);
+        await CardCmd.AutoPlay(ctx, somber1, null, AutoPlayType.Default);
+
+        // Stack a second SomberShield to confirm AddCopyNextTurnPower returns BOTH queued cards!
+        var somberFodder2 = combatState.CreateCard<Roast>(player);
+        var somber2 = combatState.CreateCard<SomberShield>(player);
+        await CardPileCmd.Add(somberFodder2, PileType.Hand);
+        await CardPileCmd.Add(somber2, PileType.Hand);
+        await CardCmd.AutoPlay(ctx, somber2, null, AutoPlayType.Default);
+        AutoTestAssert.Equal(2, player.Creature.GetPowerAmount<AddCopyNextTurnPower>(), "Two SomberShield plays stacked AddCopyNextTurnPower to 2");
+
+        // Also apply Arrogance unused before ending turn to confirm NextAttackAppliesDoomPower expires at turn end!
+        var arroganceUnused = combatState.CreateCard<Arrogance>(player);
+        await CardPileCmd.Add(arroganceUnused, PileType.Hand);
+        await CardCmd.AutoPlay(ctx, arroganceUnused, null, AutoPlayType.Default);
+        AutoTestAssert.Equal(4, player.Creature.GetPowerAmount<NextAttackAppliesDoomPower>(), "Unused Arrogance applied NextAttackAppliesDoomPower(4)");
+
+        int hpBeforeDeathmark = enemy.CurrentHp;
+        await DownfallAutoTestRunner.EndTurnAndWaitForRoundAsync(player, combatState.RoundNumber + 1);
+        AutoTestAssert.Equal(hpBeforeDeathmark - 14, enemy.CurrentHp, "LoseHpNextTurnPower dealt 14 HP loss at end of enemy turn");
+        AutoTestAssert.Equal(0, enemy.GetPowerAmount<LoseHpNextTurnPower>(), "LoseHpNextTurnPower removed itself after triggering");
+        AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<NextAttackAppliesDoomPower>(), "Unused NextAttackAppliesDoomPower expired at end of turn");
+        AutoTestAssert.True(pcs.Hand.Cards.Any(c => c is AshenStrike), "AddCopyNextTurnPower added copy of Pyred AshenStrike into Hand next turn");
+        AutoTestAssert.True(pcs.Hand.Cards.Any(c => c is Roast), "AddCopyNextTurnPower added copy of second Pyred card (Roast) into Hand next turn");
+        AutoTestAssert.True(!player.Creature.HasPower<AddCopyNextTurnPower>(), "AddCopyNextTurnPower removed itself after triggering");
+    }
 }

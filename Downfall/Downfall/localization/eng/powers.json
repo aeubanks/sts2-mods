@@ -583,5 +583,14 @@
   "DOWNFALL-NEXT_TURN_RESERVE_POWER.smartDescription": "At the start of your next turn, gain [blue]{Amount}[/blue] {Amount:plural:[gold]Reserve[/gold]|[gold]Reserves[/gold]}.",
   "DOWNFALL-STRENGTH_OVER_TURNS_POWER.title": "Empower",
   "DOWNFALL-STRENGTH_OVER_TURNS_POWER.description": "At the start of your next turns, gain [gold]Strength[/gold].",
-  "DOWNFALL-STRENGTH_OVER_TURNS_POWER.smartDescription": "At the start of your next [blue]{Amount}[/blue] {Amount:plural:turn|turns}, gain [blue]{StrengthPerTurn}[/blue] [gold]Strength[/gold]."
+  "DOWNFALL-STRENGTH_OVER_TURNS_POWER.smartDescription": "At the start of your next [blue]{Amount}[/blue] {Amount:plural:turn|turns}, gain [blue]{StrengthPerTurn}[/blue] [gold]Strength[/gold].",
+  "DOWNFALL-NEXT_ATTACK_APPLIES_DOOM_POWER.title": "Doomed Attack",
+  "DOWNFALL-NEXT_ATTACK_APPLIES_DOOM_POWER.description": "Your next Attack this turn also applies [gold]Doom[/gold].",
+  "DOWNFALL-NEXT_ATTACK_APPLIES_DOOM_POWER.smartDescription": "Your next Attack this turn also applies [blue]{Amount}[/blue] [gold]Doom[/gold].",
+  "DOWNFALL-LOSE_HP_NEXT_TURN_POWER.title": "Deathmarked",
+  "DOWNFALL-LOSE_HP_NEXT_TURN_POWER.description": "At the end of its turn, loses HP.",
+  "DOWNFALL-LOSE_HP_NEXT_TURN_POWER.smartDescription": "At the end of its turn, loses [blue]{Amount}[/blue] HP.",
+  "DOWNFALL-ADD_COPY_NEXT_TURN_POWER.title": "Gaining Card",
+  "DOWNFALL-ADD_COPY_NEXT_TURN_POWER.description": "At the start of your next turn, add copies of the stored cards into your [gold]Hand[/gold].",
+  "DOWNFALL-ADD_COPY_NEXT_TURN_POWER.smartDescription": "At the start of your next turn, add [gold]{CardNames}[/gold] into your [gold]Hand[/gold]."
 }
