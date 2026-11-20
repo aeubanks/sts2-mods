@@ -191,6 +191,7 @@ internal static class DownfallAutoTestRunner
                 ("SlimeboundVisualsRuntime", SlimeboundTests.TestVisualsRuntime),
                 ("SlimeboundStarterCombat", SlimeboundTests.TestStarterCombat),
                 ("SlimeboundCommonCardsInCombat", SlimeboundTests.TestCommonCardsInCombat),
+                ("SlimeboundUncommonBatch1InCombat", SlimeboundTests.TestUncommonBatch1AndSpecialistsInCombat),
             ];
 
             int matchedIndex = 0;
@@ -679,6 +680,7 @@ internal static class DownfallAutoTestRunner
         AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-CONSUME_KEYWORD.title").Exists(), "Missing Consume title loc");
         AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-CONSUME_KEYWORD.description").Exists(), "Missing Consume desc loc");
         AutoTestAssert.True(new LocString("cards", "DOWNFALL-SELF_FORMING_GOO.selectionScreenPrompt").Exists(), "Missing SelfFormingGoo prompt loc");
+        AutoTestAssert.True(new LocString("cards", "DOWNFALL-SLIMEBOUND_DISSOLVE.selectionScreenPrompt").Exists(), "Missing SlimeboundDissolve prompt loc");
 
         return Task.CompletedTask;
     }

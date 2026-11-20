@@ -101,6 +101,58 @@ internal static class SlimeMechanics
         return await SplitSlimeAsync(choiceContext, player, slime) ? slime : null;
     }
 
+    internal static async Task<SlimeOrb?> SpawnSpecialistSlimeAsync(PlayerChoiceContext choiceContext, Player player)
+    {
+        if (!player.Creature.IsAlive || CombatManager.Instance.IsOverOrEnding)
+            return null;
+
+        SlimeOrb slime = player.RunState.Rng.CombatCardGeneration.NextInt(8) switch
+        {
+            0 => (SlimeOrb)ModelDb.Orb<BronzeSlime>().ToMutable(),
+            1 => (SlimeOrb)ModelDb.Orb<HexSlime>().ToMutable(),
+            2 => (SlimeOrb)ModelDb.Orb<TorchHeadSlime>().ToMutable(),
+            3 => (SlimeOrb)ModelDb.Orb<CultistSlime>().ToMutable(),
+            4 => (SlimeOrb)ModelDb.Orb<ProtectorSlime>().ToMutable(),
+            5 => (SlimeOrb)ModelDb.Orb<ChampSlime>().ToMutable(),
+            6 => (SlimeOrb)ModelDb.Orb<DrawingSlime>().ToMutable(),
+            _ => (SlimeOrb)ModelDb.Orb<SlowingSlime>().ToMutable()
+        };
+
+        return await SplitSlimeAsync(choiceContext, player, slime) ? slime : null;
+    }
+
+    /// <summary>
+    /// Exhumes up to count random Lick cards from the Exhaust Pile to Hand, preferring non-token Licks
+    /// before basic Lick tokens (matching DownfallSTS BURIED priority on Lick).
+    /// </summary>
+    internal static async Task<int> ExhumeLicksAsync(PlayerChoiceContext choiceContext, Player player, int count)
+    {
+        if (count <= 0 || !player.Creature.IsAlive || CombatManager.Instance.IsOverOrEnding || player.PlayerCombatState is not { } pcs)
+            return 0;
+
+        int exhumed = 0;
+        var rng = player.RunState.Rng.CombatCardGeneration;
+        for (int i = 0; i < count; i++)
+        {
+            if (!player.Creature.IsAlive || CombatManager.Instance.IsOverOrEnding)
+                break;
+
+            var nonTokens = pcs.ExhaustPile.Cards.OfType<SlimeCard>().Where(c => c.IsLick && c is not Cards.Lick).ToList();
+            var pool = nonTokens.Count > 0
+                ? nonTokens
+                : pcs.ExhaustPile.Cards.OfType<SlimeCard>().Where(c => c.IsLick).ToList();
+
+            if (pool.Count == 0)
+                break;
+
+            var picked = pool[rng.NextInt(pool.Count)];
+            var dest = pcs.Hand.Cards.Count >= 10 ? PileType.Discard : PileType.Hand;
+            await CardPileCmd.Add(picked, dest);
+            exhumed++;
+        }
+        return exhumed;
+    }
+
     /// <summary>
     /// Triggers the leading (newest) Slime minion's attack. Adds MinionMaster bonus once per Command card play.
     /// </summary>

@@ -415,6 +415,281 @@ internal static class SlimeboundTests
         AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<SlimedThornsPower>(), "SlimedThornsPower expired at start of Round 2");
     }
 
+    internal static async Task TestUncommonBatch1AndSpecialistsInCombat()
+    {
+        var (player, _, combatState) = await DownfallAutoTestRunner.StartCombatAsync<TheSlimeBoss>("SLIME_UNC1");
+        var pcs = AutoTestAssert.NotNull(player.PlayerCombatState, "PlayerCombatState");
+        var enemy1 = AutoTestAssert.NotNull(combatState.HittableEnemies.FirstOrDefault(), "Enemy 1");
+        var enemy2 = await CreatureCmd.Add<MegaCrit.Sts2.Core.Models.Monsters.Nibbit>(combatState);
+        var ctx = new ThrowingPlayerChoiceContext();
+        await CreatureCmd.GainMaxHp(enemy1, 1000m);
+        await CreatureCmd.GainMaxHp(enemy2, 1000m);
+
+        // 1. All 8 Specialist Slimes verified individually!
+        // (a) BronzeSlime: 10 AoE, sets IsStunned=true, skips next attack & unstuns!
+        var bronze = AutoTestAssert.NotNull(await SlimeMechanics.SplitSlimeAsync<BronzeSlime>(ctx, player), "Split BronzeSlime");
+        int e1Hp = enemy1.CurrentHp;
+        int e2Hp = enemy2.CurrentHp;
+        await SlimeMechanics.CommandAsync(ctx, player);
+        AutoTestAssert.Equal(e1Hp - 10, enemy1.CurrentHp, "BronzeSlime dealt 10 AoE to enemy1");
+        AutoTestAssert.Equal(e2Hp - 10, enemy2.CurrentHp, "BronzeSlime dealt 10 AoE to enemy2");
+        AutoTestAssert.True(bronze.IsStunned, "BronzeSlime is stunned after attacking");
+        e1Hp = enemy1.CurrentHp;
+        await SlimeMechanics.CommandAsync(ctx, player);
+        AutoTestAssert.Equal(e1Hp, enemy1.CurrentHp, "Stunned BronzeSlime skipped its attack");
+        AutoTestAssert.True(!bronze.IsStunned, "BronzeSlime unstunned after skipping");
+
+        // (b) HexSlime: 4 dmg + 6 Soulburn; (c) CultistSlime: 6 dmg then +1 permanent damage!
+        await SlimeMechanics.AbsorbAllSlimesAsync(ctx, player);
+        await PowerCmd.Remove<StrengthPower>(player.Creature);
+        var hex = AutoTestAssert.NotNull(await SlimeMechanics.SplitSlimeAsync<HexSlime>(ctx, player), "Split HexSlime");
+        await SlimeMechanics.CommandAsync(ctx, player);
+        AutoTestAssert.Equal(6, enemy1.GetPowerAmount<SoulburnPower>() + enemy2.GetPowerAmount<SoulburnPower>(), "HexSlime applied 6 Soulburn");
+
+        var cultist = AutoTestAssert.NotNull(await SlimeMechanics.SplitSlimeAsync<CultistSlime>(ctx, player), "Split CultistSlime");
+        AutoTestAssert.Equal(6m, cultist.PassiveVal, "CultistSlime starts at 6 damage");
+        await SlimeMechanics.CommandAsync(ctx, player);
+        AutoTestAssert.Equal(7m, cultist.PassiveVal, "CultistSlime scaled 6 -> 7 after attacking");
+
+        // (d) TorchHeadSlime: scales with Strength; (e) ProtectorSlime: 4 Temp Thorns; (f) ChampSlime: 1 Vuln; (g) SlowingSlime: 1 Weak; (h) DrawingSlime: 1 draw (no Potency scaling on draw)!
+        await SlimeMechanics.AbsorbAllSlimesAsync(ctx, player);
+        await PowerCmd.Remove<StrengthPower>(player.Creature);
+        await PowerCmd.Apply<StrengthPower>(ctx, player.Creature, 4m, player.Creature, null);
+        var torch = AutoTestAssert.NotNull(await SlimeMechanics.SplitSlimeAsync<TorchHeadSlime>(ctx, player), "Split TorchHeadSlime");
+        AutoTestAssert.Equal(10m, torch.PassiveVal, "TorchHeadSlime scales with Strength (6 + 4 = 10)");
+        int totalHpTorch = enemy1.CurrentHp + enemy2.CurrentHp;
+        await SlimeMechanics.CommandAsync(ctx, player);
+        AutoTestAssert.Equal(totalHpTorch - 10, enemy1.CurrentHp + enemy2.CurrentHp, "TorchHeadSlime dealt 10 damage with Strength");
+        await PowerCmd.Remove<StrengthPower>(player.Creature);
+        AutoTestAssert.Equal(6m, torch.PassiveVal, "TorchHeadSlime reverted to 6 damage after Strength removed");
+
+        await SlimeMechanics.SplitSlimeAsync<ProtectorSlime>(ctx, player);
+        await SlimeMechanics.CommandAsync(ctx, player);
+        AutoTestAssert.Equal(4, player.Creature.GetPowerAmount<SlimeTempThornsPower>(), "ProtectorSlime granted 4 temporary Thorns");
+        await PowerCmd.Remove<SlimeTempThornsPower>(player.Creature);
+        await PowerCmd.Remove<ThornsPower>(player.Creature);
+
+        await SlimeMechanics.SplitSlimeAsync<ChampSlime>(ctx, player);
+        await SlimeMechanics.CommandAsync(ctx, player);
+        AutoTestAssert.Equal(1, enemy1.GetPowerAmount<VulnerablePower>() + enemy2.GetPowerAmount<VulnerablePower>(), "ChampSlime applied 1 Vulnerable");
+
+        await SlimeMechanics.SplitSlimeAsync<SlowingSlime>(ctx, player);
+        await SlimeMechanics.CommandAsync(ctx, player);
+        AutoTestAssert.Equal(1, enemy1.GetPowerAmount<WeakPower>() + enemy2.GetPowerAmount<WeakPower>(), "SlowingSlime applied 1 Weak");
+
+        await ClearHandAndRefillEnergy(player, pcs);
+        await CardPileCmd.Add(combatState.CreateCard<SlimeboundDefend>(player), PileType.Draw, CardPilePosition.Top);
+        await CardPileCmd.Add(combatState.CreateCard<SlimeboundDefend>(player), PileType.Draw, CardPilePosition.Top);
+        await PowerCmd.Apply<PotencyPower>(ctx, player.Creature, 4m, player.Creature, null);
+        var drawing = AutoTestAssert.NotNull(await SlimeMechanics.SplitSlimeAsync<DrawingSlime>(ctx, player), "Split DrawingSlime");
+        AutoTestAssert.Equal(7m, drawing.PassiveVal, "DrawingSlime damage scaled with Potency (3 + 4 = 7)");
+        AutoTestAssert.Equal(1m, drawing.EvokeVal, "DrawingSlime draw does NOT scale with Potency (stays 1)");
+        int handBefore = pcs.Hand.Cards.Count;
+        await SlimeMechanics.CommandAsync(ctx, player);
+        AutoTestAssert.Equal(handBefore + 1, pcs.Hand.Cards.Count, "DrawingSlime drew 1 card");
+        await PowerCmd.Remove<PotencyPower>(player.Creature);
+        await PowerCmd.Remove<VulnerablePower>(enemy1);
+        await PowerCmd.Remove<VulnerablePower>(enemy2);
+        await PowerCmd.Remove<WeakPower>(enemy1);
+        await PowerCmd.Remove<WeakPower>(enemy2);
+        await PowerCmd.Remove<SoulburnPower>(enemy1);
+        await PowerCmd.Remove<SoulburnPower>(enemy2);
+        await PowerCmd.Remove<StrengthPower>(player.Creature);
+
+        // 2. AcidTongue (+2 Goop), Gluttony (1 Lick on 1st Consume/turn, IHasSecondAmount), GoopArmor (+3 Block on Consume), LevelUp (+2 Potency)!
+        await ClearHandAndRefillEnergy(player, pcs);
+        var acid = combatState.CreateCard<AcidTongue>(player);
+        var gluttony = combatState.CreateCard<Gluttony>(player);
+        var armor = combatState.CreateCard<GoopArmor>(player);
+        var lvl = combatState.CreateCard<LevelUp>(player);
+        await CardPileCmd.Add(acid, PileType.Hand);
+        await CardPileCmd.Add(gluttony, PileType.Hand);
+        await CardPileCmd.Add(armor, PileType.Hand);
+        await CardPileCmd.Add(lvl, PileType.Hand);
+        AutoTestAssert.True(acid.TryManualPlay(null), "Play AcidTongue");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.True(gluttony.TryManualPlay(null), "Play Gluttony");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.True(armor.TryManualPlay(null), "Play GoopArmor");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.True(lvl.TryManualPlay(null), "Play LevelUp");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+
+        AutoTestAssert.Equal(2, player.Creature.GetPowerAmount<AcidTonguePower>(), "AcidTonguePower(2)");
+        AutoTestAssert.Equal(1, player.Creature.GetPower<GluttonyPower>()!.RemainingThisTurn, "Gluttony starts with 1 charge (no double-add)");
+        AutoTestAssert.Equal(2, player.Creature.GetPowerAmount<PotencyPower>(), "LevelUp applied PotencyPower(2)");
+
+        // CorrosiveSpit applies 6 + 2 AcidTongue = 8 Goop!
+        var spit = combatState.CreateCard<CorrosiveSpit>(player);
+        await CardPileCmd.Add(spit, PileType.Hand);
+        AutoTestAssert.True(spit.TryManualPlay(enemy1), "Play CorrosiveSpit with AcidTongue(2)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(8, enemy1.GetPowerAmount<SlimedPower>(), "AcidTongue boosted CorrosiveSpit 6 -> 8 Goop");
+
+        // GrowthPunch on Gooped enemy1: 4 Block + 3 GoopArmor = 7 Block, triggers Gluttony (+1 Lick, charge -> 0), scales GrowthPunch 4 -> 8!
+        var gp = combatState.CreateCard<GrowthPunch>(player);
+        await CardPileCmd.Add(gp, PileType.Hand);
+        int blockBefore = player.Creature.Block;
+        AutoTestAssert.True(gp.TryManualPlay(enemy1), "Play GrowthPunch on Gooped enemy1");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(blockBefore + 7, player.Creature.Block, "GrowthPunch (4) + GoopArmor (3) = +7 Block");
+        AutoTestAssert.Equal(8m, gp.DynamicVars.Block.BaseValue, "GrowthPunch Block scaled 4 -> 8");
+        AutoTestAssert.Equal(8m, gp.DynamicVars.Damage.BaseValue, "GrowthPunch Damage scaled 4 -> 8");
+        AutoTestAssert.Equal(1, pcs.Hand.Cards.OfType<Lick>().Count(), "Gluttony added 1 Lick on 1st Consume");
+        AutoTestAssert.Equal(0, player.Creature.GetPower<GluttonyPower>()!.RemainingThisTurn, "Gluttony charge decremented 1 -> 0");
+
+        // 3. BestDefense (+7 Tackle dmg, +1 Tackle self-dmg) + FlameTackle (18+7=25 dmg, 3+1=4 self-dmg, +5 TackleBuff) + Chomp+ (0-cost Tackle this combat) + ForwardTackle (Command 2)!
+        await ClearHandAndRefillEnergy(player, pcs);
+        await CreatureCmd.LoseBlock(ctx, player.Creature, player.Creature.Block, null);
+        var bestDef = combatState.CreateCard<BestDefense>(player);
+        var flame = combatState.CreateCard<FlameTackle>(player);
+        var chomp = combatState.CreateCard<Chomp>(player);
+        CardCmd.Upgrade(chomp);
+        var fwd = combatState.CreateCard<ForwardTackle>(player);
+        await CardPileCmd.Add(bestDef, PileType.Hand);
+        await CardPileCmd.Add(flame, PileType.Hand);
+        await CardPileCmd.Add(chomp, PileType.Hand);
+        await CardPileCmd.Add(fwd, PileType.Hand);
+
+        AutoTestAssert.True(bestDef.TryManualPlay(null), "Play BestDefense");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(7, player.Creature.GetPowerAmount<TackleBuffPower>(), "BestDefense TackleBuffPower(7)");
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<TackleModifyDamagePower>(), "BestDefense TackleModifyDamagePower(1)");
+
+        int hpBefore = player.Creature.CurrentHp;
+        e1Hp = enemy1.CurrentHp;
+        AutoTestAssert.True(flame.TryManualPlay(enemy1), "Play FlameTackle (18 + 7 = 25 dmg, 3 + 1 = 4 self-dmg)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(e1Hp - 25, enemy1.CurrentHp, "FlameTackle dealt 25 damage with BestDefense");
+        AutoTestAssert.Equal(hpBefore - 4, player.Creature.CurrentHp, "FlameTackle dealt 4 self-damage with Reckless");
+        AutoTestAssert.Equal(12, player.Creature.GetPowerAmount<TackleBuffPower>(), "FlameTackle stacked TackleBuffPower 7 -> 12");
+
+        AutoTestAssert.True(chomp.TryManualPlay(enemy1), "Play Chomp+ reducing ForwardTackle to 0 this combat");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(0, fwd.EnergyCost.GetWithModifiers(CostModifiers.All), "Chomp+ reduced ForwardTackle cost to 0");
+
+        // Play the 0-cost ForwardTackle (18 + 12 TackleBuff = 30 dmg, 3 + 1 Reckless = 4 self-dmg, Command 2x)!
+        await SlimeMechanics.SplitSlimeAsync<PoisonSlime>(ctx, player);
+        int energyBeforeFwd = pcs.Energy;
+        hpBefore = player.Creature.CurrentHp;
+        e2Hp = enemy2.CurrentHp;
+        AutoTestAssert.True(fwd.TryManualPlay(enemy1), "Play 0-cost ForwardTackle");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(energyBeforeFwd, pcs.Energy, "0-cost ForwardTackle spent 0 Energy");
+        AutoTestAssert.Equal(hpBefore - 4, player.Creature.CurrentHp, "ForwardTackle dealt 4 self-damage with Reckless");
+        AutoTestAssert.Equal(e2Hp - 10, enemy2.CurrentHp, "ForwardTackle commanded PoisonSlime (3+2 Potency=5) twice (10 AoE to enemy2)");
+
+        // 4. Equalize (Consume -> triggers twice: 2x8 dmg + 2x4 heal, Exhaust)!
+        await ClearHandAndRefillEnergy(player, pcs);
+        if (player.Creature.CurrentHp > 35)
+            await CreatureCmd.Damage(ctx, player.Creature, 20m, ValueProp.Unblockable | ValueProp.Unpowered, player.Creature);
+        await PowerCmd.Remove<AcidTonguePower>(player.Creature);
+        await PowerCmd.Remove<GluttonyPower>(player.Creature);
+        await PowerCmd.Remove<GoopArmorPower>(player.Creature);
+        await PowerCmd.Remove<PotencyPower>(player.Creature);
+        await PowerCmd.Remove<TackleBuffPower>(player.Creature);
+        await PowerCmd.Remove<TackleModifyDamagePower>(player.Creature);
+        await PowerCmd.Remove<StrengthPower>(player.Creature);
+        await SlimeMechanics.ApplyGoopAsync(ctx, enemy1, player, 4, null);
+        var eq = combatState.CreateCard<Equalize>(player);
+        await CardPileCmd.Add(eq, PileType.Hand);
+        hpBefore = player.Creature.CurrentHp;
+        e1Hp = enemy1.CurrentHp;
+        AutoTestAssert.True(eq.TryManualPlay(enemy1), "Play Equalize on Gooped enemy1");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(e1Hp - 20, enemy1.CurrentHp, "Equalize dealt (8+4) + 8 = 20 damage across 2 triggers");
+        AutoTestAssert.True(player.Creature.CurrentHp >= hpBefore + 8, $"Equalize healed at least 2x4=8 HP (was {hpBefore}, now {player.Creature.CurrentHp})");
+        AutoTestAssert.True(pcs.ExhaustPile.Cards.Contains(eq), "Equalize exhausted");
+
+        // 5. SlimeboundDissolve (Quick Snack: draw 1, exhaust 2-cost card -> add 2 Licks) + ExhumeLicks priority (non-token HauntingLick before basic Lick!) via DisruptingSlam & HungryTackle!
+        await ClearHandAndRefillEnergy(player, pcs);
+        await CardPileCmd.Add(combatState.CreateCard<SlimeboundDefend>(player), PileType.Draw, CardPilePosition.Top);
+        var dissolve = combatState.CreateCard<SlimeboundDissolve>(player);
+        var twoCost = combatState.CreateCard<LivingWall>(player);
+        await CardPileCmd.Add(dissolve, PileType.Hand);
+        await CardPileCmd.Add(twoCost, PileType.Hand);
+        using (DownfallAutoTestRunner.PreferCards(c => ReferenceEquals(c, twoCost)))
+        {
+            AutoTestAssert.True(dissolve.TryManualPlay(null), "Play SlimeboundDissolve exhausting 2-cost LivingWall");
+            await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        }
+        AutoTestAssert.Equal(2, pcs.Hand.Cards.OfType<Lick>().Count(), "SlimeboundDissolve added 2 Licks for 2-cost exhausted card");
+
+        // Put 1 HauntingLick (non-token) + 2 basic Licks in ExhaustPile -> HungryTackle (1 exhume) MUST pick HauntingLick first!
+        foreach (var ex in pcs.ExhaustPile.Cards.ToList())
+            await CardPileCmd.Add(ex, PileType.Discard);
+        var hauntEx = combatState.CreateCard<HauntingLick>(player);
+        var basicEx = combatState.CreateCard<Lick>(player);
+        await CardPileCmd.Add(basicEx, PileType.Exhaust);
+        await CardPileCmd.Add(hauntEx, PileType.Exhaust);
+        await ClearHandAndRefillEnergy(player, pcs);
+        var hungry = combatState.CreateCard<HungryTackle>(player);
+        await CardPileCmd.Add(hungry, PileType.Hand);
+        AutoTestAssert.True(hungry.TryManualPlay(enemy1), "Play HungryTackle exhuming non-token Lick first");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.True(pcs.Hand.Cards.Contains(hauntEx), "ExhumeLicks preferred non-token HauntingLick over basic Lick");
+        AutoTestAssert.True(pcs.ExhaustPile.Cards.Contains(basicEx), "Basic Lick remained in Exhaust Pile");
+
+        var slam = combatState.CreateCard<DisruptingSlam>(player);
+        await CardPileCmd.Add(slam, PileType.Hand);
+        AutoTestAssert.True(slam.TryManualPlay(null), "Play DisruptingSlam exhuming remaining basic Lick");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.True(pcs.Hand.Cards.Contains(basicEx), "DisruptingSlam exhumed remaining basic Lick");
+
+        // 6. LeadByExample (1st enemy-targeting card commands leading Slime) + DivideAndConquer (10 dmg/slime + Absorb all -> +Strength) + Grow (lose 1 slot -> +2 Str, +2 Dex)!
+        await ClearHandAndRefillEnergy(player, pcs);
+        await SlimeMechanics.AbsorbAllSlimesAsync(ctx, player);
+        await PowerCmd.Remove<StrengthPower>(player.Creature);
+        await SlimeMechanics.SplitSlimeAsync<PoisonSlime>(ctx, player);
+        await SlimeMechanics.SplitSlimeAsync<PoisonSlime>(ctx, player);
+        var lead = combatState.CreateCard<LeadByExample>(player);
+        var strike = combatState.CreateCard<SlimeboundStrike>(player);
+        var dnc = combatState.CreateCard<DivideAndConquer>(player);
+        var grow = combatState.CreateCard<Grow>(player);
+        await CardPileCmd.Add(lead, PileType.Hand);
+        await CardPileCmd.Add(strike, PileType.Hand);
+        await CardPileCmd.Add(dnc, PileType.Hand);
+        await CardPileCmd.Add(grow, PileType.Hand);
+
+        AutoTestAssert.True(lead.TryManualPlay(null), "Play LeadByExample");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(1, player.Creature.GetPower<ComboAttackPower>()!.RemainingThisTurn, "LeadByExample starts with 1 charge");
+
+        // Non-enemy-targeting Defend must NOT consume LeadByExample charge!
+        var defNonTarget = combatState.CreateCard<SlimeboundDefend>(player);
+        await CardPileCmd.Add(defNonTarget, PileType.Hand);
+        AutoTestAssert.True(defNonTarget.TryManualPlay(null), "Play Self-targeting Defend");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(1, player.Creature.GetPower<ComboAttackPower>()!.RemainingThisTurn, "Defend did NOT consume LeadByExample charge");
+
+        e2Hp = enemy2.CurrentHp;
+        AutoTestAssert.True(strike.TryManualPlay(enemy1), "Play Strike triggering LeadByExample Command (3 AoE from PoisonSlime)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(e2Hp - 3, enemy2.CurrentHp, "LeadByExample commanded leading PoisonSlime (3 AoE to enemy2)");
+        AutoTestAssert.Equal(0, player.Creature.GetPower<ComboAttackPower>()!.RemainingThisTurn, "LeadByExample charge decremented to 0");
+
+        int totalHp = enemy1.CurrentHp + enemy2.CurrentHp;
+        AutoTestAssert.True(dnc.TryManualPlay(null), "Play DivideAndConquer with 2 Slimes (2x10=20 dmg + Absorb 2 -> +2 Strength)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(totalHp - 20, enemy1.CurrentHp + enemy2.CurrentHp, "DivideAndConquer dealt 20 total damage for 2 Slimes");
+        AutoTestAssert.Equal(0, SlimeMechanics.GetSlimes(player).Count, "DivideAndConquer absorbed all Slimes");
+        AutoTestAssert.Equal(2, player.Creature.GetPowerAmount<StrengthPower>(), "Absorbing 2 Slimes granted +2 Strength");
+
+        int slotsBefore = pcs.OrbQueue.Capacity;
+        AutoTestAssert.True(grow.TryManualPlay(null), "Play Grow");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(slotsBefore - 1, pcs.OrbQueue.Capacity, "Grow reduced Slime slot capacity by 1");
+        AutoTestAssert.Equal(4, player.Creature.GetPowerAmount<StrengthPower>(), "Grow granted +2 Strength (2+2=4)");
+        AutoTestAssert.Equal(2, player.Creature.GetPowerAmount<DexterityPower>(), "Grow granted +2 Dexterity");
+
+        // Verify SpawnSpecialistSlimeAsync + turn-start reset of ComboAttackPower!
+        var spec = AutoTestAssert.NotNull(await SlimeMechanics.SpawnSpecialistSlimeAsync(ctx, player), "SpawnSpecialistSlimeAsync spawned a Specialist Slime");
+        AutoTestAssert.True(pcs.OrbQueue.Orbs.Contains(spec), "Spawned Specialist Slime is in OrbQueue");
+        await CreatureCmd.GainBlock(player.Creature, 80m, ValueProp.Unpowered, null);
+        await DownfallAutoTestRunner.EndTurnAndWaitForRoundAsync(player, 2);
+        AutoTestAssert.Equal(1, player.Creature.GetPower<ComboAttackPower>()!.RemainingThisTurn, "ComboAttackPower charge reset to 1 at start of Round 2");
+    }
+
     internal static async Task ClearHandAndRefillEnergy(
         MegaCrit.Sts2.Core.Entities.Players.Player player,
         MegaCrit.Sts2.Core.Entities.Players.PlayerCombatState pcs)
