@@ -1,8 +1,10 @@
+using System.Diagnostics;
 using System.Reflection;
 using BaseLib.Abstracts;
 using Downfall.Core;
 using Downfall.Hermit;
 using Godot;
+using MegaCrit.Sts2.Core.Assets;
 using MegaCrit.Sts2.Core.AutoSlay.Helpers;
 using MegaCrit.Sts2.Core.CardSelection;
 using MegaCrit.Sts2.Core.Combat;
@@ -119,12 +121,33 @@ internal static class DownfallAutoTestRunner
         try
         {
             Log("Waiting for NGame.GameStartupComplete...");
+            var suiteTimer = Stopwatch.StartNew();
             await NGame.Instance!.GameStartupComplete.WaitAsync(TimeSpan.FromSeconds(45));
+            Log($"Startup ready in {suiteTimer.Elapsed.TotalSeconds:F1}s");
 
             NonInteractiveMode.AutoSlayerCheck = () => true;
             SaveManager.Instance.PrefsSave.FastMode = FastModeType.Instant;
+            SaveManager.Instance.SetFtuesEnabled(false);
+            PreloadManager.Enabled = false;
 
             var filter = System.Environment.GetEnvironmentVariable("DOWNFALL_AUTOTEST_FILTER");
+            var shardEnv = System.Environment.GetEnvironmentVariable("DOWNFALL_AUTOTEST_SHARD");
+            int shardIndex = 0;
+            int shardCount = 1;
+            if (!string.IsNullOrEmpty(shardEnv))
+            {
+                var parts = shardEnv.Split('/');
+                if (parts.Length != 2
+                    || !int.TryParse(parts[0], out int idx)
+                    || !int.TryParse(parts[1], out int cnt)
+                    || cnt <= 0 || idx < 0 || idx >= cnt)
+                {
+                    throw new ArgumentException($"Invalid DOWNFALL_AUTOTEST_SHARD='{shardEnv}' (expected 0-indexed 'i/N')");
+                }
+                shardIndex = idx;
+                shardCount = cnt;
+            }
+
             (string Name, Func<Task> Run)[] tests =
             [
                 ("BootAndCoexistenceSmoke", TestBootAndCoexistenceSmoke),
@@ -159,12 +182,16 @@ internal static class DownfallAutoTestRunner
                 ("ChampRelicsAndPotionsInCombat", ChampTests.TestRelicsAndPotionsInCombat),
             ];
 
+            int matchedIndex = 0;
             foreach (var (name, run) in tests)
             {
                 if (!string.IsNullOrEmpty(filter) && !name.Contains(filter, StringComparison.OrdinalIgnoreCase))
                     continue;
+                if (matchedIndex++ % shardCount != shardIndex)
+                    continue;
 
                 var errorsBefore = Volatile.Read(ref _unhandledErrors);
+                var testTimer = Stopwatch.StartNew();
                 try
                 {
                     _activeCardSelector = new AutoSlayCardSelector(new Rng(1));
@@ -173,12 +200,12 @@ internal static class DownfallAutoTestRunner
                     await run().WaitAsync(TimeSpan.FromSeconds(45));
                     AutoTestAssert.Equal(errorsBefore, Volatile.Read(ref _unhandledErrors), $"{name} triggered unhandled background exceptions");
                     passed++;
-                    Log($"PASS {name}");
+                    Log($"PASS {name} ({testTimer.Elapsed.TotalSeconds:F1}s)");
                 }
                 catch (Exception ex)
                 {
                     failed++;
-                    Log($"FAIL {name}: {ex}");
+                    Log($"FAIL {name} ({testTimer.Elapsed.TotalSeconds:F1}s): {ex}");
                 }
                 finally
                 {
@@ -187,15 +214,15 @@ internal static class DownfallAutoTestRunner
             }
 
             var totalUnhandled = Volatile.Read(ref _unhandledErrors);
-            if (failed == 0 && totalUnhandled == 0 && passed > 0)
+            if (failed == 0 && totalUnhandled == 0 && matchedIndex > 0)
             {
                 exitCode = 0;
-                Log($"SUMMARY: ALL PASSED ({passed}/{passed})");
+                Log($"SUMMARY: ALL PASSED ({passed}/{passed}) in {suiteTimer.Elapsed.TotalSeconds:F1}s");
             }
             else
             {
                 exitCode = 1;
-                Log($"SUMMARY: FAILED (passed={passed}, failed={failed}, unhandled={totalUnhandled})");
+                Log($"SUMMARY: FAILED (passed={passed}, failed={failed}, matched={matchedIndex}, unhandled={totalUnhandled}) in {suiteTimer.Elapsed.TotalSeconds:F1}s");
             }
         }
         catch (Exception ex)
@@ -281,7 +308,7 @@ internal static class DownfallAutoTestRunner
         string spritePath = character.SpriteTexturePath;
 
         var player = Player.CreateForNewRun<TCharacter>(new UnlockState(SaveManager.Instance.Progress), 1uL);
-        await NGame.Instance!.StartNewSingleplayerRun(
+        var runState = await NGame.Instance!.StartNewSingleplayerRun(
             player,
             shouldSave: false,
             ActModel.GetDefaultList(),
@@ -343,13 +370,16 @@ internal static class DownfallAutoTestRunner
             }
         }
 
-        // 3. Combat + lethal damage / player death path.
-        CleanupRun();
-        var (combatPlayer, _, combatState) = await StartCombatAsync<TCharacter>(seed + "C");
+        // 3. Combat + lethal damage / player death path (reuse the same RunState — no second StartNewSingleplayerRun!).
+        var encounter = ModelDb.Encounter<MegaCrit.Sts2.Core.Models.Encounters.NibbitsWeak>().ToMutable();
+        await RunManager.Instance.EnterRoomDebug(RoomType.Monster, MapPointType.Monster, encounter, showTransition: false);
+        var combatRoom = AutoTestAssert.NotNull(runState.CurrentRoom as CombatRoom, "Entered CombatRoom");
+        var combatState = AutoTestAssert.NotNull(combatRoom.CombatState, "CombatState active");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
         var creatures = new List<NCreature>();
         CollectNodes(NRun.Instance!, creatures);
         var playerCreatureNode = AutoTestAssert.NotNull(
-            creatures.FirstOrDefault(c => c.Entity == combatPlayer.Creature),
+            creatures.FirstOrDefault(c => c.Entity == player.Creature),
             $"{character.Id} live player NCreature mounted in combat");
         AutoTestAssert.True(playerCreatureNode.Visuals.IsNodeReady(), $"{character.Id} NCreatureVisuals._Ready() completed");
         var combatSprite = AutoTestAssert.NotNull(playerCreatureNode.Visuals.Body as Sprite2D, $"{character.Id} live combat body is Sprite2D");
@@ -367,11 +397,11 @@ internal static class DownfallAutoTestRunner
             $"{character.Id} VfxSpawnPosition should be on torso (got Y={playerCreatureNode.Visuals.VfxSpawnPosition.Position.Y})");
 
         var enemy = AutoTestAssert.NotNull(combatState.HittableEnemies.FirstOrDefault(), "Enemy for lethal test");
-        for (int attempt = 0; attempt < 6 && combatPlayer.Creature.IsAlive; attempt++)
+        for (int attempt = 0; attempt < 6 && player.Creature.IsAlive; attempt++)
         {
-            await CreatureCmd.Damage(new ThrowingPlayerChoiceContext(), combatPlayer.Creature, 999m, ValueProp.Unblockable | ValueProp.Unpowered, dealer: enemy, cardSource: null, cardPlay: null);
+            await CreatureCmd.Damage(new ThrowingPlayerChoiceContext(), player.Creature, 999m, ValueProp.Unblockable | ValueProp.Unpowered, dealer: enemy, cardSource: null, cardPlay: null);
         }
-        AutoTestAssert.True(combatPlayer.Creature.IsDead, $"{character.Id} died cleanly from lethal damage");
+        AutoTestAssert.True(player.Creature.IsDead, $"{character.Id} died cleanly from lethal damage");
     }
 
     private static Task TestBootAndCoexistenceSmoke()

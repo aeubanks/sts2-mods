@@ -12,6 +12,7 @@ using MegaCrit.Sts2.Core.Entities.Relics;
 using MegaCrit.Sts2.Core.GameActions.Multiplayer;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Models.Powers;
+using MegaCrit.Sts2.Core.Nodes.Combat;
 using MegaCrit.Sts2.Core.Nodes.Rooms;
 using MegaCrit.Sts2.Core.Rooms;
 using MegaCrit.Sts2.Core.Runs;
@@ -65,8 +66,11 @@ internal static class GremlinTests
             AutoTestAssert.True(slot.Visible, $"Standby Slot{s} visible with 5 living Gremlins");
             AutoTestAssert.Equal(0, slot.ZIndex, $"Standby Slot{s} at ZIndex 0");
             AutoTestAssert.True(slot.GlobalPosition.X > 0f, $"Standby Slot{s} stays on-screen (X={slot.GlobalPosition.X})");
-            var label = slot.GetNode<Label>("HpLabel");
-            AutoTestAssert.True(label.Text.EndsWith(" 16/16"), $"Standby Slot{s} displays 16/16 HP (got '{label.Text}')");
+            var hpBar = AutoTestAssert.NotNull(slot.GetNodeOrNull<NHealthBar>("HealthBar"), $"Standby Slot{s} uses native NHealthBar");
+            AutoTestAssert.True(hpBar.HpBarContainer.Size.X > 0f && hpBar.HpBarContainer.Size.Y > 0f,
+                $"Standby Slot{s} NHealthBar has non-zero layout bounds ({hpBar.HpBarContainer.Size})");
+            var hpLabel = hpBar.GetNode<MegaCrit.Sts2.addons.mega_text.MegaLabel>("%HpLabel");
+            AutoTestAssert.Equal("16/16", hpLabel.Text, $"Standby Slot{s} native NHealthBar displays 16/16");
             var hover = hoverLayer.GetNode<Control>($"Hover{s}");
             AutoTestAssert.True(hover.Visible, $"Standby Hover{s} visible with 5 living Gremlins");
             var kind = (GremlinKind)hover.GetMeta("gremlin_kind").AsInt32();
@@ -335,6 +339,12 @@ internal static class GremlinTests
         await GremlinMob.SwapToSpecificAsync(player, combatState, GremlinKind.Fat, ctx);
         AutoTestAssert.Equal(16, player.Creature.CurrentHp, "Swapping to Fat Gremlin restored Fat's 16/16 HP");
         AutoTestAssert.Equal(11, GremlinMob.GetGremlinHp(player, damagedKind), "Previous Gremlin retained 11/16 HP in standby");
+        // Verify the standby slot now holding damagedKind updated its native NHealthBar to 11/16!
+        int damagedSlotIdx = GremlinMob.GetStandbyKinds(combatState, player).ToList().IndexOf(damagedKind);
+        AutoTestAssert.True(damagedSlotIdx >= 0, "Damaged Gremlin appears in living standby list");
+        var damagedHpBar = standbyRow.GetNode<Node2D>($"Slot{damagedSlotIdx}").GetNode<NHealthBar>("HealthBar");
+        AutoTestAssert.Equal("11/16", damagedHpBar.GetNode<MegaCrit.Sts2.addons.mega_text.MegaLabel>("%HpLabel").Text,
+            "Standby native NHealthBar updated to 11/16 after damaged Gremlin swapped out");
 
         // Verify MobStateEncoded save/load roundtrip preserves damaged HP!
         AutoTestAssert.True(!string.IsNullOrEmpty(knob.MobStateEncoded), "GremlinKnob saved MobStateEncoded");

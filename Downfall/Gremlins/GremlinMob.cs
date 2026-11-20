@@ -9,6 +9,7 @@ using MegaCrit.Sts2.Core.CardSelection;
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Commands;
 using MegaCrit.Sts2.Core.Entities.Cards;
+using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.GameActions.Multiplayer;
 using MegaCrit.Sts2.Core.HoverTips;
@@ -71,6 +72,9 @@ internal static class GremlinMob
     }
 
     private static readonly ConditionalWeakTable<Player, RunMobState> RunStates = new();
+    private static readonly ConditionalWeakTable<Node2D, Creature[]> StandbyHealthProxies = new();
+    private const float StandbyHealthBarWidth = 108f;
+    private const float StandbyHealthBarScale = 0.68f;
 
     public static readonly GremlinKind[] AllKinds =
     [
@@ -156,16 +160,6 @@ internal static class GremlinMob
         string desc = $"{hpLine}\n{powerDesc.GetFormattedText()}";
         return new HoverTip(new LocString("powers", $"{powerKey}.title"), desc);
     }
-
-    public static string ShortNameFor(GremlinKind kind) => kind switch
-    {
-        GremlinKind.Mad => "Mad",
-        GremlinKind.Fat => "Fat",
-        GremlinKind.Shield => "Shd",
-        GremlinKind.Sneaky => "Snk",
-        GremlinKind.Wizard => "Wiz",
-        _ => "Grm"
-    };
 
     public static bool IsValidGremlinSpritePath(string? path)
     {
@@ -955,10 +949,16 @@ internal static class GremlinMob
         var row = visuals.GetNodeOrNull<Node2D>(StandbyRowNodeName);
         if (row is null)
         {
-            row = CreateStandbyRowNode();
+            var templateHealthBar = creatureNode
+                .GetNodeOrNull<NCreatureStateDisplay>("%HealthBar")
+                ?.GetNodeOrNull<NHealthBar>("%HealthBar");
+            row = CreateStandbyRowNode(player, templateHealthBar, out var proxies);
+            StandbyHealthProxies.AddOrUpdate(row, proxies);
             visuals.AddChild(row);
             // Draw behind active Gremlin Body (child 1+) while staying at ZIndex = 0 (in front of combat background!).
             visuals.MoveChild(row, 0);
+            // Initialize native NHealthBars AFTER entering the SceneTree so _Ready() has wired all %Node refs!
+            InitializeStandbyHealthBars(row, proxies);
         }
 
         var hoverLayer = creatureNode.GetNodeOrNull<Control>(StandbyHoverLayerNodeName);
@@ -980,6 +980,7 @@ internal static class GremlinMob
         hoverLayer.Visible = true;
         int maxHp = Math.Max(1, player.Creature.MaxHp);
         var livingStandby = state.Order.Skip(1).Where(k => state.Hp[(int)k] > 0).ToList();
+        StandbyHealthProxies.TryGetValue(row, out var healthProxies);
 
         for (int i = 0; i < StandbySlotOffsets.Length; i++)
         {
@@ -1010,18 +1011,13 @@ internal static class GremlinMob
                     }
                 }
 
-                if (slot.GetNodeOrNull<ColorRect>("HpFill") is { } hpFill)
+                if (healthProxies is not null && slot.GetNodeOrNull<NHealthBar>("HealthBar") is { } hpBar)
                 {
-                    float ratio = Math.Clamp(hp / (float)maxHp, 0f, 1f);
-                    hpFill.OffsetRight = -26f + 52f * ratio;
-                    hpFill.Color = ratio > 0.5f
-                        ? new Color(0.84f, 0.22f, 0.22f, 1f)
-                        : new Color(0.95f, 0.45f, 0.15f, 1f);
-                }
-
-                if (slot.GetNodeOrNull<Label>("HpLabel") is { } hpLabel)
-                {
-                    hpLabel.Text = $"{ShortNameFor(kind)} {hp}/{maxHp}";
+                    var proxy = healthProxies[i];
+                    proxy.SetMaxHpInternal(maxHp);
+                    proxy.SetCurrentHpInternal(hp);
+                    hpBar.UpdateWidthRelativeToReferenceValue(maxHp, StandbyHealthBarWidth);
+                    hpBar.RefreshValues();
                 }
             }
 
@@ -1033,7 +1029,10 @@ internal static class GremlinMob
         }
     }
 
-    private static Node2D CreateStandbyRowNode()
+    private static Node2D CreateStandbyRowNode(
+        Player player,
+        NHealthBar? templateHealthBar,
+        out Creature[] proxies)
     {
         // IMPORTANT: Keep ZIndex = 0 (never negative!) so Godot draws standby Gremlins IN FRONT of
         // the ZIndex = 0 combat room background, while MoveChild(row, 0) keeps them BEHIND active Body.
@@ -1042,6 +1041,16 @@ internal static class GremlinMob
             Name = StandbyRowNodeName,
             ZIndex = 0
         };
+
+        int maxHp = Math.Max(1, player.Creature.MaxHp);
+        proxies = new Creature[StandbySlotOffsets.Length];
+
+        PackedScene? healthBarScene = null;
+        string? scenePath = templateHealthBar?.SceneFilePath;
+        if (string.IsNullOrEmpty(scenePath) && ResourceLoader.Exists("res://scenes/combat/health_bar.tscn"))
+            scenePath = "res://scenes/combat/health_bar.tscn";
+        if (!string.IsNullOrEmpty(scenePath) && ResourceLoader.Exists(scenePath))
+            healthBarScene = ResourceLoader.Load<PackedScene>(scenePath);
 
         foreach (int i in StandbyDrawOrder)
         {
@@ -1061,51 +1070,48 @@ internal static class GremlinMob
             };
             slot.AddChild(sprite);
 
-            var hpBg = new ColorRect
-            {
-                Name = "HpBg",
-                MouseFilter = Control.MouseFilterEnum.Ignore,
-                Color = new Color(0.08f, 0.08f, 0.12f, 0.88f),
-                OffsetLeft = -28f,
-                OffsetRight = 28f,
-                OffsetTop = 0f,
-                OffsetBottom = 12f
-            };
-            slot.AddChild(hpBg);
+            var proxy = new Creature(player, maxHp, maxHp);
+            proxies[i] = proxy;
 
-            var hpFill = new ColorRect
+            if (healthBarScene?.Instantiate<NHealthBar>() is { } hpBar)
             {
-                Name = "HpFill",
-                MouseFilter = Control.MouseFilterEnum.Ignore,
-                Color = new Color(0.84f, 0.22f, 0.22f, 1f),
-                OffsetLeft = -26f,
-                OffsetRight = 26f,
-                OffsetTop = 2f,
-                OffsetBottom = 10f
-            };
-            slot.AddChild(hpFill);
-
-            var hpLabel = new Label
-            {
-                Name = "HpLabel",
-                MouseFilter = Control.MouseFilterEnum.Ignore,
-                HorizontalAlignment = HorizontalAlignment.Center,
-                VerticalAlignment = VerticalAlignment.Center,
-                OffsetLeft = -44f,
-                OffsetRight = 44f,
-                OffsetTop = 12f,
-                OffsetBottom = 26f
-            };
-            hpLabel.AddThemeFontSizeOverride("font_size", 11);
-            hpLabel.AddThemeColorOverride("font_color", Colors.White);
-            hpLabel.AddThemeColorOverride("font_outline_color", Colors.Black);
-            hpLabel.AddThemeConstantOverride("outline_size", 3);
-            slot.AddChild(hpLabel);
+                hpBar.Name = "HealthBar";
+                hpBar.Scale = new Vector2(StandbyHealthBarScale, StandbyHealthBarScale);
+                hpBar.Position = new Vector2(-StandbyHealthBarWidth * StandbyHealthBarScale * 0.5f, 2f);
+                SetMouseFilterIgnoreRecursive(hpBar);
+                slot.AddChild(hpBar);
+            }
 
             row.AddChild(slot);
         }
 
         return row;
+    }
+
+    private static void InitializeStandbyHealthBars(Node2D row, Creature[] proxies)
+    {
+        for (int i = 0; i < proxies.Length; i++)
+        {
+            if (row.GetNodeOrNull<Node2D>($"Slot{i}")?.GetNodeOrNull<NHealthBar>("HealthBar") is not { } hpBar)
+                continue;
+
+            if (hpBar.GetNodeOrNull<Control>("%BlockContainer") is { } blockContainer)
+                blockContainer.Visible = false;
+            if (hpBar.GetNodeOrNull<Control>("%BlockOutline") is { } blockOutline)
+                blockOutline.Visible = false;
+
+            hpBar.HpBarContainer.SetAnchorsPreset(Control.LayoutPreset.TopLeft);
+            hpBar.HpBarContainer.Position = Vector2.Zero;
+            hpBar.SetCreature(proxies[i]);
+        }
+    }
+
+    private static void SetMouseFilterIgnoreRecursive(Node node)
+    {
+        if (node is Control ctrl)
+            ctrl.MouseFilter = Control.MouseFilterEnum.Ignore;
+        foreach (var child in node.GetChildren())
+            SetMouseFilterIgnoreRecursive(child);
     }
 
     private static Control CreateStandbyHoverLayer(Player player)

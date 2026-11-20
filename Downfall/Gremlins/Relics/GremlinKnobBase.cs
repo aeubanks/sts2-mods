@@ -12,16 +12,16 @@ namespace Downfall.Gremlins.Relics;
 
 public abstract class GremlinKnobBase : GremlinRelic
 {
-    private string? _mobStateEncoded;
+    private string _mobStateEncoded = string.Empty;
 
     [SavedProperty]
-    public string? MobStateEncoded
+    public string MobStateEncoded
     {
         get => _mobStateEncoded;
         set
         {
             AssertMutable();
-            _mobStateEncoded = value;
+            _mobStateEncoded = value ?? string.Empty;
         }
     }
 
