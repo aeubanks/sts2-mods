@@ -237,16 +237,16 @@ public abstract class BronzeCard(
         decimal baseDamage,
         int hitCount = 1)
     {
-        if (owner.Creature.CombatState is null || CombatManager.Instance.IsOverOrEnding)
+        if (hitCount <= 0 || owner.Creature.CombatState is null || CombatManager.Instance.IsOverOrEnding)
+            return;
+
+        var resolved = ResolveTarget(owner, target);
+        if (resolved is null)
             return;
 
         for (int i = 0; i < hitCount; i++)
         {
-            if (!owner.Creature.IsAlive || CombatManager.Instance.IsOverOrEnding)
-                return;
-
-            var resolved = ResolveTarget(owner, target);
-            if (resolved is null)
+            if (!owner.Creature.IsAlive || !resolved.IsAlive || CombatManager.Instance.IsOverOrEnding)
                 return;
 
             if (isFromPower || sourceCard is null)

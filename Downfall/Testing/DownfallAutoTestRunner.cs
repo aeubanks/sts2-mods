@@ -227,6 +227,7 @@ internal static class DownfallAutoTestRunner
                 ("AutomatonStarterEncodeAndFunctionCompile", AutomatonTests.TestStarterEncodeAndFunctionCompile),
                 ("AutomatonCommonCardsInCombat", AutomatonTests.TestCommonCardsInCombat),
                 ("AutomatonUncommonBatch1InCombat", AutomatonTests.TestUncommonBatch1InCombat),
+                ("AutomatonUncommonBatch2InCombat", AutomatonTests.TestUncommonBatch2InCombat),
             ];
 
             int matchedIndex = 0;
@@ -803,6 +804,8 @@ internal static class DownfallAutoTestRunner
         }
         AutoTestAssert.True(new LocString("cards", "DOWNFALL-BIT_SHIFT.selectionScreenPrompt").Exists(), "Missing BitShift prompt");
         AutoTestAssert.True(new LocString("cards", "DOWNFALL-CUT_THROUGH.selectionScreenPrompt").Exists(), "Missing CutThrough prompt");
+        AutoTestAssert.True(new LocString("cards", "DOWNFALL-REFACTOR.selectionScreenPrompt").Exists(), "Missing Refactor prompt");
+        AutoTestAssert.True(new LocString("cards", "DOWNFALL-BRONZE_RETURN.selectionScreenPrompt").Exists(), "Missing BronzeReturn prompt");
 
         return Task.CompletedTask;
     }

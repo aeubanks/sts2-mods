@@ -16,6 +16,7 @@ using MegaCrit.Sts2.Core.Models.Powers;
 using MegaCrit.Sts2.Core.Nodes.Orbs;
 using MegaCrit.Sts2.Core.Nodes.Rooms;
 using MegaCrit.Sts2.Core.Runs;
+using MegaCrit.Sts2.Core.ValueProps;
 
 namespace Downfall.Testing;
 
@@ -750,5 +751,225 @@ internal static class AutomatonTests
         await ibPower.AfterPlayerTurnStart(ctx, player);
         AutoTestAssert.Equal(CardPile.MaxCardsInHand, pcs.Hand.Cards.Count, "InfiniteBeamsPower did not exceed MaxCardsInHand");
         AutoTestAssert.Equal(discardBeamsBefore + 1, pcs.DiscardPile.Cards.Count(c => c is MinorBeam), "InfiniteBeamsPower overflowed MinorBeam to Discard when Hand full");
+    }
+
+    internal static async Task TestUncommonBatch2InCombat()
+    {
+        var (player, _, combatState) = await DownfallAutoTestRunner.StartCombatAsync<TheAutomaton>("AUTO_UNC2");
+        var pcs = AutoTestAssert.NotNull(player.PlayerCombatState, "PlayerCombatState");
+        var enemy = AutoTestAssert.NotNull(combatState.HittableEnemies.FirstOrDefault(e => e.IsAlive), "Alive enemy");
+        var ctx = new ThrowingPlayerChoiceContext();
+
+        await CreatureCmd.SetMaxAndCurrentHp(enemy, 1500);
+        if (enemy.Block > 0)
+            await CreatureCmd.LoseBlock(ctx, enemy, enemy.Block, null);
+
+        async Task ClearHandAndRefillAsync()
+        {
+            foreach (var c in pcs.Hand.Cards.ToList())
+                await CardPileCmd.Add(c, PileType.Discard);
+            pcs.Energy = 20;
+        }
+
+        void ClearSequence()
+        {
+            foreach (var orb in AutomatonMechanics.GetEncodedOrbs(player))
+                AutomatonMechanics.RemoveEncodedOrb(player, orb);
+        }
+
+        // 1. Perfection() Easter Egg: Constructor (Slot 0: 5->10 Block) + Separator (Slot 1: 6->12 dmg) + Terminator (Slot 2: PlayTwice!)
+        await ClearHandAndRefillAsync();
+        ClearSequence();
+        var perfCtor = combatState.CreateCard<Constructor>(player);
+        var perfSep = combatState.CreateCard<Downfall.Automaton.Cards.Separator>(player);
+        var perfTerm = combatState.CreateCard<Terminator>(player);
+        await CardPileCmd.Add(perfCtor, PileType.Hand);
+        await CardPileCmd.Add(perfSep, PileType.Hand);
+        await CardPileCmd.Add(perfTerm, PileType.Hand);
+        await PlayCardAsync(perfCtor);
+        await PlayCardAsync(perfSep, enemy);
+        await PlayCardAsync(perfTerm);
+
+        var perfFunc = AutoTestAssert.NotNull(pcs.Hand.Cards.OfType<FunctionCard>().FirstOrDefault(), "Perfection() FunctionCard created");
+        AutoTestAssert.Equal("Perfection()", perfFunc.Title, "Constructor + Separator + Terminator compiled as 'Perfection()'");
+        AutoTestAssert.True(perfFunc.PlayTwice, "Terminator in Slot 2 set PlayTwice on FunctionCard");
+
+        if (player.Creature.Block > 0)
+            await CreatureCmd.LoseBlock(ctx, player.Creature, player.Creature.Block, null);
+        int hpBeforePerf = enemy.CurrentHp;
+        await PlayCardAsync(perfFunc, enemy);
+        AutoTestAssert.Equal(20, player.Creature.Block, "Perfection() played twice: 2 x 10 = 20 Block from Slot-0 Constructor");
+        AutoTestAssert.Equal(hpBeforePerf - 24, enemy.CurrentHp, "Perfection() played twice: 2 x 12 = 24 damage from Slot-1 Separator");
+
+        // Verify Terminator in Slot 0 does NOT grant PlayTwice!
+        await ClearHandAndRefillAsync();
+        await AutomatonMechanics.EncodeCardAsync(ctx, player, (BronzeCard)combatState.CreateCard<Terminator>(player));
+        var nonLastTermFunc = AutoTestAssert.NotNull(await AutomatonMechanics.CompileFunctionAsync(ctx, player), "Compiled Slot-0 Terminator");
+        AutoTestAssert.True(!nonLastTermFunc.PlayTwice, "Terminator in Slot 0 did NOT set PlayTwice");
+
+        // 2. InfiniteLoop (6 dmg; Compile adds copy to Hand with +2 dmg = 8) + Iterate (2x3=6 dmg) + Shell+ (Blockchain+: Blur on play & Compile)!
+        await ClearHandAndRefillAsync();
+        int hpBeforeLoop = enemy.CurrentHp;
+        var loop = combatState.CreateCard<InfiniteLoop>(player);
+        var iterate = combatState.CreateCard<Iterate>(player);
+        var shellPlus = combatState.CreateCard<Shell>(player);
+        CardCmd.Upgrade(shellPlus);
+        await CardPileCmd.Add(loop, PileType.Hand);
+        await CardPileCmd.Add(iterate, PileType.Hand);
+        await CardPileCmd.Add(shellPlus, PileType.Hand);
+        await PlayCardAsync(loop, enemy);
+        await PlayCardAsync(iterate, enemy);
+        await PlayCardAsync(shellPlus);
+
+        AutoTestAssert.Equal(hpBeforeLoop - 12, enemy.CurrentHp, "InfiniteLoop (6) + Iterate (2x3=6) dealt 12 total damage");
+        AutoTestAssert.Equal(2, player.Creature.GetPowerAmount<BlurPower>(), "Shell+ granted 1 Blur on play + 1 Blur on Compile = 2 Blur");
+        var scaledLoop = AutoTestAssert.NotNull(pcs.Hand.Cards.OfType<InfiniteLoop>().FirstOrDefault(), "InfiniteLoop Compile added copy to Hand");
+        AutoTestAssert.Equal(8, scaledLoop.DynamicVars.Damage.IntValue, "InfiniteLoop Compile copy increased damage 6 -> 8");
+
+        // 3. Optimize (OptimizePower(3)): upgrades upgradable encoded cards & skips already-upgraded cards!
+        await ClearHandAndRefillAsync();
+        var opt = combatState.CreateCard<Optimize>(player);
+        await CardPileCmd.Add(opt, PileType.Hand);
+        await PlayCardAsync(opt);
+        AutoTestAssert.Equal(3, player.Creature.GetPowerAmount<OptimizePower>(), "Optimize applied OptimizePower(3)");
+
+        var alreadyUpg = (BronzeCard)combatState.CreateCard<Safeguard>(player);
+        CardCmd.Upgrade(alreadyUpg);
+        await AutomatonMechanics.EncodeCardAsync(ctx, player, alreadyUpg);
+        AutoTestAssert.Equal(3, player.Creature.GetPowerAmount<OptimizePower>(), "OptimizePower did not consume stack on already-upgraded card");
+
+        var rawNull = (NullPointer)combatState.CreateCard<NullPointer>(player);
+        await AutomatonMechanics.EncodeCardAsync(ctx, player, rawNull);
+        AutoTestAssert.True(rawNull.IsUpgraded, "OptimizePower upgraded NullPointer on Encode");
+        AutoTestAssert.Equal(15, rawNull.DynamicVars.Damage.IntValue, "Upgraded NullPointer has 15 damage");
+        AutoTestAssert.Equal(2, player.Creature.GetPowerAmount<OptimizePower>(), "OptimizePower decremented 3 -> 2");
+
+        // 4. Overload (Copy Paste): plays copies of encoded cards WITHOUT re-encoding them!
+        if (player.Creature.Block > 0)
+            await CreatureCmd.LoseBlock(ctx, player.Creature, player.Creature.Block, null);
+        int hpBeforeOverload = enemy.CurrentHp;
+        int orbCountBeforeOverload = AutomatonMechanics.GetEncodedOrbs(player).Count;
+        var overload = combatState.CreateCard<Overload>(player);
+        await CardPileCmd.Add(overload, PileType.Hand);
+        await PlayCardAsync(overload);
+        // Encoded cards: Safeguard+ (6 Block) + NullPointer+ (15 Block, 15 dmg) = 21 Block, 15 dmg!
+        AutoTestAssert.Equal(21, player.Creature.Block, "Overload played copies of Safeguard+ (6) & NullPointer+ (15) = 21 Block");
+        AutoTestAssert.Equal(hpBeforeOverload - 15, enemy.CurrentHp, "Overload played copy of NullPointer+ for 15 damage");
+        AutoTestAssert.Equal(orbCountBeforeOverload, AutomatonMechanics.GetEncodedOrbs(player).Count, "Overload did NOT re-encode played copies");
+
+        // Compile NullPointer -> FunctionCard is Unplayable!
+        var nullFunc = AutoTestAssert.NotNull(await AutomatonMechanics.CompileFunctionAsync(ctx, player), "Compiled NullPointer Function");
+        AutoTestAssert.True(nullFunc.Keywords.Contains(CardKeyword.Unplayable), "NullPointer Compile Error made Function Unplayable");
+        AutoTestAssert.True(!nullFunc.CanPlay(), "Unplayable NullPointer Function cannot be played");
+        await PowerCmd.Remove<OptimizePower>(player.Creature);
+
+        // 5. Philosophize (+1 Str; Compile Error: enemy +2 Str) + Repair (4 Block; Compile: Heal 7 HP; non-generatable)!
+        await ClearHandAndRefillAsync();
+        await PowerCmd.Remove<StrengthPower>(player.Creature);
+        await PowerCmd.Remove<StrengthPower>(enemy);
+        await CreatureCmd.Damage(ctx, player.Creature, 20m, ValueProp.Unblockable | ValueProp.Unpowered, enemy);
+        int hpBeforeRepair = player.Creature.CurrentHp;
+
+        var phil = combatState.CreateCard<Philosophize>(player);
+        var repair = combatState.CreateCard<Repair>(player);
+        AutoTestAssert.True(!repair.CanBeGeneratedInCombat, "Repair is excluded from combat random generation (Healing)");
+        await CardPileCmd.Add(phil, PileType.Hand);
+        await CardPileCmd.Add(repair, PileType.Hand);
+        await PlayCardAsync(phil);
+        await PlayCardAsync(repair);
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<StrengthPower>(), "Philosophize granted +1 Strength");
+        await AutomatonMechanics.CompileFunctionAsync(ctx, player);
+        AutoTestAssert.Equal(2, enemy.GetPowerAmount<StrengthPower>(), "Philosophize Compile Error gave enemy +2 Strength");
+        AutoTestAssert.Equal(hpBeforeRepair + 7, player.Creature.CurrentHp, "Repair Compile healed 7 HP");
+        await PowerCmd.Remove<StrengthPower>(player.Creature);
+        await PowerCmd.Remove<StrengthPower>(enemy);
+
+        // 6. RecursiveStrike+ (9x2 dmg + Encodes 2 copies of BronzeStrike+)
+        await ClearHandAndRefillAsync();
+        ClearSequence();
+        int hpBeforeRec = enemy.CurrentHp;
+        var recStrike = combatState.CreateCard<RecursiveStrike>(player);
+        CardCmd.Upgrade(recStrike);
+        await CardPileCmd.Add(recStrike, PileType.Hand);
+        await PlayCardAsync(recStrike, enemy);
+        AutoTestAssert.Equal(hpBeforeRec - 18, enemy.CurrentHp, "RecursiveStrike+ dealt 9 x 2 = 18 damage");
+        var recEncoded = AutomatonMechanics.GetEncodedCards(player);
+        AutoTestAssert.Equal(2, recEncoded.Count, "RecursiveStrike+ encoded 2 cards");
+        AutoTestAssert.True(recEncoded.All(c => c is BronzeStrike { IsUpgraded: true }), "RecursiveStrike+ encoded 2 copies of BronzeStrike+");
+        ClearSequence();
+
+        // 7. ItsAFeature (FeaturePower: +3 Block on draw or exhaust Status) + Refactor (Scry 4, Exhaust discarded Status -> +4 Block + FeaturePower +3 Block!) + Repulsor (ExhaustStatusesPower)
+        await ClearHandAndRefillAsync();
+        if (player.Creature.Block > 0)
+            await CreatureCmd.LoseBlock(ctx, player.Creature, player.Creature.Block, null);
+        var feat = combatState.CreateCard<ItsAFeature>(player);
+        await CardPileCmd.Add(feat, PileType.Hand);
+        await PlayCardAsync(feat);
+        AutoTestAssert.Equal(3, player.Creature.GetPowerAmount<FeaturePower>(), "ItsAFeature applied FeaturePower(3)");
+
+        var topDazed = combatState.CreateCard<Dazed>(player);
+        await CardPileCmd.Add(topDazed, PileType.Draw, CardPilePosition.Top);
+        var refactor = combatState.CreateCard<Refactor>(player);
+        await CardPileCmd.Add(refactor, PileType.Hand);
+        using (DownfallAutoTestRunner.PreferCards(c => ReferenceEquals(c, topDazed)))
+        {
+            await PlayCardAsync(refactor);
+        }
+        AutoTestAssert.True(pcs.ExhaustPile.Cards.Contains(topDazed), "Refactor Exhausted discarded Status from Scry");
+        AutoTestAssert.Equal(7, player.Creature.Block, "Refactor (+4 Block) + FeaturePower on Status Exhaust (+3 Block) = 7 Block");
+
+        var repulsor = combatState.CreateCard<Repulsor>(player);
+        await CardPileCmd.Add(repulsor, PileType.Hand);
+        await PlayCardAsync(repulsor);
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<Downfall.Guardian.Powers.ExhaustStatusesPower>(), "Repulsor applied Guardian ExhaustStatusesPower(1)");
+
+        // Exercise FeaturePower on Status draw + Repulsor exhausting first Status drawn & drawing replacement!
+        if (player.Creature.Block > 0)
+            await CreatureCmd.LoseBlock(ctx, player.Creature, player.Creature.Block, null);
+        var repulsorReplacement = combatState.CreateCard<BronzeStrike>(player);
+        var repulsorDazed = combatState.CreateCard<Dazed>(player);
+        await CardPileCmd.Add(repulsorReplacement, PileType.Draw, CardPilePosition.Top);
+        await CardPileCmd.Add(repulsorDazed, PileType.Draw, CardPilePosition.Top);
+        await CardPileCmd.Draw(ctx, 1, player);
+        AutoTestAssert.True(pcs.ExhaustPile.Cards.Contains(repulsorDazed), "Repulsor exhausted drawn Status card");
+        AutoTestAssert.True(pcs.Hand.Cards.Contains(repulsorReplacement), "Repulsor drew replacement card");
+        AutoTestAssert.Equal(6, player.Creature.Block, "FeaturePower(3) triggered on Status draw (+3) AND on Repulsor exhaust (+3) = 6 Block");
+
+        // 8. Undervolt (ALL enemies -2 Strength + 2 Burns in Hand) + BronzeReturn (Discard -> top of Draw + EnergyNextTurnPower) + MaxOutput (Draw 3 + MaxOutputPower) across real turn transition!
+        await ClearHandAndRefillAsync();
+        var undervolt = combatState.CreateCard<Undervolt>(player);
+        await CardPileCmd.Add(undervolt, PileType.Hand);
+        await PlayCardAsync(undervolt);
+        AutoTestAssert.Equal(-2, enemy.GetPowerAmount<StrengthPower>(), "Undervolt reduced enemy Strength by 2");
+        AutoTestAssert.Equal(2, pcs.Hand.Cards.Count(c => c is Burn), "Undervolt added 2 Burns to Hand");
+
+        await ClearHandAndRefillAsync();
+        var returnTarget = combatState.CreateCard<BronzeStrike>(player);
+        await CardPileCmd.Add(returnTarget, PileType.Discard);
+        var bronzeReturn = combatState.CreateCard<BronzeReturn>(player);
+        CardCmd.Upgrade(bronzeReturn); // +2 Energy next turn
+        await CardPileCmd.Add(bronzeReturn, PileType.Hand);
+        using (DownfallAutoTestRunner.PreferCards(c => ReferenceEquals(c, returnTarget)))
+        {
+            await PlayCardAsync(bronzeReturn);
+        }
+        AutoTestAssert.True(ReferenceEquals(pcs.DrawPile.Cards.FirstOrDefault(), returnTarget), "BronzeReturn put chosen Discard card on top of Draw Pile");
+        AutoTestAssert.Equal(2, player.Creature.GetPowerAmount<EnergyNextTurnPower>(), "BronzeReturn+ applied EnergyNextTurnPower(2)");
+
+        for (int i = 0; i < 6; i++)
+            await CardPileCmd.Add(combatState.CreateCard<BronzeDefend>(player), PileType.Draw, CardPilePosition.Top);
+        int handBeforeMax = pcs.Hand.Cards.Count;
+        var maxOut = combatState.CreateCard<MaxOutput>(player);
+        await CardPileCmd.Add(maxOut, PileType.Hand);
+        await PlayCardAsync(maxOut);
+        AutoTestAssert.Equal(handBeforeMax + 3, pcs.Hand.Cards.Count, "MaxOutput immediately drew 3 cards");
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<MaxOutputPower>(), "MaxOutput applied MaxOutputPower(1)");
+
+        int dazedBeforeTurn = pcs.DrawPile.Cards.Count(c => c is Dazed) + pcs.DiscardPile.Cards.Count(c => c is Dazed);
+        await DownfallAutoTestRunner.EndTurnAndWaitForRoundAsync(player, combatState.RoundNumber + 1);
+        AutoTestAssert.Equal(5, pcs.Energy, "BronzeReturn+ EnergyNextTurnPower(2) granted 3 + 2 = 5 Energy on next turn");
+        AutoTestAssert.True(pcs.Hand.Cards.Count >= 6, $"MaxOutputPower drew an extra card on Turn 2 (Hand={pcs.Hand.Cards.Count})");
+        int dazedAfterTurn = pcs.DrawPile.Cards.Count(c => c is Dazed) + pcs.DiscardPile.Cards.Count(c => c is Dazed) + pcs.Hand.Cards.Count(c => c is Dazed) + pcs.ExhaustPile.Cards.Count(c => c is Dazed);
+        AutoTestAssert.True(dazedAfterTurn > dazedBeforeTurn, "MaxOutputPower inserted a Dazed on Turn 2");
     }
 }

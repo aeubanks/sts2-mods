@@ -541,5 +541,14 @@
   "DOWNFALL-INFINITE_BEAMS_POWER.smartDescription": "At the start of your turn, add [blue]{Amount}[/blue] [gold]Minor {Amount:plural:Beam|Beams}[/gold] to your [gold]Hand[/gold].",
   "DOWNFALL-INFINITE_BEAMS_PLUS_POWER.title": "Infinite Beams+",
   "DOWNFALL-INFINITE_BEAMS_PLUS_POWER.description": "At the start of your turn, add [gold]Minor Beam+[/gold] cards to your [gold]Hand[/gold].",
-  "DOWNFALL-INFINITE_BEAMS_PLUS_POWER.smartDescription": "At the start of your turn, add [blue]{Amount}[/blue] [gold]Minor {Amount:plural:Beam+|Beams+}[/gold] to your [gold]Hand[/gold]."
+  "DOWNFALL-INFINITE_BEAMS_PLUS_POWER.smartDescription": "At the start of your turn, add [blue]{Amount}[/blue] [gold]Minor {Amount:plural:Beam+|Beams+}[/gold] to your [gold]Hand[/gold].",
+  "DOWNFALL-FEATURE_POWER.title": "It's a Feature",
+  "DOWNFALL-FEATURE_POWER.description": "Whenever you draw or [gold]Exhaust[/gold] a Status card, gain [gold]Block[/gold].",
+  "DOWNFALL-FEATURE_POWER.smartDescription": "Whenever you draw or [gold]Exhaust[/gold] a Status card, gain [blue]{Amount}[/blue] [gold]Block[/gold].",
+  "DOWNFALL-MAX_OUTPUT_POWER.title": "Max Output",
+  "DOWNFALL-MAX_OUTPUT_POWER.description": "At the start of your turn, draw additional cards and [gold]Insert[/gold] [gold]Dazed[/gold].",
+  "DOWNFALL-MAX_OUTPUT_POWER.smartDescription": "At the start of your turn, draw [blue]{Amount}[/blue] additional {Amount:plural:card|cards} and [gold]Insert[/gold] [blue]{Amount}[/blue] [gold]Dazed[/gold].",
+  "DOWNFALL-OPTIMIZE_POWER.title": "Optimized",
+  "DOWNFALL-OPTIMIZE_POWER.description": "[gold]Upgrade[/gold] the next [gold]Upgradable[/gold] card you [gold]Encode[/gold].",
+  "DOWNFALL-OPTIMIZE_POWER.smartDescription": "[gold]Upgrade[/gold] the next [blue]{Amount}[/blue] [gold]Upgradable[/gold] {Amount:plural:card|cards} you [gold]Encode[/gold]."
 }
