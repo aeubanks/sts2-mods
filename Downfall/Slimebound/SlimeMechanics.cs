@@ -241,6 +241,23 @@ internal static class SlimeMechanics
         }
     }
 
+    internal static CardModel? CreateRandomTackleCard(
+        ICombatState combatState,
+        Player owner,
+        Func<SlimeCard, bool>? filter = null)
+    {
+        var tackles = ModelDb.CardPool<SlimeboundCardPool>()
+            .GetUnlockedCards(owner.UnlockState, owner.RunState.CardMultiplayerConstraint)
+            .OfType<SlimeCard>()
+            .Where(c => c.IsTackle && c.CanBeGeneratedInCombat && (filter is null || filter(c)))
+            .ToList();
+        if (tackles.Count == 0)
+            return null;
+
+        var picked = tackles[owner.RunState.Rng.CombatCardGeneration.NextInt(tackles.Count)];
+        return combatState.CreateCard(picked, owner);
+    }
+
     private static async Task NotifySlimeSplitAsync(PlayerChoiceContext choiceContext, Player player, SlimeOrb slime)
     {
         foreach (var listener in player.Creature.Powers.OfType<ISlimeSplitListener>().ToList())

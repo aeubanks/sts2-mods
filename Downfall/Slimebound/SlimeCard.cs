@@ -19,6 +19,12 @@ public abstract class SlimeCard(
 
     public virtual bool IsTackle => false;
     public virtual bool IsLick => false;
+    public virtual bool UsesConsumeGlow => false;
+
+    protected override bool ShouldGlowGoldInternal =>
+        UsesConsumeGlow
+        && CombatState is not null
+        && CombatState.HittableEnemies.Any(e => e.IsAlive && e.HasPower<SlimedPower>());
 
     internal static IHoverTip SplitHoverTip => new HoverTip(
         new LocString("gameplay_ui", "DOWNFALL-SPLIT_KEYWORD.title"),

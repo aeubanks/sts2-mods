@@ -185,6 +185,236 @@ internal static class SlimeboundTests
         AutoTestAssert.Equal(hpBefore + 3, player.Creature.CurrentHp, "Black Heart of Goo healed +3 HP on lethal Goop consume");
     }
 
+    internal static async Task TestCommonCardsInCombat()
+    {
+        var (player, _, combatState) = await DownfallAutoTestRunner.StartCombatAsync<TheSlimeBoss>("SLIME_COM01");
+        var pcs = AutoTestAssert.NotNull(player.PlayerCombatState, "PlayerCombatState");
+        var enemy1 = AutoTestAssert.NotNull(combatState.HittableEnemies.FirstOrDefault(), "Enemy 1");
+        var enemy2 = await CreatureCmd.Add<MegaCrit.Sts2.Core.Models.Monsters.Nibbit>(combatState);
+        var ctx = new ThrowingPlayerChoiceContext();
+        await CreatureCmd.GainMaxHp(enemy1, 800m);
+        await CreatureCmd.GainMaxHp(enemy2, 800m);
+
+        // 1. GoopSpray (5 Goop + 1 Weak ALL) + RejuvenatingLick+ (4 Goop x2 + draw 1, Exhaust) + HauntingLick+ (1 Vuln + 4 Goop + draw 1, Exhaust)!
+        await ClearHandAndRefillEnergy(player, pcs);
+        await CardPileCmd.Add(combatState.CreateCard<SlimeboundDefend>(player), PileType.Draw, CardPilePosition.Top);
+        await CardPileCmd.Add(combatState.CreateCard<SlimeboundDefend>(player), PileType.Draw, CardPilePosition.Top);
+        var spray = combatState.CreateCard<GoopSpray>(player);
+        var dblLick = combatState.CreateCard<RejuvenatingLick>(player);
+        var haunt = combatState.CreateCard<HauntingLick>(player);
+        CardCmd.Upgrade(dblLick);
+        CardCmd.Upgrade(haunt);
+        await CardPileCmd.Add(spray, PileType.Hand);
+        await CardPileCmd.Add(dblLick, PileType.Hand);
+        await CardPileCmd.Add(haunt, PileType.Hand);
+
+        AutoTestAssert.True(spray.TryManualPlay(null), "Play GoopSpray");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(5, enemy1.GetPowerAmount<SlimedPower>(), "GoopSpray applied 5 Goop to enemy1");
+        AutoTestAssert.Equal(5, enemy2.GetPowerAmount<SlimedPower>(), "GoopSpray applied 5 Goop to enemy2");
+        AutoTestAssert.Equal(1, enemy1.GetPowerAmount<WeakPower>(), "GoopSpray applied 1 Weak to enemy1");
+        AutoTestAssert.Equal(1, enemy2.GetPowerAmount<WeakPower>(), "GoopSpray applied 1 Weak to enemy2");
+
+        int handBefore = pcs.Hand.Cards.Count;
+        AutoTestAssert.True(dblLick.TryManualPlay(enemy1), "Play RejuvenatingLick+");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(13, enemy1.GetPowerAmount<SlimedPower>(), "RejuvenatingLick+ applied 4+4=8 Goop (5+8=13)");
+        AutoTestAssert.Equal(handBefore, pcs.Hand.Cards.Count, "RejuvenatingLick+ drew 1 card");
+        AutoTestAssert.True(pcs.ExhaustPile.Cards.Contains(dblLick), "RejuvenatingLick+ exhausted");
+
+        handBefore = pcs.Hand.Cards.Count;
+        AutoTestAssert.True(haunt.TryManualPlay(enemy2), "Play HauntingLick+");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(9, enemy2.GetPowerAmount<SlimedPower>(), "HauntingLick+ applied 4 Goop (5+4=9)");
+        AutoTestAssert.Equal(1, enemy2.GetPowerAmount<VulnerablePower>(), "HauntingLick+ applied 1 Vulnerable");
+        AutoTestAssert.Equal(handBefore, pcs.Hand.Cards.Count, "HauntingLick+ drew 1 card");
+        await PowerCmd.Remove<WeakPower>(enemy1);
+        await PowerCmd.Remove<WeakPower>(enemy2);
+        await PowerCmd.Remove<VulnerablePower>(enemy2);
+
+        // 2. Consume cards: LeechingTouch (Block = Goop=13, CardTag.Strike, UsesConsumeGlow), ItLooksTasty+ (Lick+), LeechEnergy (+1 Energy + 1 draw)!
+        await ClearHandAndRefillEnergy(player, pcs);
+        var leechStrike = combatState.CreateCard<LeechingTouch>(player);
+        await CardPileCmd.Add(leechStrike, PileType.Hand);
+        AutoTestAssert.True(leechStrike.Tags.Contains(CardTag.Strike), "LeechingTouch has CardTag.Strike");
+        AutoTestAssert.True(leechStrike.ShouldGlowGold, "LeechingTouch glows gold when enemy has Goop");
+        int blockBefore = player.Creature.Block;
+        AutoTestAssert.True(leechStrike.TryManualPlay(enemy1), "Play LeechingTouch on 13-Goop enemy1");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(blockBefore + 13, player.Creature.Block, "LeechingTouch gained Block equal to snapshotted Goop (13)");
+        AutoTestAssert.Equal(0, enemy1.GetPowerAmount<SlimedPower>(), "LeechingTouch consumed Goop");
+
+        // Negative Consume check: playing LeechingTouch on Goop-less enemy1 grants 0 Block!
+        var leechNoGoop = combatState.CreateCard<LeechingTouch>(player);
+        await CardPileCmd.Add(leechNoGoop, PileType.Hand);
+        blockBefore = player.Creature.Block;
+        AutoTestAssert.True(leechNoGoop.TryManualPlay(enemy1), "Play LeechingTouch on Goop-less enemy1");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(blockBefore, player.Creature.Block, "LeechingTouch did NOT gain Block without Goop");
+
+        var tasty = combatState.CreateCard<ItLooksTasty>(player);
+        CardCmd.Upgrade(tasty);
+        await CardPileCmd.Add(tasty, PileType.Hand);
+        AutoTestAssert.True(tasty.TryManualPlay(enemy2), "Play ItLooksTasty+ on Gooped enemy2");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        var addedLick = AutoTestAssert.NotNull(pcs.Hand.Cards.OfType<Lick>().FirstOrDefault(), "ItLooksTasty+ added Lick to Hand");
+        AutoTestAssert.True(addedLick.IsUpgraded, "ItLooksTasty+ added Upgraded Lick+");
+
+        // Use Schlurp+ (7 Goop + 2 Licks) then LeechEnergy (Consume -> +1 Energy + 1 draw)!
+        var schlurp = combatState.CreateCard<Schlurp>(player);
+        CardCmd.Upgrade(schlurp);
+        await CardPileCmd.Add(schlurp, PileType.Hand);
+        AutoTestAssert.True(schlurp.TryManualPlay(enemy1), "Play Schlurp+");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(7, enemy1.GetPowerAmount<SlimedPower>(), "Schlurp+ applied 7 Goop");
+        AutoTestAssert.Equal(3, pcs.Hand.Cards.OfType<Lick>().Count(), "Schlurp+ added 2 more Licks (1+2=3)");
+
+        await CardPileCmd.Add(combatState.CreateCard<SlimeboundDefend>(player), PileType.Draw, CardPilePosition.Top);
+        var leechEnergy = combatState.CreateCard<LeechEnergy>(player);
+        await CardPileCmd.Add(leechEnergy, PileType.Hand);
+        int energyBefore = pcs.Energy;
+        handBefore = pcs.Hand.Cards.Count;
+        AutoTestAssert.True(leechEnergy.TryManualPlay(enemy1), "Play LeechEnergy on Gooped enemy1");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(energyBefore, pcs.Energy, "LeechEnergy spent 1 and gained +1 Energy");
+        AutoTestAssert.Equal(handBefore, pcs.Hand.Cards.Count, "LeechEnergy drew 1 card");
+
+        // 3. RollThrough (6 AoE + PreventTackleDamagePower 2) + FinishingTackle (0 self-dmg via Prevent, Consume -> 2 Vuln) + ComboTackle (0 self-dmg via Prevent, draw 2) + GoopTackle (3 self-dmg after charges spent, adds 0-cost random Tackle)!
+        await ClearHandAndRefillEnergy(player, pcs);
+        for (int i = 0; i < 3; i++)
+            await CardPileCmd.Add(combatState.CreateCard<SlimeboundDefend>(player), PileType.Draw, CardPilePosition.Top);
+        var roll = combatState.CreateCard<RollThrough>(player);
+        var finish = combatState.CreateCard<FinishingTackle>(player);
+        var combo = combatState.CreateCard<ComboTackle>(player);
+        var goopTackle = combatState.CreateCard<GoopTackle>(player);
+        await CardPileCmd.Add(roll, PileType.Hand);
+        await CardPileCmd.Add(finish, PileType.Hand);
+        await CardPileCmd.Add(combo, PileType.Hand);
+        await CardPileCmd.Add(goopTackle, PileType.Hand);
+
+        AutoTestAssert.True(roll.TryManualPlay(null), "Play RollThrough");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(2, player.Creature.GetPowerAmount<PreventTackleDamagePower>(), "RollThrough applied PreventTackleDamagePower(2)");
+
+        // Apply Goop after RollThrough so FinishingTackle consumes it!
+        await SlimeMechanics.ApplyGoopAsync(ctx, enemy1, player, 4, null);
+
+        int hpBefore = player.Creature.CurrentHp;
+        AutoTestAssert.True(finish.TryManualPlay(enemy1), "Play FinishingTackle (prevent charge #1)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(hpBefore, player.Creature.CurrentHp, "RollThrough prevented FinishingTackle self-damage");
+        AutoTestAssert.Equal(2, enemy1.GetPowerAmount<VulnerablePower>(), "FinishingTackle Consume applied 2 Vulnerable");
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<PreventTackleDamagePower>(), "PreventTackleDamagePower decremented 2 -> 1");
+
+        handBefore = pcs.Hand.Cards.Count;
+        AutoTestAssert.True(combo.TryManualPlay(enemy1), "Play ComboTackle (prevent charge #2)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(hpBefore, player.Creature.CurrentHp, "RollThrough prevented ComboTackle self-damage");
+        AutoTestAssert.Equal(handBefore - 1 + 2, pcs.Hand.Cards.Count, "ComboTackle drew 2 cards");
+        AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<PreventTackleDamagePower>(), "PreventTackleDamagePower consumed");
+
+        // Now GoopTackle takes 3 self-damage (unblocked -> drop block first) and adds a 0-cost other Tackle!
+        if (player.Creature.Block > 0)
+            await CreatureCmd.LoseBlock(ctx, player.Creature, player.Creature.Block, null);
+        hpBefore = player.Creature.CurrentHp;
+        AutoTestAssert.True(goopTackle.TryManualPlay(enemy1), "Play GoopTackle");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(hpBefore - 3, player.Creature.CurrentHp, "GoopTackle dealt 3 self-damage once Prevent expired");
+        var genTackle = AutoTestAssert.NotNull(pcs.Hand.Cards.OfType<SlimeCard>().FirstOrDefault(c => c.IsTackle && c is not GoopTackle),
+            "GoopTackle generated a random other Tackle card");
+        AutoTestAssert.Equal(0, genTackle.EnergyCost.GetWithModifiers(CostModifiers.All), "Generated Tackle costs 0 this turn");
+
+        // 4. Split cards (SplitBruiser, SplitLeeching, SplitLicking, SplitAcid) + PressTheAttack+ (Command twice)!
+        await ClearHandAndRefillEnergy(player, pcs);
+        await SlimeMechanics.AbsorbAllSlimesAsync(ctx, player);
+        var sBruiser = combatState.CreateCard<SplitBruiser>(player);
+        var sLeeching = combatState.CreateCard<SplitLeeching>(player);
+        var sLicking = combatState.CreateCard<SplitLicking>(player);
+        var sAcid = combatState.CreateCard<SplitAcid>(player);
+        await CardPileCmd.Add(sBruiser, PileType.Hand);
+        await CardPileCmd.Add(sLeeching, PileType.Hand);
+        await CardPileCmd.Add(sLicking, PileType.Hand);
+        await CardPileCmd.Add(sAcid, PileType.Hand);
+
+        int totalHp = enemy1.CurrentHp + enemy2.CurrentHp;
+        AutoTestAssert.True(sBruiser.TryManualPlay(null), "Play SplitBruiser (2 commands x 2 hits x 3 dmg = 12)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(totalHp - 12, enemy1.CurrentHp + enemy2.CurrentHp, "SplitBruiser dealt 12 total damage");
+
+        blockBefore = player.Creature.Block;
+        AutoTestAssert.True(sLeeching.TryManualPlay(null), "Play SplitLeeching (2 commands x 3 Block = 6)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(blockBefore + 6, player.Creature.Block, "SplitLeeching granted +6 Block");
+
+        AutoTestAssert.True(sLicking.TryManualPlay(null), "Play SplitLicking (2 commands x 2 Goop = 4)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(4, enemy1.GetPowerAmount<SlimedPower>() + enemy2.GetPowerAmount<SlimedPower>(), "SplitLicking applied 4 total Goop");
+
+        int e1Hp = enemy1.CurrentHp;
+        int e2Hp = enemy2.CurrentHp;
+        AutoTestAssert.True(sAcid.TryManualPlay(null), "Play SplitAcid (2 commands x 3 AoE = 6 each, auto-evokes oldest Bruiser)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(e1Hp - 6, enemy1.CurrentHp, "SplitAcid dealt 6 AoE to enemy1");
+        AutoTestAssert.Equal(e2Hp - 6, enemy2.CurrentHp, "SplitAcid dealt 6 AoE to enemy2");
+
+        var press = combatState.CreateCard<PressTheAttack>(player);
+        CardCmd.Upgrade(press);
+        await CardPileCmd.Add(press, PileType.Hand);
+        e2Hp = enemy2.CurrentHp;
+        AutoTestAssert.True(press.TryManualPlay(enemy1), "Play PressTheAttack+ (Commands leading PoisonSlime twice = 6 AoE)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(e2Hp - 6, enemy2.CurrentHp, "PressTheAttack+ commanded leading PoisonSlime twice (6 dmg to enemy2)");
+
+        // 5. SelfFormingGoo (8 Block, Discard -> top of Draw) + SlimeSpikes stacking (2x + permanent Thorns preservation!) + LivingWall (SlimedThornsPower applies 4 Goop to attacker!)
+        await ClearHandAndRefillEnergy(player, pcs);
+        await PowerCmd.Remove<SlimedPower>(enemy1);
+        await PowerCmd.Apply<ThornsPower>(ctx, player.Creature, 2m, player.Creature, null); // 2 permanent Thorns
+        var targetDiscard = combatState.CreateCard<Tackle>(player);
+        await CardPileCmd.Add(targetDiscard, PileType.Discard);
+        var reform = combatState.CreateCard<SelfFormingGoo>(player);
+        var spikes1 = combatState.CreateCard<SlimeSpikes>(player);
+        var spikes2 = combatState.CreateCard<SlimeSpikes>(player);
+        var wall = combatState.CreateCard<LivingWall>(player);
+        await CardPileCmd.Add(reform, PileType.Hand);
+        await CardPileCmd.Add(spikes1, PileType.Hand);
+        await CardPileCmd.Add(spikes2, PileType.Hand);
+        await CardPileCmd.Add(wall, PileType.Hand);
+
+        using (DownfallAutoTestRunner.PreferCards(c => ReferenceEquals(c, targetDiscard)))
+        {
+            AutoTestAssert.True(reform.TryManualPlay(null), "Play SelfFormingGoo");
+            await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        }
+        AutoTestAssert.Equal(targetDiscard, pcs.DrawPile.Cards.FirstOrDefault(), "SelfFormingGoo put Tackle on top of Draw Pile");
+
+        AutoTestAssert.True(spikes1.TryManualPlay(null), "Play SlimeSpikes #1");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(5, player.Creature.GetPowerAmount<ThornsPower>(), "SlimeSpikes #1 stacked Thorns 2 -> 5");
+        AutoTestAssert.Equal(3, player.Creature.GetPowerAmount<SlimeTempThornsPower>(), "SlimeSpikes #1 applied SlimeTempThornsPower(3)");
+
+        AutoTestAssert.True(spikes2.TryManualPlay(null), "Play SlimeSpikes #2 (stacking check)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(8, player.Creature.GetPowerAmount<ThornsPower>(), "SlimeSpikes #2 stacked Thorns 5 -> 8 (no double-apply)");
+        AutoTestAssert.Equal(6, player.Creature.GetPowerAmount<SlimeTempThornsPower>(), "SlimeSpikes #2 stacked SlimeTempThornsPower 3 -> 6");
+
+        AutoTestAssert.True(wall.TryManualPlay(null), "Play LivingWall");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(4, player.Creature.GetPowerAmount<SlimedThornsPower>(), "LivingWall applied SlimedThornsPower(4)");
+
+        // Simulate powered enemy attack from enemy1 -> verifies SlimedThornsPower applies 4 Goop AND Thorns(8) damages enemy1!
+        e1Hp = enemy1.CurrentHp;
+        await CreatureCmd.Damage(ctx, player.Creature, 5m, ValueProp.Move, enemy1);
+        AutoTestAssert.Equal(4, enemy1.GetPowerAmount<SlimedPower>(), "SlimedThornsPower applied 4 Goop to attacking enemy1");
+        AutoTestAssert.Equal(e1Hp - 8, enemy1.CurrentHp, "Stacked Thorns(8) dealt 8 damage to attacking enemy1");
+
+        // End Turn 1 -> temporary Thorns (6) removed leaving 2 permanent Thorns, and SlimedThornsPower expires by Round 2!
+        await CreatureCmd.GainBlock(player.Creature, 80m, ValueProp.Unpowered, null);
+        await DownfallAutoTestRunner.EndTurnAndWaitForRoundAsync(player, 2);
+        AutoTestAssert.Equal(2, player.Creature.GetPowerAmount<ThornsPower>(), "Temporary Thorns expired leaving 2 permanent Thorns at Round 2");
+        AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<SlimeTempThornsPower>(), "SlimeTempThornsPower removed");
+        AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<SlimedThornsPower>(), "SlimedThornsPower expired at start of Round 2");
+    }
+
     internal static async Task ClearHandAndRefillEnergy(
         MegaCrit.Sts2.Core.Entities.Players.Player player,
         MegaCrit.Sts2.Core.Entities.Players.PlayerCombatState pcs)

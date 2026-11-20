@@ -190,6 +190,7 @@ internal static class DownfallAutoTestRunner
                 ("SneckoRelicsAndPotionsInCombat", SneckoTests.TestRelicsAndPotionsInCombat),
                 ("SlimeboundVisualsRuntime", SlimeboundTests.TestVisualsRuntime),
                 ("SlimeboundStarterCombat", SlimeboundTests.TestStarterCombat),
+                ("SlimeboundCommonCardsInCombat", SlimeboundTests.TestCommonCardsInCombat),
             ];
 
             int matchedIndex = 0;
@@ -677,6 +678,7 @@ internal static class DownfallAutoTestRunner
         AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-TACKLE_KEYWORD.description").Exists(), "Missing Tackle desc loc");
         AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-CONSUME_KEYWORD.title").Exists(), "Missing Consume title loc");
         AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-CONSUME_KEYWORD.description").Exists(), "Missing Consume desc loc");
+        AutoTestAssert.True(new LocString("cards", "DOWNFALL-SELF_FORMING_GOO.selectionScreenPrompt").Exists(), "Missing SelfFormingGoo prompt loc");
 
         return Task.CompletedTask;
     }

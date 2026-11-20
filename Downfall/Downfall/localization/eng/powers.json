@@ -358,5 +358,14 @@
   "DOWNFALL-POTENCY_POWER.smartDescription": "Your Slime minions deal [blue]{Amount}[/blue] additional damage and gain [blue]{SecondaryBonus}[/blue] to their secondary effects.",
   "DOWNFALL-SOULBURN_POWER.title": "Soulburn",
   "DOWNFALL-SOULBURN_POWER.description": "After 3 turns, detonates to cause HP loss equal to its stacks.",
-  "DOWNFALL-SOULBURN_POWER.smartDescription": "In [blue]{Turns}[/blue] {Turns:plural:turn|turns}, loses [blue]{Amount}[/blue] HP."
+  "DOWNFALL-SOULBURN_POWER.smartDescription": "In [blue]{Turns}[/blue] {Turns:plural:turn|turns}, loses [blue]{Amount}[/blue] HP.",
+  "DOWNFALL-SLIMED_THORNS_POWER.title": "Living Wall",
+  "DOWNFALL-SLIMED_THORNS_POWER.description": "Apply [gold]Goop[/gold] to attackers this turn.",
+  "DOWNFALL-SLIMED_THORNS_POWER.smartDescription": "Apply [blue]{Amount}[/blue] [gold]Goop[/gold] to attackers this turn.",
+  "DOWNFALL-PREVENT_TACKLE_DAMAGE_POWER.title": "Protected",
+  "DOWNFALL-PREVENT_TACKLE_DAMAGE_POWER.description": "You do not take self-damage from your next Tackle cards.",
+  "DOWNFALL-PREVENT_TACKLE_DAMAGE_POWER.smartDescription": "You do not take self-damage from your next [blue]{Amount}[/blue] {Amount:plural:\"Tackle\" card|\"Tackle\" cards}.",
+  "DOWNFALL-SLIME_TEMP_THORNS_POWER.title": "Temporary Thorns",
+  "DOWNFALL-SLIME_TEMP_THORNS_POWER.description": "Grants [gold]Thorns[/gold] until your next turn.",
+  "DOWNFALL-SLIME_TEMP_THORNS_POWER.smartDescription": "At the start of your next turn, lose [blue]{Amount}[/blue] [gold]Thorns[/gold]."
 }
