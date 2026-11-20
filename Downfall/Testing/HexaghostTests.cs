@@ -17,6 +17,7 @@ using MegaCrit.Sts2.Core.Models.Powers;
 using MegaCrit.Sts2.Core.Nodes.Orbs;
 using MegaCrit.Sts2.Core.Nodes.Rooms;
 using MegaCrit.Sts2.Core.Runs;
+using MegaCrit.Sts2.Core.ValueProps;
 
 namespace Downfall.Testing;
 
@@ -587,5 +588,311 @@ internal static class HexaghostTests
         }
         AutoTestAssert.Equal(hpBeforeSword - 14, enemy.CurrentHp, "SwordOfDarkness dealt 14 damage");
         AutoTestAssert.True(pcs.ExhaustPile.Cards.Contains(topSear), "SwordOfDarkness Exhausted scry-discarded Ethereal Sear");
+    }
+
+    internal static async Task TestUncommonBatch1InCombat()
+    {
+        var (player, _, combatState) = await DownfallAutoTestRunner.StartCombatAsync<TheHexaghost>("HEXA_UNC1");
+        var pcs = AutoTestAssert.NotNull(player.PlayerCombatState, "PlayerCombatState");
+        var enemy = AutoTestAssert.NotNull(combatState.HittableEnemies.FirstOrDefault(e => e.IsAlive), "Alive enemy");
+        var ctx = new ThrowingPlayerChoiceContext();
+
+        await CreatureCmd.SetMaxAndCurrentHp(enemy, 800);
+        if (enemy.Block > 0)
+            await CreatureCmd.LoseBlock(ctx, enemy, enemy.Block, null);
+
+        async Task ClearHandAndRefillAsync()
+        {
+            foreach (var c in pcs.Hand.Cards.ToList())
+                await CardPileCmd.Add(c, PileType.Discard);
+            pcs.Energy = 20;
+        }
+
+        // 1. BurningQuestion: OnPlay (+3 Str, +1 Dex) & Afterlife (+1 Dex only!)
+        await ClearHandAndRefillAsync();
+        var bq1 = combatState.CreateCard<BurningQuestion>(player);
+        await CardPileCmd.Add(bq1, PileType.Hand);
+        await PlayCardAsync(bq1);
+        AutoTestAssert.Equal(3, player.Creature.GetPowerAmount<StrengthPower>(), "BurningQuestion OnPlay granted +3 Strength");
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<DexterityPower>(), "BurningQuestion OnPlay granted +1 Dexterity");
+
+        var bq2 = combatState.CreateCard<BurningQuestion>(player);
+        await CardPileCmd.Add(bq2, PileType.Hand);
+        await CardCmd.Exhaust(ctx, bq2, causedByEthereal: true);
+        AutoTestAssert.Equal(3, player.Creature.GetPowerAmount<StrengthPower>(), "BurningQuestion Afterlife did not grant Strength");
+        AutoTestAssert.Equal(2, player.Creature.GetPowerAmount<DexterityPower>(), "BurningQuestion Afterlife granted +1 Dexterity");
+        await PowerCmd.Remove<StrengthPower>(player.Creature);
+        await PowerCmd.Remove<DexterityPower>(player.Creature);
+
+        // 2. EmpoweredFlame: +1 (+2) Intensity
+        await ClearHandAndRefillAsync();
+        var emp = combatState.CreateCard<EmpoweredFlame>(player);
+        CardCmd.Upgrade(emp);
+        await CardPileCmd.Add(emp, PileType.Hand);
+        await PlayCardAsync(emp);
+        AutoTestAssert.Equal(2, HexaMechanics.GetIntensity(player), "EmpoweredFlame+ granted +2 Intensity");
+
+        // 3. CatchUp: Advance to Slot 1 so previous is Slot 0 (Searing); CatchUp ignites Searing twice -> 2 * (3+2)*2 = 20 Soulburn, and Exhausts (CatchUp+ does not)!
+        await HexaMechanics.AdvanceAsync(ctx, player);
+        await PowerCmd.Remove<SoulburnPower>(enemy);
+        await ClearHandAndRefillAsync();
+        var catchUp = combatState.CreateCard<CatchUp>(player);
+        await CardPileCmd.Add(catchUp, PileType.Hand);
+        await PlayCardAsync(catchUp);
+        AutoTestAssert.Equal(20, enemy.GetPowerAmount<SoulburnPower>(), "CatchUp ignited previous Searing twice (2 * 5 * 2 = 20 Soulburn)");
+        AutoTestAssert.True(pcs.ExhaustPile.Cards.Contains(catchUp), "Unupgraded CatchUp exhausted");
+
+        var catchUpPlus = combatState.CreateCard<CatchUp>(player);
+        CardCmd.Upgrade(catchUpPlus);
+        AutoTestAssert.True(!catchUpPlus.Keywords.Contains(CardKeyword.Exhaust), "CatchUp+ removed Exhaust");
+
+        await PowerCmd.Remove<EnhancePower>(player.Creature);
+
+        // 4. ChargedBarrage & Divider scale with Ignited Ghostflames (currently Slot 0 is Ignited -> 1 ignited -> 2 total hits!)
+        await PowerCmd.Remove<SoulburnPower>(enemy);
+        await ClearHandAndRefillAsync();
+        AutoTestAssert.Equal(1, HexaMechanics.GetIgnitedCount(player), "1 Ghostflame currently ignited");
+        var barrage = combatState.CreateCard<ChargedBarrage>(player);
+        await CardPileCmd.Add(barrage, PileType.Hand);
+        await PlayCardAsync(barrage, enemy);
+        // Note: CatchUp + ChargedBarrage are 2 Skills on Slot 1 (Crushing), so ChargedBarrage's play ignited Crushing BEFORE OnPlay -> 2 ignited -> 1+2 = 3 applications * 6 = 18 Soulburn!
+        AutoTestAssert.Equal(2, HexaMechanics.GetIgnitedCount(player), "ChargedBarrage (2nd Skill) ignited Slot 1 Crushing -> 2 ignited");
+        AutoTestAssert.Equal(18, enemy.GetPowerAmount<SoulburnPower>(), "ChargedBarrage applied 6 * (1 + 2 ignited) = 18 Soulburn");
+
+        if (enemy.Block > 0)
+            await CreatureCmd.LoseBlock(ctx, enemy, enemy.Block, null);
+        int hpBeforeDiv = enemy.CurrentHp;
+        var divider = combatState.CreateCard<Divider>(player);
+        await CardPileCmd.Add(divider, PileType.Hand);
+        await PlayCardAsync(divider, enemy);
+        AutoTestAssert.Equal(hpBeforeDiv - 9, enemy.CurrentHp, "Divider dealt 3 * (1 + 2 ignited) = 9 damage");
+
+        // 5. ExtraCrispy (CrispyPower) triggers ON Soulburn detonation (NOT application)!
+        await ClearHandAndRefillAsync();
+        var crispy = combatState.CreateCard<ExtraCrispy>(player);
+        await CardPileCmd.Add(crispy, PileType.Hand);
+        await PlayCardAsync(crispy);
+        AutoTestAssert.Equal(12, player.Creature.GetPowerAmount<CrispyPower>(), "ExtraCrispy applied CrispyPower(12)");
+        var existingSb = AutoTestAssert.NotNull(enemy.GetPower<SoulburnPower>(), "Enemy has Soulburn");
+        int hpBeforeCrispyDet = enemy.CurrentHp;
+        await existingSb.DetonateAsync(ctx, leaveOne: false);
+        AutoTestAssert.Equal(hpBeforeCrispyDet - 18, enemy.CurrentHp, "Soulburn detonated for 18 damage");
+        AutoTestAssert.Equal(12, enemy.GetPowerAmount<SoulburnPower>(), "CrispyPower re-applied 12 Soulburn after detonation");
+        await PowerCmd.Remove<CrispyPower>(player.Creature);
+
+        // 6. HeatCrush (12 + 12 Soulburn = 24 damage) & HeatShield (12 Block + delays Soulburn by 1 turn: 3 -> 4!)
+        await ClearHandAndRefillAsync();
+        int hpBeforeHc = enemy.CurrentHp;
+        var heatCrush = combatState.CreateCard<HeatCrush>(player);
+        await CardPileCmd.Add(heatCrush, PileType.Hand);
+        await PlayCardAsync(heatCrush, enemy);
+        AutoTestAssert.Equal(hpBeforeHc - 24, enemy.CurrentHp, "HeatCrush dealt 12 + 12 Soulburn = 24 damage");
+
+        int blockBeforeHs = player.Creature.Block;
+        var heatShield = combatState.CreateCard<HeatShield>(player);
+        await CardPileCmd.Add(heatShield, PileType.Hand);
+        await PlayCardAsync(heatShield, enemy);
+        AutoTestAssert.Equal(blockBeforeHs + 12, player.Creature.Block, "HeatShield granted Block equal to 12 Soulburn");
+        AutoTestAssert.Equal(4, enemy.GetPower<SoulburnPower>()!.TurnsRemaining, "HeatShield delayed Soulburn by 1 turn (3 -> 4)");
+        AutoTestAssert.True(pcs.ExhaustPile.Cards.Contains(heatShield), "Unupgraded HeatShield exhausted");
+
+        // 7. EtherealExpedition: adds a random Ethereal card costing 0 this turn and Exhausts!
+        await ClearHandAndRefillAsync();
+        var exp = combatState.CreateCard<EtherealExpedition>(player);
+        await CardPileCmd.Add(exp, PileType.Hand);
+        await PlayCardAsync(exp);
+        var generated = AutoTestAssert.NotNull(pcs.Hand.Cards.FirstOrDefault(), "EtherealExpedition added a card to Hand");
+        AutoTestAssert.True(generated.Keywords.Contains(CardKeyword.Ethereal), "Generated card is Ethereal");
+        AutoTestAssert.Equal(0, generated.EnergyCost.GetWithModifiers(CostModifiers.All), "Generated Ethereal card costs 0 this turn");
+        AutoTestAssert.True(pcs.ExhaustPile.Cards.Contains(exp), "EtherealExpedition exhausted");
+
+        // 8. GhostOfSpirePast (PastPower) + HexaFastForward: Advance triggers PastPower once per turn!
+        await ClearHandAndRefillAsync();
+        var pastCard = combatState.CreateCard<GhostOfSpirePast>(player);
+        await CardPileCmd.Add(pastCard, PileType.Hand);
+        await PlayCardAsync(pastCard);
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<PastPower>(), "GhostOfSpirePast applied PastPower(1)");
+
+        // Ensure enough cards in draw pile
+        for (int i = 0; i < 5; i++)
+            await CardPileCmd.Add(combatState.CreateCard<HexaStrike>(player), PileType.Draw, CardPilePosition.Top);
+
+        int slotBeforeFf = HexaMechanics.GetActiveSlotIndex(player);
+        var ff = combatState.CreateCard<HexaFastForward>(player);
+        await CardPileCmd.Add(ff, PileType.Hand);
+        await PlayCardAsync(ff);
+        // FastForward drew 2 cards + Advanced -> PastPower drew 1 more = 3 cards in hand!
+        AutoTestAssert.Equal((slotBeforeFf + 1) % 6, HexaMechanics.GetActiveSlotIndex(player), "HexaFastForward advanced 1 slot");
+        AutoTestAssert.Equal(3, pcs.Hand.Cards.Count, "HexaFastForward (2) + PastPower (1) drew 3 cards");
+
+        // 2nd Advance this turn should NOT trigger PastPower(1) again!
+        int handBefore2ndAdv = pcs.Hand.Cards.Count;
+        await HexaMechanics.AdvanceAsync(ctx, player, isEndTurn: false);
+        AutoTestAssert.Equal(handBefore2ndAdv, pcs.Hand.Cards.Count, "PastPower(1) did not trigger a 2nd time this turn");
+
+        // End-of-turn auto-Advance (isEndTurn: true) must NOT trigger PastPower even with fresh capacity!
+        await PowerCmd.Apply<PastPower>(ctx, player.Creature, 2m, player.Creature, null); // Amount=3, _activationsThisTurn=2 -> 1 remaining
+        int handBeforeEndTurnAdv = pcs.Hand.Cards.Count;
+        await HexaMechanics.AdvanceAsync(ctx, player, isEndTurn: true);
+        AutoTestAssert.Equal(handBeforeEndTurnAdv, pcs.Hand.Cards.Count, "PastPower ignored end-of-turn Advance (isEndTurn: true)");
+
+        // Retract DOES trigger PastPower when capacity remains (2 < 3)!
+        int handBeforeRetract = pcs.Hand.Cards.Count;
+        await HexaMechanics.RetractAsync(ctx, player);
+        AutoTestAssert.Equal(handBeforeRetract + 1, pcs.Hand.Cards.Count, "PastPower triggered draw on Retract");
+
+        // 9. FlameSwitch (Bad Omen): skip path leaves slot unchanged; Bolstering choice replaces slot in-place!
+        await ClearHandAndRefillAsync();
+        int activeBeforeSwitch = HexaMechanics.GetActiveSlotIndex(player);
+        var orbBeforeSkip = HexaMechanics.GetGhostflames(player)[activeBeforeSwitch];
+        var flameSwitchSkip = combatState.CreateCard<FlameSwitch>(player);
+        await CardPileCmd.Add(flameSwitchSkip, PileType.Hand);
+        using (DownfallAutoTestRunner.CancelCardSelection())
+        {
+            await PlayCardAsync(flameSwitchSkip);
+        }
+        AutoTestAssert.True(ReferenceEquals(orbBeforeSkip, HexaMechanics.GetGhostflames(player)[activeBeforeSwitch]), "FlameSwitch skip left active Ghostflame unchanged");
+
+        var flameSwitch = combatState.CreateCard<FlameSwitch>(player);
+        CardCmd.Upgrade(flameSwitch);
+        AutoTestAssert.True(flameSwitch.Keywords.Contains(CardKeyword.Retain), "FlameSwitch+ has Retain");
+        await CardPileCmd.Add(flameSwitch, PileType.Hand);
+        using (DownfallAutoTestRunner.PreferCards(c => c is HexaBolsteringChoice))
+        {
+            await PlayCardAsync(flameSwitch);
+        }
+        AutoTestAssert.True(HexaMechanics.GetGhostflames(player)[activeBeforeSwitch] is BolsteringGhostflameOrb, "FlameSwitch replaced active slot with BolsteringGhostflameOrb");
+        AutoTestAssert.True(pcs.ExhaustPile.Cards.Contains(flameSwitch), "FlameSwitch exhausted");
+
+        // 10. FlamesFromBeyond: 10x2 = 20 Soulburn on Play, 10x1 = 10 Soulburn on Afterlife!
+        await PowerCmd.Remove<SoulburnPower>(enemy);
+        await ClearHandAndRefillAsync();
+        var ffb1 = combatState.CreateCard<FlamesFromBeyond>(player);
+        await CardPileCmd.Add(ffb1, PileType.Hand);
+        await PlayCardAsync(ffb1);
+        AutoTestAssert.Equal(20, enemy.GetPowerAmount<SoulburnPower>(), "FlamesFromBeyond OnPlay applied 10x2 = 20 Soulburn");
+
+        var ffb2 = combatState.CreateCard<FlamesFromBeyond>(player);
+        await CardPileCmd.Add(ffb2, PileType.Hand);
+        await CardCmd.Exhaust(ctx, ffb2, causedByEthereal: true);
+        AutoTestAssert.Equal(30, enemy.GetPowerAmount<SoulburnPower>(), "FlamesFromBeyond Afterlife applied 10x1 = 10 Soulburn (20 -> 30)");
+
+        // 11. Floatwork: OnPlay (+1 Dex, +2 Plating); non-Ethereal Exhaust (+2 Plating, 0 bonus Block)!
+        await ClearHandAndRefillAsync();
+        var fw1 = combatState.CreateCard<Floatwork>(player);
+        await CardPileCmd.Add(fw1, PileType.Hand);
+        await PlayCardAsync(fw1);
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<DexterityPower>(), "Floatwork OnPlay granted +1 Dexterity");
+        AutoTestAssert.Equal(2, player.Creature.GetPowerAmount<PlatingPower>(), "Floatwork OnPlay granted +2 Plating");
+
+        int blockBeforeFwManual = player.Creature.Block;
+        var fwManual = combatState.CreateCard<Floatwork>(player);
+        await CardPileCmd.Add(fwManual, PileType.Hand);
+        await CardCmd.Exhaust(ctx, fwManual, causedByEthereal: false);
+        AutoTestAssert.Equal(4, player.Creature.GetPowerAmount<PlatingPower>(), "Floatwork non-Ethereal Afterlife granted +2 Plating (2 -> 4)");
+        AutoTestAssert.Equal(blockBeforeFwManual, player.Creature.Block, "Floatwork non-Ethereal Afterlife granted 0 bonus Block");
+        await PowerCmd.Remove<StrengthPower>(player.Creature);
+        await PowerCmd.Remove<DexterityPower>(player.Creature);
+        await PowerCmd.Remove<PlatingPower>(player.Creature);
+
+        // 12. GhostShield (OnPlay: 6 Block + 1 Blur; Afterlife: 6 Block) & Hexaguard (OnPlay: 6 Block + Draw 2; Afterlife: 6 Block)
+        await ClearHandAndRefillAsync();
+        int blockBeforeGs = player.Creature.Block;
+        var gs = combatState.CreateCard<GhostShield>(player);
+        await CardPileCmd.Add(gs, PileType.Hand);
+        await PlayCardAsync(gs);
+        AutoTestAssert.Equal(blockBeforeGs + 6, player.Creature.Block, "GhostShield granted 6 Block");
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<BlurPower>(), "GhostShield granted 1 Blur");
+
+        var gs2 = combatState.CreateCard<GhostShield>(player);
+        await CardPileCmd.Add(gs2, PileType.Hand);
+        int blockBeforeGsAfter = player.Creature.Block;
+        await CardCmd.Exhaust(ctx, gs2, causedByEthereal: false);
+        AutoTestAssert.Equal(blockBeforeGsAfter + 6, player.Creature.Block, "GhostShield Afterlife granted 6 Block");
+
+        // Hexaguard OnPlay (6 Block + Draw 2) & Afterlife (6 Block)
+        await ClearHandAndRefillAsync();
+        for (int i = 0; i < 3; i++)
+            await CardPileCmd.Add(combatState.CreateCard<HexaStrike>(player), PileType.Draw, CardPilePosition.Top);
+        var hgPlay = combatState.CreateCard<Hexaguard>(player);
+        await CardPileCmd.Add(hgPlay, PileType.Hand);
+        int blockBeforeHgPlay = player.Creature.Block;
+        await PlayCardAsync(hgPlay);
+        AutoTestAssert.Equal(blockBeforeHgPlay + 6, player.Creature.Block, "Hexaguard OnPlay granted 6 Block");
+        AutoTestAssert.Equal(2, pcs.Hand.Cards.Count, "Hexaguard OnPlay drew 2 cards");
+
+        var hg = combatState.CreateCard<Hexaguard>(player);
+        await CardPileCmd.Add(hg, PileType.Hand);
+        int blockBeforeHg = player.Creature.Block;
+        await CardCmd.Exhaust(ctx, hg, causedByEthereal: true);
+        AutoTestAssert.Equal(blockBeforeHg + 6, player.Creature.Block, "Hexaguard Afterlife granted 6 Block");
+
+        // 13. GhostflameBarrier (Whisper from Beyond): 12 dmg + SoulburnOnExhaustPower(5)
+        await PowerCmd.Remove<SoulburnPower>(enemy);
+        await ClearHandAndRefillAsync();
+        int hpBeforeGfb = enemy.CurrentHp;
+        var gfb = combatState.CreateCard<GhostflameBarrier>(player);
+        await CardPileCmd.Add(gfb, PileType.Hand);
+        await PlayCardAsync(gfb, enemy);
+        AutoTestAssert.Equal(hpBeforeGfb - 12, enemy.CurrentHp, "GhostflameBarrier dealt 12 damage");
+        AutoTestAssert.Equal(5, enemy.GetPowerAmount<SoulburnOnExhaustPower>(), "GhostflameBarrier applied SoulburnOnExhaustPower(5)");
+
+        var dummyExh = combatState.CreateCard<HexaStrike>(player);
+        await CardPileCmd.Add(dummyExh, PileType.Hand);
+        await CardCmd.Exhaust(ctx, dummyExh, causedByEthereal: false);
+        AutoTestAssert.Equal(5, enemy.GetPowerAmount<SoulburnPower>(), "Exhausting a card triggered SoulburnOnExhaustPower for 5 Soulburn");
+
+        // 14. Haunt (Haunted Hand): OnPlay (Draw 1 + draw until non-Ethereal) & Afterlife (draw until non-Ethereal)
+        await ClearHandAndRefillAsync();
+        var nonEthPlay = combatState.CreateCard<HexaStrike>(player);
+        var ethPlay = combatState.CreateCard<Sear>(player);
+        var firstDrawPlay = combatState.CreateCard<HexaDefend>(player);
+        await CardPileCmd.Add(nonEthPlay, PileType.Draw, CardPilePosition.Top);
+        await CardPileCmd.Add(ethPlay, PileType.Draw, CardPilePosition.Top);
+        await CardPileCmd.Add(firstDrawPlay, PileType.Draw, CardPilePosition.Top);
+        var hauntPlay = combatState.CreateCard<Downfall.Hexaghost.Cards.Haunt>(player);
+        await CardPileCmd.Add(hauntPlay, PileType.Hand);
+        await PlayCardAsync(hauntPlay);
+        AutoTestAssert.Equal(3, pcs.Hand.Cards.Count, "Haunt OnPlay drew 1 card + 1 Ethereal + stopped on 1st non-Ethereal (3 cards)");
+        AutoTestAssert.True(pcs.Hand.Cards.Contains(nonEthPlay), "Haunt OnPlay stopped on non-Ethereal card");
+
+        await ClearHandAndRefillAsync();
+        var nonEth = combatState.CreateCard<HexaStrike>(player);
+        var eA = combatState.CreateCard<Sear>(player);
+        var eB = combatState.CreateCard<Sear>(player);
+        await CardPileCmd.Add(nonEth, PileType.Draw, CardPilePosition.Top);
+        await CardPileCmd.Add(eB, PileType.Draw, CardPilePosition.Top);
+        await CardPileCmd.Add(eA, PileType.Draw, CardPilePosition.Top);
+        var haunt = combatState.CreateCard<Downfall.Hexaghost.Cards.Haunt>(player);
+        await CardPileCmd.Add(haunt, PileType.Hand);
+        await CardCmd.Exhaust(ctx, haunt, causedByEthereal: false);
+        AutoTestAssert.Equal(3, pcs.Hand.Cards.Count, "Haunt Afterlife drew 2 Ethereals + stopped on 1st non-Ethereal (3 cards)");
+        AutoTestAssert.True(pcs.Hand.Cards.Contains(nonEth), "Haunt stopped after drawing the non-Ethereal card");
+
+        // 15. Real End-of-Turn verification:
+        // - Hold an Ethereal Floatwork in Hand alongside the 2 Ethereal Sear cards + existing BlurPower!
+        // - Verify Floatwork Ethereal Afterlife grants +2 Plating & single +2 Block (no double-Block with PlatingPower),
+        //   SoulburnOnExhaustPower triggers on the end-of-turn Ethereal exhausts BEFORE expiring in AfterSideTurnEnd,
+        //   and PastPower resets its per-turn counter on Round 2!
+        var fwEndTurn = combatState.CreateCard<Floatwork>(player);
+        await CardPileCmd.Add(fwEndTurn, PileType.Hand);
+        int burnBeforeEndTurn = enemy.GetPowerAmount<SoulburnPower>();
+        // Neutralize enemy attack damage via negative Strength so we can assert exact Floatwork Ethereal Block (+2, NOT +4!) through Blur!
+        await PowerCmd.Apply<StrengthPower>(ctx, enemy, -99m, player.Creature, null);
+        int blockBeforeEndTurn = player.Creature.Block;
+
+        await DownfallAutoTestRunner.EndTurnAndWaitForRoundAsync(player, 2);
+
+        AutoTestAssert.Equal(blockBeforeEndTurn + 2, player.Creature.Block, "Floatwork Ethereal Afterlife granted exactly +2 Block on turn end (no double-Block with PlatingPower)");
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<PlatingPower>(), "Floatwork Ethereal Afterlife granted +2 Plating which decremented to 1 at Round 2 start");
+        AutoTestAssert.Equal(0, enemy.GetPowerAmount<SoulburnOnExhaustPower>(), "SoulburnOnExhaustPower expired after player turn ended");
+        // 3 Ethereal cards in hand (eA Sear, eB Sear, fwEndTurn Floatwork) all exhausted at turn end:
+        // 2x Sear Afterlife (+10 Soulburn) + 3x SoulburnOnExhaustPower (+15 Soulburn) = +25 Soulburn!
+        AutoTestAssert.Equal(burnBeforeEndTurn + 25, enemy.GetPowerAmount<SoulburnPower>(), "SoulburnOnExhaustPower triggered on all 3 end-of-turn Ethereal exhausts (+15) plus 2x Sear Afterlife (+10)");
+
+        // Verify PastPower reset on Round 2: Advance draws 1 card again!
+        int handRound2BeforeAdv = pcs.Hand.Cards.Count;
+        await HexaMechanics.AdvanceAsync(ctx, player, isEndTurn: false);
+        AutoTestAssert.Equal(handRound2BeforeAdv + 1, pcs.Hand.Cards.Count, "PastPower reset on Round 2 and drew 1 card on Advance");
     }
 }

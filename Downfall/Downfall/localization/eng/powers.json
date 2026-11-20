@@ -481,5 +481,14 @@
   "DOWNFALL-ENHANCE_POWER.smartDescription": "Modifies the damage, [gold]Soulburn[/gold], and [gold]Block[/gold] applied by Ghostflames when [gold]Ignited[/gold] by [blue]{Amount}[/blue].",
   "DOWNFALL-FLAME_AFFECT_ALL_ENEMIES_POWER.title": "Hexaburn",
   "DOWNFALL-FLAME_AFFECT_ALL_ENEMIES_POWER.description": "Your Ghostflame effects affect ALL enemies.",
-  "DOWNFALL-FLAME_AFFECT_ALL_ENEMIES_POWER.smartDescription": "Your Ghostflame effects affect ALL enemies and trigger [blue]{Amount}[/blue] {Amount:plural:time|times}."
+  "DOWNFALL-FLAME_AFFECT_ALL_ENEMIES_POWER.smartDescription": "Your Ghostflame effects affect ALL enemies and trigger [blue]{Amount}[/blue] {Amount:plural:time|times}.",
+  "DOWNFALL-CRISPY_POWER.title": "Extra Crispy",
+  "DOWNFALL-CRISPY_POWER.description": "Whenever [gold]Soulburn[/gold] detonates on an enemy, apply [gold]Soulburn[/gold] to them afterward.",
+  "DOWNFALL-CRISPY_POWER.smartDescription": "Whenever [gold]Soulburn[/gold] detonates on an enemy, apply [blue]{Amount}[/blue] [gold]Soulburn[/gold] to them after detonation.",
+  "DOWNFALL-PAST_POWER.title": "Devil's Dance",
+  "DOWNFALL-PAST_POWER.description": "The first time you [gold]Advance[/gold] or [gold]Retract[/gold] each turn, draw [blue]1[/blue] card.",
+  "DOWNFALL-PAST_POWER.smartDescription": "The first {Amount:plural:time|[blue]{}[/blue] times} you [gold]Advance[/gold] or [gold]Retract[/gold] each turn, draw [blue]1[/blue] card.",
+  "DOWNFALL-SOULBURN_ON_EXHAUST_POWER.title": "Soulburn Infestation",
+  "DOWNFALL-SOULBURN_ON_EXHAUST_POWER.description": "Whenever you [gold]Exhaust[/gold] a card this turn, apply [gold]Soulburn[/gold] to this enemy.",
+  "DOWNFALL-SOULBURN_ON_EXHAUST_POWER.smartDescription": "Whenever you [gold]Exhaust[/gold] a card this turn, apply [blue]{Amount}[/blue] [gold]Soulburn[/gold] to this enemy."
 }
