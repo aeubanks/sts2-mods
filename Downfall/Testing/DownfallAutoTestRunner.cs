@@ -181,6 +181,8 @@ internal static class DownfallAutoTestRunner
                 ("ChampUncommonBatch2InCombat", ChampTests.TestUncommonBatch2InCombat),
                 ("ChampRareCardsInCombat", ChampTests.TestRareCardsInCombat),
                 ("ChampRelicsAndPotionsInCombat", ChampTests.TestRelicsAndPotionsInCombat),
+                ("SneckoVisualsRuntime", SneckoTests.TestVisualsRuntime),
+                ("SneckoStarterCombat", SneckoTests.TestStarterCombat),
             ];
 
             int matchedIndex = 0;
@@ -616,6 +618,17 @@ internal static class DownfallAutoTestRunner
         AutoTestAssert.True(new LocString("relics", "DOWNFALL-GREMLIN_KNOB_UPGRADE.additionalRestSiteHealText").Exists(), "Missing GremlinKnobUpgrade additionalRestSiteHealText loc");
         AutoTestAssert.True(ResourceLoader.Exists("res://Downfall/images/champ/ui/stance_charge_on.png"), "Missing Champ stance_charge_on.png");
         AutoTestAssert.True(ResourceLoader.Exists("res://Downfall/images/champ/ui/stance_charge_off.png"), "Missing Champ stance_charge_off.png");
+        AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-MUDDLE_KEYWORD.title").Exists(), "Missing Muddle title loc");
+        AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-MUDDLE_KEYWORD.description").Exists(), "Missing Muddle desc loc");
+        AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-OVERFLOW_KEYWORD.title").Exists(), "Missing Overflow title loc");
+        AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-OVERFLOW_KEYWORD.description").Exists(), "Missing Overflow desc loc");
+        AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-OFFCLASS_KEYWORD.title").Exists(), "Missing Offclass title loc");
+        AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-OFFCLASS_KEYWORD.description").Exists(), "Missing Offclass desc loc");
+        AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-GIFT_KEYWORD.title").Exists(), "Missing Gift title loc");
+        AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-GIFT_KEYWORD.description").Exists(), "Missing Gift desc loc");
+        AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-LUCKY_KEYWORD.title").Exists(), "Missing Lucky title loc");
+        AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-LUCKY_KEYWORD.description").Exists(), "Missing Lucky desc loc");
+        AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-SNECKO_MUDDLE.selectionScreenPrompt").Exists(), "Missing Snecko Muddle prompt loc");
 
         return Task.CompletedTask;
     }

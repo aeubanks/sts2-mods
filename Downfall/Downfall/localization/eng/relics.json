@@ -169,8 +169,15 @@
   "DOWNFALL-SPECTERS_HAND.title": "Spectre's Hand",
   "DOWNFALL-SPECTERS_HAND.description": "Whenever you enter a [gold]Stance[/gold], add a [blue]0[/blue]-cost [gold]Strike[/gold] or [gold]Defend[/gold] [gold]Echo[/gold] to your [gold]Hand[/gold].",
   "DOWNFALL-SPECTERS_HAND.flavor": "Some victories stay with you.",
+  "DOWNFALL-SNECKO_SOUL.title": "Snecko Soul",
+  "DOWNFALL-SNECKO_SOUL.description": "At the start of each combat, add a [gold]Soul Roll[/gold] to your [gold]Hand[/gold].",
+  "DOWNFALL-SNECKO_SOUL.flavor": "0...3...2...2...1",
+  "DOWNFALL-SUPER_SNECKO_SOUL.title": "Super Snecko Soul",
+  "DOWNFALL-SUPER_SNECKO_SOUL.description": "Replaces [gold]Snecko Soul[/gold].\nAt the start of each combat and every other turn, add a [gold]Soul Roll[/gold] to your [gold]Hand[/gold].\nOn other turns, draw [blue]1[/blue] card and [gold]Muddle[/gold] it.",
+  "DOWNFALL-SUPER_SNECKO_SOUL.flavor": "3120231321230320",
   "SEA_GLASS.DOWNFALL-THE_HERMIT.title": "Sea Glass (Hermit)",
   "SEA_GLASS.DOWNFALL-THE_AWAKENED_ONE.title": "Sea Glass (Awakened)",
   "SEA_GLASS.DOWNFALL-THE_GREMLINS.title": "Sea Glass (Gremlins)",
-  "SEA_GLASS.DOWNFALL-THE_CHAMP.title": "Sea Glass (Champ)"
+  "SEA_GLASS.DOWNFALL-THE_CHAMP.title": "Sea Glass (Champ)",
+  "SEA_GLASS.DOWNFALL-THE_SNECKO.title": "Sea Glass (Snecko)"
 }

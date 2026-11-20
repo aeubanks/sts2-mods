@@ -58,5 +58,20 @@
   "DOWNFALL-THE_CHAMP.goldMonologue": "A champion's spoils!",
   "DOWNFALL-THE_CHAMP.banter": "BEHOLD MY TRUE POWER!",
   "DOWNFALL-THE_CHAMP.bestiaryQuote": "Undefeated gladiator of the City's arena.",
-  "DOWNFALL-THE_CHAMP.aromaPrinciple": "Polished steel and arena dust."
+  "DOWNFALL-THE_CHAMP.aromaPrinciple": "Polished steel and arena dust.",
+  "DOWNFALL-THE_SNECKO.title": "The Snecko",
+  "DOWNFALL-THE_SNECKO.titleObject": "the Snecko",
+  "DOWNFALL-THE_SNECKO.shortTitle": "Snecko",
+  "DOWNFALL-THE_SNECKO.description": "A serpentine creature, native to the City.\nKnown for a stare that confuses predators.",
+  "DOWNFALL-THE_SNECKO.pronounObject": "it",
+  "DOWNFALL-THE_SNECKO.possessiveAdjective": "its",
+  "DOWNFALL-THE_SNECKO.pronounPossessive": "its",
+  "DOWNFALL-THE_SNECKO.pronounSubject": "it",
+  "DOWNFALL-THE_SNECKO.cardsModifierTitle": "Snecko's Cards",
+  "DOWNFALL-THE_SNECKO.cardsModifierDescription": "Snecko cards can now appear in rewards and shops.",
+  "DOWNFALL-THE_SNECKO.eventDeathPrevention": "Sssssssss....",
+  "DOWNFALL-THE_SNECKO.goldMonologue": "Shiny scales and gold!",
+  "DOWNFALL-THE_SNECKO.banter": "Sssssssss....",
+  "DOWNFALL-THE_SNECKO.bestiaryQuote": "A serpentine creature with a bewildering stare.",
+  "DOWNFALL-THE_SNECKO.aromaPrinciple": "Damp scales and chaotic magic."
 }

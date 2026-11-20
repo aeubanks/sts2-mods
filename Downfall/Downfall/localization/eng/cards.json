@@ -668,5 +668,15 @@
   "DOWNFALL-ULTIMATE_STANCE_CARD.title": "Ultimate Stance",
   "DOWNFALL-ULTIMATE_STANCE_CARD.description": "During your next turn, you are in [gold]Ultimate Stance[/gold].",
   "DOWNFALL-VAMPIRIC_STRIKE.title": "Clobber Strike",
-  "DOWNFALL-VAMPIRIC_STRIKE.description": "Deal {Damage:diff()} damage.\nGain [gold]Block[/gold] equal to unblocked damage dealt."
+  "DOWNFALL-VAMPIRIC_STRIKE.description": "Deal {Damage:diff()} damage.\nGain [gold]Block[/gold] equal to unblocked damage dealt.",
+  "DOWNFALL-SNECKO_STRIKE.title": "Strike",
+  "DOWNFALL-SNECKO_STRIKE.description": "Deal {Damage:diff()} damage.",
+  "DOWNFALL-SNECKO_DEFEND.title": "Defend",
+  "DOWNFALL-SNECKO_DEFEND.description": "Gain {Block:diff()} [gold]Block[/gold].",
+  "DOWNFALL-TAIL_WHIP.title": "Tail Whip",
+  "DOWNFALL-TAIL_WHIP.description": "Deal {Damage:diff()} damage.\n[gold]Overflow[/gold]: Apply {WeakPower:diff()} [gold]Weak[/gold] and {VulnerablePower:diff()} [gold]Vulnerable[/gold].",
+  "DOWNFALL-SNEK_BITE.title": "Snek Bite",
+  "DOWNFALL-SNEK_BITE.description": "Deal {Damage:diff()} damage.\n[gold]Muddle[/gold] {Cards:diff()} {Cards:plural:card|cards}.",
+  "DOWNFALL-SOUL_ROLL.title": "Soul Roll",
+  "DOWNFALL-SOUL_ROLL.description": "Gain {Block:diff()} [gold]Block[/gold].\n[gold]Muddle[/gold] {Cards:diff()} card."
 }

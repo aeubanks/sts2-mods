@@ -22,5 +22,16 @@
   "DOWNFALL-FINISHER_KEYWORD.title": "Finisher",
   "DOWNFALL-FINISHER_KEYWORD.description": "Can only be played while in a [gold]Stance[/gold]. Triggers your Stance's [gold]Finisher Bonus[/gold] and exits your Stance.",
   "DOWNFALL-COMBO_KEYWORD.title": "Combo",
-  "DOWNFALL-COMBO_KEYWORD.description": "Triggers a bonus effect if you are in the matching [gold]Stance[/gold]."
+  "DOWNFALL-COMBO_KEYWORD.description": "Triggers a bonus effect if you are in the matching [gold]Stance[/gold].",
+  "DOWNFALL-MUDDLE_KEYWORD.title": "Muddle",
+  "DOWNFALL-MUDDLE_KEYWORD.description": "Muddling a card changes its cost this turn to a different value between [blue]0[/blue] and [blue]3[/blue] at random.",
+  "DOWNFALL-OVERFLOW_KEYWORD.title": "Overflow",
+  "DOWNFALL-OVERFLOW_KEYWORD.description": "[gold]Overflow[/gold] effects activate if you have more than [blue]5[/blue] cards in [gold]Hand[/gold].",
+  "DOWNFALL-OFFCLASS_KEYWORD.title": "Offclass",
+  "DOWNFALL-OFFCLASS_KEYWORD.description": "An [gold]Offclass[/gold] card is any card from a card pool other than your own character's.",
+  "DOWNFALL-GIFT_KEYWORD.title": "Gift",
+  "DOWNFALL-GIFT_KEYWORD.description": "When you add this card to your [gold]Deck[/gold], choose an [gold]Offclass[/gold] card reward to add to your [gold]Deck[/gold].",
+  "DOWNFALL-LUCKY_KEYWORD.title": "Lucky",
+  "DOWNFALL-LUCKY_KEYWORD.description": "[gold]Overflow[/gold] effects always activate regardless of [gold]Hand[/gold] size.",
+  "DOWNFALL-SNECKO_MUDDLE.selectionScreenPrompt": "Choose card(s) to Muddle."
 }
