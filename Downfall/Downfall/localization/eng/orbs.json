@@ -34,5 +34,8 @@
   "DOWNFALL-DRAWING_SLIME.smartDescription": "Deals [blue]{Passive}[/blue] damage and draws [blue]{Evoke}[/blue] card at the start of your turn.\n[gold]Absorb[/gold]: Gain [blue]1[/blue] [gold]Strength[/gold].",
   "DOWNFALL-SLOWING_SLIME.title": "Time Slime",
   "DOWNFALL-SLOWING_SLIME.description": "Deals [blue]4[/blue] damage and applies [blue]1[/blue] [gold]Weak[/gold] at the start of your turn.\n[gold]Absorb[/gold]: Gain [blue]1[/blue] [gold]Strength[/gold].",
-  "DOWNFALL-SLOWING_SLIME.smartDescription": "Deals [blue]{Passive}[/blue] damage and applies [blue]{Evoke}[/blue] [gold]Weak[/gold] at the start of your turn.\n[gold]Absorb[/gold]: Gain [blue]1[/blue] [gold]Strength[/gold]."
+  "DOWNFALL-SLOWING_SLIME.smartDescription": "Deals [blue]{Passive}[/blue] damage and applies [blue]{Evoke}[/blue] [gold]Weak[/gold] at the start of your turn.\n[gold]Absorb[/gold]: Gain [blue]1[/blue] [gold]Strength[/gold].",
+  "DOWNFALL-STASIS_ORB.title": "Stasis",
+  "DOWNFALL-STASIS_ORB.description": "Holds a card in [gold]Stasis[/gold]. At the start of your turn, reduces its counter by [blue]1[/blue]. When it reaches [blue]0[/blue], returns it to your [gold]Hand[/gold] costing [blue]0[/blue] until played.",
+  "DOWNFALL-STASIS_ORB.smartDescription": "Releases its suspended card in [blue]{Passive}[/blue] {Passive:plural:turn|turns}. Released non-[gold]Volatile[/gold] cards cost [blue]0[/blue] until played."
 }

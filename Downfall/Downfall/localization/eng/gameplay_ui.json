@@ -44,5 +44,15 @@
   "DOWNFALL-TACKLE_KEYWORD.title": "Tackle",
   "DOWNFALL-TACKLE_KEYWORD.description": "High-damage Attacks that also deal self-damage to you.",
   "DOWNFALL-CONSUME_KEYWORD.title": "Consume",
-  "DOWNFALL-CONSUME_KEYWORD.description": "Triggers a bonus effect when attacking an enemy that has [gold]Goop[/gold]."
+  "DOWNFALL-CONSUME_KEYWORD.description": "Triggers a bonus effect when attacking an enemy that has [gold]Goop[/gold].",
+  "DOWNFALL-BRACE_KEYWORD.title": "Brace",
+  "DOWNFALL-BRACE_KEYWORD.description": "Reduce your [gold]Mode Shift[/gold] counter to enter [gold]Defensive Mode[/gold] sooner.",
+  "DOWNFALL-STASIS_KEYWORD.title": "Stasis",
+  "DOWNFALL-STASIS_KEYWORD.description": "Suspend a card in a [gold]Stasis[/gold] slot for turns equal to its cost + [blue]1[/blue]. When released, it returns to your [gold]Hand[/gold] costing [blue]0[/blue] until played.",
+  "DOWNFALL-ACCELERATE_KEYWORD.title": "Accelerate",
+  "DOWNFALL-ACCELERATE_KEYWORD.description": "Reduce the turn counter of your oldest [gold]Stasis[/gold] card by [blue]1[/blue].",
+  "DOWNFALL-VOLATILE_KEYWORD.title": "Volatile",
+  "DOWNFALL-VOLATILE_KEYWORD.description": "When released from [gold]Stasis[/gold], this card is [gold]Exhausted[/gold] instead of returning to your [gold]Hand[/gold].",
+  "DOWNFALL-GEM_KEYWORD.title": "Gem",
+  "DOWNFALL-GEM_KEYWORD.description": "Can be socketed into open card sockets at Rest Sites to permanently add its effect to that card."
 }

@@ -227,10 +227,17 @@
   "DOWNFALL-SELF_DAMAGE_PREVENT_RELIC.title": "Protective Gear",
   "DOWNFALL-SELF_DAMAGE_PREVENT_RELIC.description": "Reduce the self-damage you take from \"Tackle\" cards by [blue]{Reduction}[/blue].",
   "DOWNFALL-SELF_DAMAGE_PREVENT_RELIC.flavor": "The best defense is a good offense.",
+  "DOWNFALL-MODE_SHIFTER.title": "Bronze Gear",
+  "DOWNFALL-MODE_SHIFTER.description": "Start each combat with [blue]20[/blue] [gold]Mode Shift[/gold] and add a [gold]Gear Up[/gold] to your [gold]Hand[/gold]. Begin your run with a random Common [gold]Gem[/gold] and socket [gold]Gems[/gold] at Rest Sites.",
+  "DOWNFALL-MODE_SHIFTER.flavor": "A finely crafted bronze mechanism humming with ancient power.",
+  "DOWNFALL-MODE_SHIFTER_PLUS.title": "Guardian's Gear",
+  "DOWNFALL-MODE_SHIFTER_PLUS.description": "Replaces [gold]Bronze Gear[/gold].\nStart each combat with [blue]20[/blue] [gold]Mode Shift[/gold] and add a [gold]Gear Up[/gold] to your [gold]Hand[/gold]. Whenever [gold]Mode Shift[/gold] activates, gain [blue]1[/blue] Energy (or next turn) and draw [blue]2[/blue] cards.",
+  "DOWNFALL-MODE_SHIFTER_PLUS.flavor": "Reinforced with crystalline bearings for instantaneous mode shifts.",
   "SEA_GLASS.DOWNFALL-THE_HERMIT.title": "Sea Glass (Hermit)",
   "SEA_GLASS.DOWNFALL-THE_AWAKENED_ONE.title": "Sea Glass (Awakened)",
   "SEA_GLASS.DOWNFALL-THE_GREMLINS.title": "Sea Glass (Gremlins)",
   "SEA_GLASS.DOWNFALL-THE_CHAMP.title": "Sea Glass (Champ)",
   "SEA_GLASS.DOWNFALL-THE_SNECKO.title": "Sea Glass (Snecko)",
-  "SEA_GLASS.DOWNFALL-THE_SLIME_BOSS.title": "Sea Glass (Slime Boss)"
+  "SEA_GLASS.DOWNFALL-THE_SLIME_BOSS.title": "Sea Glass (Slime Boss)",
+  "SEA_GLASS.DOWNFALL-THE_GUARDIAN.title": "Sea Glass (Guardian)"
 }

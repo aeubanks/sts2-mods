@@ -1,0 +1,7 @@
+{
+  "OPTION_DOWNFALL_SOCKET_GEM.name": "Socket Gem",
+  "OPTION_DOWNFALL_SOCKET_GEM.description": "Socket a [gold]Gem[/gold] from your deck into an open socket on another card.",
+  "OPTION_DOWNFALL_SOCKET_GEM.descriptionDisabled": "Requires a [gold]Gem[/gold] and a card with an open socket in your deck.",
+  "OPTION_DOWNFALL_SOCKET_GEM.selectGemPrompt": "Choose a Gem to socket.",
+  "OPTION_DOWNFALL_SOCKET_GEM.selectTargetPrompt": "Choose a card with an open socket."
+}

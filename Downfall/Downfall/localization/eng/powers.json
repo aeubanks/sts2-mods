@@ -421,5 +421,11 @@
   "DOWNFALL-COMMAND_ON_PLAY_POWER.smartDescription": "Your next {Amount:plural:card played this turn triggers|[blue]{}[/blue] cards played this turn trigger} a [gold]Command[/gold].",
   "DOWNFALL-RECYCLING_POWER.title": "Recycling",
   "DOWNFALL-RECYCLING_POWER.description": "At the start of your turn, return random \"Lick\" cards from your [gold]Exhaust Pile[/gold] to your [gold]Hand[/gold].",
-  "DOWNFALL-RECYCLING_POWER.smartDescription": "At the start of your turn, return [blue]{Amount}[/blue] random \"Lick\" {Amount:plural:card|cards} from your [gold]Exhaust Pile[/gold] to your [gold]Hand[/gold]."
+  "DOWNFALL-RECYCLING_POWER.smartDescription": "At the start of your turn, return [blue]{Amount}[/blue] random \"Lick\" {Amount:plural:card|cards} from your [gold]Exhaust Pile[/gold] to your [gold]Hand[/gold].",
+  "DOWNFALL-MODE_SHIFT_POWER.title": "Mode Shift",
+  "DOWNFALL-MODE_SHIFT_POWER.description": "Lose HP or [gold]Brace[/gold] to enter [gold]Defensive Mode[/gold] and gain [blue]16[/blue] [gold]Block[/gold]. Threshold increases by [blue]10[/blue] each time (up to [blue]50[/blue]).",
+  "DOWNFALL-MODE_SHIFT_POWER.smartDescription": "After losing [blue]{Amount}[/blue] more HP or [gold]Bracing[/gold] [blue]{Amount}[/blue], gain [blue]16[/blue] [gold]Block[/gold] and enter [gold]Defensive Mode[/gold].",
+  "DOWNFALL-DEFENSIVE_MODE_POWER.title": "Defensive Mode",
+  "DOWNFALL-DEFENSIVE_MODE_POWER.description": "You have [blue]3[/blue] [gold]Thorns[/gold] and your [gold]Block[/gold] does not expire at the start of your turn.",
+  "DOWNFALL-DEFENSIVE_MODE_POWER.smartDescription": "You have [blue]3[/blue] [gold]Thorns[/gold] and your [gold]Block[/gold] does not expire for [blue]{Amount}[/blue] {Amount:plural:turn|turns}."
 }

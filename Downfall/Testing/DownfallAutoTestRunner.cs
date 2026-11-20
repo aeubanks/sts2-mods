@@ -83,8 +83,22 @@ internal static class DownfallAutoTestRunner
         public void Dispose() => _activeCardSelector = _previous;
     }
 
+    private sealed class CancelSelector : ICardSelector
+    {
+        public Task<IEnumerable<CardModel>> GetSelectedCards(IEnumerable<CardModel> options, int minSelect, int maxSelect) =>
+            Task.FromResult(Enumerable.Empty<CardModel>());
+
+        public CardRewardSelection GetSelectedCardReward(
+            IReadOnlyList<CardCreationResult> options,
+            IReadOnlyList<CardRewardAlternative> alternatives) =>
+            new AutoSlayCardSelector(new Rng(1)).GetSelectedCardReward(options, alternatives);
+    }
+
     internal static IDisposable PreferCards(Func<CardModel, bool> preferred) =>
         new CardSelectorScope(new PredicateCardSelector(preferred));
+
+    internal static IDisposable CancelCardSelection() =>
+        new CardSelectorScope(new CancelSelector());
 
     public static void Start()
     {
@@ -195,6 +209,8 @@ internal static class DownfallAutoTestRunner
                 ("SlimeboundUncommonBatch2InCombat", SlimeboundTests.TestUncommonBatch2InCombat),
                 ("SlimeboundRareCardsInCombat", SlimeboundTests.TestRareCardsInCombat),
                 ("SlimeboundRelicsAndPotionsInCombat", SlimeboundTests.TestRelicsAndPotionsInCombat),
+                ("GuardianVisualsRuntime", GuardianTests.TestVisualsRuntime),
+                ("GuardianStarterGemsStasisAndRestSite", GuardianTests.TestStarterGemsStasisAndRestSite),
             ];
 
             int matchedIndex = 0;
@@ -697,6 +713,24 @@ internal static class DownfallAutoTestRunner
         AutoTestAssert.True(new LocString("cards", "DOWNFALL-SELF_FORMING_GOO.selectionScreenPrompt").Exists(), "Missing SelfFormingGoo prompt loc");
         AutoTestAssert.True(new LocString("cards", "DOWNFALL-SLIMEBOUND_DISSOLVE.selectionScreenPrompt").Exists(), "Missing SlimeboundDissolve prompt loc");
         AutoTestAssert.True(new LocString("cards", "DOWNFALL-REPLICATION.selectionScreenPrompt").Exists(), "Missing Replication prompt loc");
+        AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-BRACE_KEYWORD.title").Exists(), "Missing Brace title loc");
+        AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-BRACE_KEYWORD.description").Exists(), "Missing Brace desc loc");
+        AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-STASIS_KEYWORD.title").Exists(), "Missing Stasis title loc");
+        AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-STASIS_KEYWORD.description").Exists(), "Missing Stasis desc loc");
+        AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-ACCELERATE_KEYWORD.title").Exists(), "Missing Accelerate title loc");
+        AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-ACCELERATE_KEYWORD.description").Exists(), "Missing Accelerate desc loc");
+        AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-VOLATILE_KEYWORD.title").Exists(), "Missing Volatile title loc");
+        AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-VOLATILE_KEYWORD.description").Exists(), "Missing Volatile desc loc");
+        AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-GEM_KEYWORD.title").Exists(), "Missing Gem title loc");
+        AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-GEM_KEYWORD.description").Exists(), "Missing Gem desc loc");
+        AutoTestAssert.True(new LocString("cards", "DOWNFALL-CURL_UP.selectionScreenPrompt").Exists(), "Missing CurlUp prompt loc");
+        AutoTestAssert.True(new LocString("rest_site_ui", "OPTION_DOWNFALL_SOCKET_GEM.name").Exists(), "Missing SocketGem rest site name loc");
+        AutoTestAssert.True(new LocString("rest_site_ui", "OPTION_DOWNFALL_SOCKET_GEM.description").Exists(), "Missing SocketGem rest site desc loc");
+        AutoTestAssert.True(new LocString("rest_site_ui", "OPTION_DOWNFALL_SOCKET_GEM.descriptionDisabled").Exists(), "Missing SocketGem rest site disabled desc loc");
+        AutoTestAssert.True(new LocString("rest_site_ui", "OPTION_DOWNFALL_SOCKET_GEM.selectGemPrompt").Exists(), "Missing SocketGem selectGemPrompt loc");
+        AutoTestAssert.True(new LocString("rest_site_ui", "OPTION_DOWNFALL_SOCKET_GEM.selectTargetPrompt").Exists(), "Missing SocketGem selectTargetPrompt loc");
+        AutoTestAssert.True(ResourceLoader.Exists("res://images/ui/rest_site/option_downfall_socket_gem.png"), "Missing SocketGem rest site icon");
+        AutoTestAssert.True(ResourceLoader.Exists(Guardian.GuardianMechanics.DefensiveSpritePath), "Missing Guardian defensive sprite");
 
         return Task.CompletedTask;
     }

@@ -88,5 +88,20 @@
   "DOWNFALL-THE_SLIME_BOSS.goldMonologue": "Ooooh... shiny...",
   "DOWNFALL-THE_SLIME_BOSS.banter": "SLIME... CRUSH!",
   "DOWNFALL-THE_SLIME_BOSS.bestiaryQuote": "The towering gelatinous ruler of the Exordium.",
-  "DOWNFALL-THE_SLIME_BOSS.aromaPrinciple": "Acidic jelly and damp stone."
+  "DOWNFALL-THE_SLIME_BOSS.aromaPrinciple": "Acidic jelly and damp stone.",
+  "DOWNFALL-THE_GUARDIAN.title": "The Guardian",
+  "DOWNFALL-THE_GUARDIAN.titleObject": "the Guardian",
+  "DOWNFALL-THE_GUARDIAN.shortTitle": "Guardian",
+  "DOWNFALL-THE_GUARDIAN.description": "A massive bronze automaton engineered to defend the Spire.\nShifts into Defensive Mode, suspends cards in Stasis, and sockets Gems for lasting power.",
+  "DOWNFALL-THE_GUARDIAN.pronounObject": "it",
+  "DOWNFALL-THE_GUARDIAN.possessiveAdjective": "its",
+  "DOWNFALL-THE_GUARDIAN.pronounPossessive": "its",
+  "DOWNFALL-THE_GUARDIAN.pronounSubject": "it",
+  "DOWNFALL-THE_GUARDIAN.cardsModifierTitle": "Guardian's Cards",
+  "DOWNFALL-THE_GUARDIAN.cardsModifierDescription": "Guardian cards can now appear in rewards and shops.",
+  "DOWNFALL-THE_GUARDIAN.eventDeathPrevention": "DEFENSIVE PROTOCOLS... ENGAGED.",
+  "DOWNFALL-THE_GUARDIAN.goldMonologue": "Metallic currency acquired.",
+  "DOWNFALL-THE_GUARDIAN.banter": "INITIATING DEFENSIVE PROTOCOLS.",
+  "DOWNFALL-THE_GUARDIAN.bestiaryQuote": "The ancient bronze sentinel of the Exordium.",
+  "DOWNFALL-THE_GUARDIAN.aromaPrinciple": "Hot bronze and crystalline ozone."
 }
