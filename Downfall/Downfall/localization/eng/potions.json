@@ -37,5 +37,13 @@
   "DOWNFALL-OFFCLASS_REDUCTION_POTION.title": "Exotic Beverage",
   "DOWNFALL-OFFCLASS_REDUCTION_POTION.description": "Reduce the cost of [gold]Offclass[/gold] cards in your [gold]Hand[/gold] by [blue]{CostReduction}[/blue] this combat.",
   "DOWNFALL-DICE_ROLL_POTION.title": "Card in a Bottle",
-  "DOWNFALL-DICE_ROLL_POTION.description": "Add [blue]{RewardCount}[/blue] extra card {RewardCount:plural:reward|rewards} with [blue]3[/blue] [gold]Upgraded[/gold] Uncommon [gold]Offclass[/gold] cards to this combat's rewards."
+  "DOWNFALL-DICE_ROLL_POTION.description": "Add [blue]{RewardCount}[/blue] extra card {RewardCount:plural:reward|rewards} with [blue]3[/blue] [gold]Upgraded[/gold] Uncommon [gold]Offclass[/gold] cards to this combat's rewards.",
+  "DOWNFALL-SLIMED_POTION.title": "Jar of Slime",
+  "DOWNFALL-SLIMED_POTION.description": "Apply [blue]{SlimedPower}[/blue] [gold]Goop[/gold].",
+  "DOWNFALL-SLIMY_TONGUE_POTION.title": "Slimy Elixir",
+  "DOWNFALL-SLIMY_TONGUE_POTION.description": "Whenever an effect applies [gold]Goop[/gold] this combat, apply [blue]{AcidTonguePower}[/blue] more.",
+  "DOWNFALL-SPAWN_SLIME_POTION.title": "Army in a Bottle",
+  "DOWNFALL-SPAWN_SLIME_POTION.description": "[gold]Split[/gold] [blue]{Slimes}[/blue] random Slimes (Normal or Specialist).",
+  "DOWNFALL-THREE_ZERO_POTION.title": "Ooze-Infused Drink",
+  "DOWNFALL-THREE_ZERO_POTION.description": "Add [blue]{Cards}[/blue] random [blue]0[/blue]-cost cards to your [gold]Hand[/gold]."
 }

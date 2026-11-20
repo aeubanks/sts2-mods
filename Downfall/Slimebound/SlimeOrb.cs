@@ -52,6 +52,10 @@ public abstract class SlimeOrb : DownfallOrb
 
     public override async Task AfterTurnStartOrbTrigger(PlayerChoiceContext choiceContext)
     {
+        // Battle-start Slimes (AggressiveSlimeRelic, MaxSlimesRelic) do not auto-attack on Turn 1.
+        if (Owner?.Creature.CombatState?.RoundNumber <= 1)
+            return;
+
         await TriggerPassive(choiceContext, null);
     }
 

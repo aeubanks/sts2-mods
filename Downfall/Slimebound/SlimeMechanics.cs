@@ -305,7 +305,20 @@ internal static class SlimeMechanics
         if (!player.Creature.IsAlive || CombatManager.Instance.IsOverOrEnding)
             return;
 
-        int damage = CalculateTackleSelfDamage(player, baseSelfDamage);
+        int damage = baseSelfDamage;
+        foreach (var mod in player.Creature.Powers.OfType<ITackleSelfDamageModifier>())
+            damage = mod.ModifyTackleSelfDamage(damage);
+        foreach (var relic in player.Relics)
+        {
+            if (relic is ITackleSelfDamageModifier mod)
+            {
+                int next = mod.ModifyTackleSelfDamage(damage);
+                if (next < damage)
+                    relic.Flash();
+                damage = next;
+            }
+        }
+        damage = Math.Max(0, damage);
         if (damage <= 0)
             return;
 

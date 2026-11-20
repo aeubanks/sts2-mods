@@ -2,6 +2,7 @@ using Downfall.Core;
 using Downfall.Slimebound;
 using Downfall.Slimebound.Cards;
 using Downfall.Slimebound.Orbs;
+using Downfall.Slimebound.Potions;
 using Downfall.Slimebound.Powers;
 using Downfall.Slimebound.Relics;
 using MegaCrit.Sts2.Core.Combat;
@@ -1249,6 +1250,119 @@ internal static class SlimeboundTests
         AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<LoseSlimesPower>(), "LoseSlimesPower removed on Round 3");
         AutoTestAssert.Equal(0, SlimeMechanics.GetSlimes(player).Count, "LoseSlimesPower absorbed all Slimes on Round 3");
         AutoTestAssert.Equal(strBeforeR3 + 1, player.Creature.GetPowerAmount<StrengthPower>(), "Absorbed Slime on Round 3 granted +1 Strength");
+    }
+
+    internal static async Task TestRelicsAndPotionsInCombat()
+    {
+        var (player, runState, combatState) = await DownfallAutoTestRunner.StartCombatAsync<TheSlimeBoss>("SLIME_RELPOT");
+        var pcs = AutoTestAssert.NotNull(player.PlayerCombatState, "PlayerCombatState");
+        var enemy = AutoTestAssert.NotNull(combatState.HittableEnemies.FirstOrDefault(), "Enemy");
+        var ctx = new ThrowingPlayerChoiceContext();
+        await CreatureCmd.GainMaxHp(enemy, 1000m);
+
+        // 1. Obtain all 8 non-starter Slimebound relics and verify their effects in a fresh combat after a Rest Site!
+        await RelicCmd.Obtain<AggressiveSlimeRelic>(player);
+        await RelicCmd.Obtain<PotencyRelic>(player);
+        await RelicCmd.Obtain<SlimedSkullRelic>(player);
+        await RelicCmd.Obtain<MaxSlimesRelic>(player);
+        var prepared = await RelicCmd.Obtain<PreparedRelic>(player);
+        await RelicCmd.Obtain<StickyStick>(player);
+        await RelicCmd.Obtain<SlimedTailRelic>(player);
+        await RelicCmd.Obtain<SelfDamagePreventRelic>(player);
+
+        // Arm PreparedRelic via RestSiteRoom entry & verify [SavedProperty] serialization + clone preservation!
+        await prepared.AfterRoomEntered(new MegaCrit.Sts2.Core.Rooms.RestSiteRoom());
+        AutoTestAssert.True(prepared.IsArmed, "PreparedRelic armed on RestSiteRoom entry");
+        AutoTestAssert.Equal(RelicStatus.Active, prepared.Status, "PreparedRelic status is Active when armed");
+        var preparedClone = (PreparedRelic)prepared.MutableClone();
+        AutoTestAssert.True(preparedClone.IsArmed, "PreparedRelic MutableClone preserves IsArmed");
+        var preparedRoundTrip = (PreparedRelic)RelicModel.FromSerializable(prepared.ToSerializable());
+        AutoTestAssert.True(preparedRoundTrip.IsArmed, "PreparedRelic [SavedProperty] round-trips IsArmed=true");
+        AutoTestAssert.Equal(RelicStatus.Active, preparedRoundTrip.Status, "PreparedRelic round-trip restores RelicStatus.Active");
+
+        // Enter a fresh combat so Round 1 BeforeSideTurnStart & AfterPlayerTurnStart fire naturally!
+        var encounter = ModelDb.Encounter<MegaCrit.Sts2.Core.Models.Encounters.NibbitsWeak>().ToMutable();
+        await RunManager.Instance.EnterRoomDebug(
+            MegaCrit.Sts2.Core.Rooms.RoomType.Monster,
+            MegaCrit.Sts2.Core.Map.MapPointType.Monster,
+            encounter,
+            showTransition: false);
+        var combatRoom = AutoTestAssert.NotNull(runState.CurrentRoom as MegaCrit.Sts2.Core.Rooms.CombatRoom, "Fresh CombatRoom");
+        combatState = AutoTestAssert.NotNull(combatRoom.CombatState, "Fresh CombatState");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        pcs = AutoTestAssert.NotNull(player.PlayerCombatState, "Fresh PlayerCombatState");
+        enemy = AutoTestAssert.NotNull(combatState.HittableEnemies.FirstOrDefault(), "Fresh Enemy");
+        AutoTestAssert.Equal(enemy.MaxHp, enemy.CurrentHp, "Turn-1 battle-start Slimes did NOT auto-attack on Turn 1");
+        await CreatureCmd.GainMaxHp(enemy, 1000m);
+
+        // Verify all Round-1 combat-start relics triggered:
+        AutoTestAssert.Equal(4, pcs.OrbQueue.Capacity, "MaxSlimesRelic increased Slime slots 3 -> 4");
+        var slimes = SlimeMechanics.GetSlimes(player);
+        AutoTestAssert.Equal(2, slimes.Count, "AggressiveSlimeRelic + MaxSlimesRelic spawned 2 Slimes");
+        AutoTestAssert.True(slimes.Any(s => s is AttackSlime), "AggressiveSlimeRelic spawned Bruiser Slime");
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<PotencyPower>(), "PotencyRelic granted +1 Potency");
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<AcidTonguePower>(), "SlimedSkullRelic granted +1 AcidTongue");
+        AutoTestAssert.Equal(6, player.Creature.Block, "SlimedTailRelic granted exactly 6 Block from 2 Splits (no Turn-1 Slime passive)");
+        AutoTestAssert.True(!prepared.IsArmed, "PreparedRelic disarmed after Turn 1");
+        var prepCard = AutoTestAssert.NotNull(pcs.Hand.Cards.OfType<Prepare>().FirstOrDefault(), "PreparedRelic added Prepare to Hand");
+        AutoTestAssert.Equal(0, prepCard.EnergyCost.GetWithModifiers(CostModifiers.All), "PreparedRelic Prepare costs 0 this turn");
+
+        // 2. StickyStick (Gelatinous Cube): drawing a Status grants +3 Block!
+        await ClearHandAndRefillEnergy(player, pcs);
+        await CreatureCmd.LoseBlock(ctx, player.Creature, player.Creature.Block, null);
+        var slimedStatus = combatState.CreateCard<MegaCrit.Sts2.Core.Models.Cards.Slimed>(player);
+        await CardPileCmd.Add(slimedStatus, PileType.Draw, CardPilePosition.Top);
+        await CardPileCmd.Draw(ctx, 1m, player);
+        AutoTestAssert.Equal(3, player.Creature.Block, "StickyStick granted 3 Block on drawing Status card");
+
+        // 3. SelfDamagePreventRelic (Protective Gear): reduces Tackle self-damage by 3 (3 -> 0; and with Reckless(4): 3 + 4 - 3 = 4)!
+        await CreatureCmd.LoseBlock(ctx, player.Creature, player.Creature.Block, null);
+        int hpBefore = player.Creature.CurrentHp;
+        var tackle = combatState.CreateCard<Tackle>(player);
+        await CardPileCmd.Add(tackle, PileType.Hand);
+        AutoTestAssert.True(tackle.TryManualPlay(enemy), "Play Tackle with SelfDamagePreventRelic");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(hpBefore, player.Creature.CurrentHp, "SelfDamagePreventRelic reduced Tackle 3 self-damage to 0");
+
+        await PowerCmd.Apply<TackleModifyDamagePower>(ctx, player.Creature, 4m, player.Creature, null);
+        hpBefore = player.Creature.CurrentHp;
+        var tackle2 = combatState.CreateCard<Tackle>(player);
+        await CardPileCmd.Add(tackle2, PileType.Hand);
+        AutoTestAssert.True(tackle2.TryManualPlay(enemy), "Play Tackle with Reckless(4) and SelfDamagePreventRelic (3 + 4 - 3 = 4)");
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        AutoTestAssert.Equal(hpBefore - 4, player.Creature.CurrentHp, "SelfDamagePreventRelic reduced Reckless Tackle self-damage from 7 to 4");
+        await PowerCmd.Remove<TackleModifyDamagePower>(player.Creature);
+
+        // 4. All 4 Potions:
+        // (a) SlimyTonguePotion: +2 AcidTongue (1 -> 3)
+        var tonguePot = (SlimyTonguePotion)ModelDb.Potion<SlimyTonguePotion>().ToMutable();
+        await PotionCmd.TryToProcure(tonguePot, player);
+        await tonguePot.OnUseWrapper(ctx, null);
+        AutoTestAssert.Equal(3, player.Creature.GetPowerAmount<AcidTonguePower>(), "SlimyTonguePotion stacked AcidTongue 1 -> 3");
+
+        // (b) SlimedPotion (Jar of Slime): 15 + 3 AcidTongue = 18 Goop!
+        await PowerCmd.Remove<SlimedPower>(enemy);
+        var slimedPot = (SlimedPotion)ModelDb.Potion<SlimedPotion>().ToMutable();
+        await PotionCmd.TryToProcure(slimedPot, player);
+        await slimedPot.OnUseWrapper(ctx, enemy);
+        AutoTestAssert.Equal(18, enemy.GetPowerAmount<SlimedPower>(), "SlimedPotion applied 15 + 3 AcidTongue = 18 Goop");
+
+        // (c) SpawnSlimePotion (Army in a Bottle): splits 3 random Slimes (and triggers SlimedTailRelic 3x -> +9 Block)!
+        await SlimeMechanics.AbsorbAllSlimesAsync(ctx, player);
+        await CreatureCmd.LoseBlock(ctx, player.Creature, player.Creature.Block, null);
+        var spawnPot = (SpawnSlimePotion)ModelDb.Potion<SpawnSlimePotion>().ToMutable();
+        await PotionCmd.TryToProcure(spawnPot, player);
+        await spawnPot.OnUseWrapper(ctx, null);
+        AutoTestAssert.Equal(3, SlimeMechanics.GetSlimes(player).Count, "SpawnSlimePotion spawned 3 Slimes");
+        AutoTestAssert.Equal(9, player.Creature.Block, "SlimedTailRelic triggered 3x (+9 Block) on SpawnSlimePotion");
+
+        // (d) ThreeZeroPotion (Ooze-Infused Drink): adds 4 random 0-cost cards to Hand!
+        await ClearHandAndRefillEnergy(player, pcs);
+        var zeroPot = (ThreeZeroPotion)ModelDb.Potion<ThreeZeroPotion>().ToMutable();
+        await PotionCmd.TryToProcure(zeroPot, player);
+        await zeroPot.OnUseWrapper(ctx, null);
+        AutoTestAssert.Equal(4, pcs.Hand.Cards.Count, "ThreeZeroPotion added 4 cards to Hand");
+        AutoTestAssert.True(pcs.Hand.Cards.All(c => c.EnergyCost.Canonical == 0 && !c.EnergyCost.CostsX), "All 4 cards from ThreeZeroPotion are 0-cost");
     }
 
     internal static async Task ClearHandAndRefillEnergy(
