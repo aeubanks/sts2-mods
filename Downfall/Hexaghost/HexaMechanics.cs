@@ -22,7 +22,7 @@ namespace Downfall.Hexaghost;
 /// </summary>
 public interface IGhostflameIgniteListener
 {
-    Task OnGhostflameIgnitedAsync(PlayerChoiceContext choiceContext, Player player, GhostflameOrb ghostflame);
+    Task OnGhostflameIgnitedAsync(PlayerChoiceContext choiceContext, Player player, GhostflameOrb ghostflame, int ignitedCount);
 }
 
 /// <summary>
@@ -116,6 +116,16 @@ public static class HexaMechanics
 
         int prevIdx = (GetActiveSlotIndex(player) - 1 + flames.Count) % flames.Count;
         return flames[prevIdx];
+    }
+
+    public static GhostflameOrb? GetNextGhostflame(Player? player)
+    {
+        var flames = GetGhostflames(player);
+        if (flames.Count == 0)
+            return null;
+
+        int nextIdx = (GetActiveSlotIndex(player) + 1) % flames.Count;
+        return flames[nextIdx];
     }
 
     public static async Task ScryExhaustEtherealAsync(
@@ -277,6 +287,7 @@ public static class HexaMechanics
         }
 
         ghostflame.MarkIgnited();
+        int ignitedCount = GetIgnitedCount(player);
         if (player.Creature.CombatState is { } combatState)
         {
             var state = HexaCombatState.Get(combatState);
@@ -295,7 +306,7 @@ public static class HexaMechanics
         {
             if (!player.Creature.IsAlive || CombatManager.Instance.IsOverOrEnding)
                 break;
-            await listener.OnGhostflameIgnitedAsync(choiceContext, player, ghostflame);
+            await listener.OnGhostflameIgnitedAsync(choiceContext, player, ghostflame, ignitedCount);
         }
 
         RefreshGhostflameVisuals(player);
@@ -526,6 +537,14 @@ public static class HexaMechanics
         {
             if (power is T listener)
                 result.Add(listener);
+        }
+        if (player.PlayerCombatState is { } pcs)
+        {
+            foreach (var card in pcs.DiscardPile.Cards)
+            {
+                if (card is T listener)
+                    result.Add(listener);
+            }
         }
         return result;
     }

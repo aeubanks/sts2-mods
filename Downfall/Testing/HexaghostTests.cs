@@ -1174,4 +1174,294 @@ internal static class HexaghostTests
         }
         AutoTestAssert.Equal(0, HexaMechanics.GetActiveSlotIndex(player), "Toasty+ Retract moved back from Slot 1 to Slot 0");
     }
+
+    internal static async Task TestRareCardsInCombat()
+    {
+        var (player, _, combatState) = await DownfallAutoTestRunner.StartCombatAsync<TheHexaghost>("HEXA_RARE");
+        var pcs = AutoTestAssert.NotNull(player.PlayerCombatState, "PlayerCombatState");
+        var enemy = AutoTestAssert.NotNull(combatState.HittableEnemies.FirstOrDefault(e => e.IsAlive), "Alive enemy");
+        var ctx = new ThrowingPlayerChoiceContext();
+
+        await CreatureCmd.SetMaxAndCurrentHp(enemy, 1500);
+        if (enemy.Block > 0)
+            await CreatureCmd.LoseBlock(ctx, enemy, enemy.Block, null);
+
+        async Task ClearHandAndRefillAsync()
+        {
+            foreach (var c in pcs.Hand.Cards.ToList())
+                await CardPileCmd.Add(c, PileType.Discard);
+            pcs.Energy = 20;
+        }
+
+        // 1. EtherStep: OnPlay with 2+ cards in Hand (exercises CardSelectCmd.FromHand + SelectionScreenPrompt) & Afterlife (10 dmg)!
+        await ClearHandAndRefillAsync();
+        var exhFodder = combatState.CreateCard<HexaStrike>(player);
+        var keepCard = combatState.CreateCard<HexaDefend>(player);
+        var drawTarget = combatState.CreateCard<HexaDefend>(player);
+        await CardPileCmd.Add(drawTarget, PileType.Draw, CardPilePosition.Top);
+        await CardPileCmd.Add(exhFodder, PileType.Hand);
+        await CardPileCmd.Add(keepCard, PileType.Hand);
+        var etherStep = combatState.CreateCard<EtherStep>(player);
+        await CardPileCmd.Add(etherStep, PileType.Hand);
+        int hpBeforeEs = enemy.CurrentHp;
+        using (DownfallAutoTestRunner.PreferCards(c => ReferenceEquals(c, exhFodder)))
+        {
+            await PlayCardAsync(etherStep, enemy);
+        }
+        AutoTestAssert.Equal(hpBeforeEs - 10, enemy.CurrentHp, "EtherStep OnPlay dealt 10 damage");
+        AutoTestAssert.True(pcs.ExhaustPile.Cards.Contains(exhFodder), "EtherStep exhausted selected card from multi-card Hand");
+        AutoTestAssert.True(pcs.Hand.Cards.Contains(keepCard), "EtherStep kept unselected card in Hand");
+        AutoTestAssert.True(pcs.Hand.Cards.Contains(drawTarget), "EtherStep drew 1 card");
+
+        var etherStep2 = combatState.CreateCard<EtherStep>(player);
+        await CardPileCmd.Add(etherStep2, PileType.Hand);
+        int hpBeforeEsAfter = enemy.CurrentHp;
+        await CardCmd.Exhaust(ctx, etherStep2, causedByEthereal: false);
+        AutoTestAssert.Equal(hpBeforeEsAfter - 10, enemy.CurrentHp, "EtherStep Afterlife dealt 10 damage");
+
+        // 2. ForkedFlame: Active on Slot 1 (Crushing) -> 4 dmg + Ignites previous (Slot 0 Searing -> +6 Soulburn) and next (Slot 2 Bolstering -> +1 Str, +4 Block)!
+        await ClearHandAndRefillAsync();
+        await PowerCmd.Remove<SoulburnPower>(enemy);
+        HexaCombatState.Get(combatState).ActiveSlotIndex = 1;
+        int hpBeforeFork = enemy.CurrentHp;
+        int strBeforeFork = player.Creature.GetPowerAmount<StrengthPower>();
+        var fork = combatState.CreateCard<ForkedFlame>(player);
+        await CardPileCmd.Add(fork, PileType.Hand);
+        await PlayCardAsync(fork, enemy);
+        AutoTestAssert.Equal(hpBeforeFork - 4, enemy.CurrentHp, "ForkedFlame dealt 4 damage");
+        AutoTestAssert.Equal(6, enemy.GetPowerAmount<SoulburnPower>(), "ForkedFlame ignited previous Slot 0 Searing (+6 Soulburn)");
+        AutoTestAssert.Equal(strBeforeFork + 1, player.Creature.GetPowerAmount<StrengthPower>(), "ForkedFlame ignited next Slot 2 Bolstering (+1 Strength)");
+        await PowerCmd.Remove<StrengthPower>(player.Creature);
+
+        // 3. SearingWound: enemy loses HP equal to Soulburn WITHOUT removing Soulburn!
+        await ClearHandAndRefillAsync();
+        int hpBeforeSw = enemy.CurrentHp;
+        var searingWound = combatState.CreateCard<SearingWound>(player);
+        await CardPileCmd.Add(searingWound, PileType.Hand);
+        await PlayCardAsync(searingWound);
+        AutoTestAssert.Equal(hpBeforeSw - 6, enemy.CurrentHp, "SearingWound dealt 6 HP loss equal to Soulburn");
+        AutoTestAssert.Equal(6, enemy.GetPowerAmount<SoulburnPower>(), "SearingWound did not remove Soulburn");
+        AutoTestAssert.True(pcs.ExhaustPile.Cards.Contains(searingWound), "Unupgraded SearingWound exhausted");
+        var searingWoundPlus = combatState.CreateCard<SearingWound>(player);
+        CardCmd.Upgrade(searingWoundPlus);
+        AutoTestAssert.True(!searingWoundPlus.Keywords.Contains(CardKeyword.Exhaust), "SearingWound+ removed Exhaust");
+
+        // 4. VolcanoVisage + ParanormalForm:
+        //    - VolcanoVisage applies 4 Soulburn to ALL enemies whenever a Ghostflame ignites!
+        //    - ParanormalForm makes random enemy lose 6 HP whenever an Ethereal card is played!
+        await ClearHandAndRefillAsync();
+        await PowerCmd.Remove<SoulburnPower>(enemy);
+        var volcano = combatState.CreateCard<VolcanoVisage>(player);
+        var para = combatState.CreateCard<ParanormalForm>(player);
+        await CardPileCmd.Add(volcano, PileType.Hand);
+        await CardPileCmd.Add(para, PileType.Hand);
+        await PlayCardAsync(volcano);
+        await PlayCardAsync(para);
+        AutoTestAssert.Equal(4, player.Creature.GetPowerAmount<VolcanoVisagePower>(), "VolcanoVisage applied VolcanoVisagePower(4)");
+        AutoTestAssert.Equal(6, player.Creature.GetPowerAmount<ParanormalFormPower>(), "ParanormalForm applied ParanormalFormPower(6)");
+
+        await HexaMechanics.IgniteAsync(ctx, player, HexaMechanics.GetGhostflames(player)[1], extinguishFirstIfIgnited: true);
+        AutoTestAssert.Equal(4, enemy.GetPowerAmount<SoulburnPower>(), "VolcanoVisage applied 4 Soulburn on Ghostflame ignition");
+
+        int hpBeforePara = enemy.CurrentHp;
+        var ethSear = combatState.CreateCard<Sear>(player); // Ethereal Attack: 5 dmg + 5 Soulburn + 6 HP loss from ParanormalForm!
+        await CardPileCmd.Add(ethSear, PileType.Hand);
+        await PlayCardAsync(ethSear, enemy);
+        AutoTestAssert.Equal(hpBeforePara - 5 - 6, enemy.CurrentHp, "ParanormalForm dealt 6 HP loss on playing Ethereal Sear (5 + 6 = 11 total)");
+        await PowerCmd.Remove<VolcanoVisagePower>(player.Creature);
+        await PowerCmd.Remove<ParanormalFormPower>(player.Creature);
+
+        // 5. LingeringShades: Retract + 12 Soulburn + returns all Ethereal cards from Discard Pile to Hand!
+        await ClearHandAndRefillAsync();
+        await PowerCmd.Remove<SoulburnPower>(enemy);
+        var discEth1 = combatState.CreateCard<Sear>(player);
+        var discEth2 = combatState.CreateCard<GhostShield>(player);
+        var discNonEth = combatState.CreateCard<HexaStrike>(player);
+        await CardPileCmd.Add(discEth1, PileType.Discard);
+        await CardPileCmd.Add(discEth2, PileType.Discard);
+        await CardPileCmd.Add(discNonEth, PileType.Discard);
+        int slotBeforeLs = HexaMechanics.GetActiveSlotIndex(player);
+        var ls = combatState.CreateCard<LingeringShades>(player);
+        await CardPileCmd.Add(ls, PileType.Hand);
+        await PlayCardAsync(ls, enemy);
+        AutoTestAssert.Equal((slotBeforeLs + 5) % 6, HexaMechanics.GetActiveSlotIndex(player), "LingeringShades retracted 1 slot");
+        AutoTestAssert.Equal(12, enemy.GetPowerAmount<SoulburnPower>(), "LingeringShades applied 12 Soulburn");
+        AutoTestAssert.True(pcs.Hand.Cards.Contains(discEth1) && pcs.Hand.Cards.Contains(discEth2), "LingeringShades returned all Ethereal cards from Discard to Hand");
+        AutoTestAssert.True(!pcs.Hand.Cards.Contains(discNonEth), "LingeringShades left non-Ethereal card in Discard");
+
+        // 6. TimeWarp: returns from Discard to Hand on manual Advance/Retract, NOT on end-of-turn Advance!
+        await ClearHandAndRefillAsync();
+        var tw = combatState.CreateCard<TimeWarp>(player);
+        await CardPileCmd.Add(tw, PileType.Discard);
+        await HexaMechanics.AdvanceAsync(ctx, player, isEndTurn: true);
+        AutoTestAssert.True(pcs.DiscardPile.Cards.Contains(tw), "TimeWarp stayed in Discard on end-of-turn Advance");
+        await HexaMechanics.AdvanceAsync(ctx, player, isEndTurn: false);
+        AutoTestAssert.True(pcs.Hand.Cards.Contains(tw), "TimeWarp returned from Discard to Hand on manual Advance");
+        await CardPileCmd.Add(tw, PileType.Discard);
+        await HexaMechanics.RetractAsync(ctx, player);
+        AutoTestAssert.True(pcs.Hand.Cards.Contains(tw), "TimeWarp returned from Discard to Hand on Retract");
+
+        // 7. GhostOfSpireFuture (Into Shadow) + RetreatToShadows (Incorporeal):
+        //    Retract triggers FuturePower -> PlayCardAndExhaustPower(1) -> next card costs 0 and Exhausts!
+        //    RetreatToShadows retracts, loses 6 HP, grants 1 Intangible!
+        await ClearHandAndRefillAsync();
+        var futureCard = combatState.CreateCard<GhostOfSpireFuture>(player);
+        await CardPileCmd.Add(futureCard, PileType.Hand);
+        await PlayCardAsync(futureCard);
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<FuturePower>(), "GhostOfSpireFuture applied FuturePower(1)");
+
+        // Non-Exhaust Retract card (BacktrackSmack) with FuturePower(1) must land in Discard (NOT Exhaust) and leave PlayCardAndExhaustPower == 1!
+        var nonExhRetract = combatState.CreateCard<BacktrackSmack>(player);
+        await CardPileCmd.Add(nonExhRetract, PileType.Hand);
+        await PlayCardAsync(nonExhRetract, enemy);
+        AutoTestAssert.True(pcs.DiscardPile.Cards.Contains(nonExhRetract), "Non-Exhaust Retract card went to Discard (not Exhaust)");
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<PlayCardAndExhaustPower>(), "Non-Exhaust Retract left PlayCardAndExhaustPower == 1");
+
+        // Consume that charge cleanly before RetreatToShadows
+        pcs.Energy = 0; // 0 Energy left! Playing 2-cost HeatCrush must succeed for 0 Energy and Exhaust!
+        var freeCard = combatState.CreateCard<HeatCrush>(player);
+        await CardPileCmd.Add(freeCard, PileType.Hand);
+        AutoTestAssert.Equal(0, freeCard.EnergyCost.GetWithModifiers(CostModifiers.All), "PlayCardAndExhaustPower reduced HeatCrush cost to 0");
+        await PlayCardAsync(freeCard, enemy);
+        AutoTestAssert.True(pcs.ExhaustPile.Cards.Contains(freeCard), "PlayCardAndExhaustPower exhausted played card");
+        AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<PlayCardAndExhaustPower>(), "PlayCardAndExhaustPower decremented to 0");
+
+        int playerHpBeforeRetreat = player.Creature.CurrentHp;
+        var retreat = combatState.CreateCard<RetreatToShadows>(player);
+        await CardPileCmd.Add(retreat, PileType.Hand);
+        await PlayCardAsync(retreat);
+        AutoTestAssert.Equal(playerHpBeforeRetreat - 6, player.Creature.CurrentHp, "RetreatToShadows dealt 6 self HP loss");
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<IntangiblePower>(), "RetreatToShadows granted 1 Intangible");
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<PlayCardAndExhaustPower>(), "Retreat triggered FuturePower -> PlayCardAndExhaustPower(1)");
+        await PowerCmd.Remove<PlayCardAndExhaustPower>(player.Creature);
+        await PowerCmd.Remove<FuturePower>(player.Creature);
+        await PowerCmd.Remove<IntangiblePower>(player.Creature);
+
+        // 8. GhostflameInferno (Instant Inferno): 12 Soulburn + switches to Slot 5 and ignites Inferno!
+        await ClearHandAndRefillAsync();
+        await PowerCmd.Remove<SoulburnPower>(enemy);
+        var flames = HexaMechanics.GetGhostflames(player);
+        for (int i = 0; i < 6; i++)
+            await HexaMechanics.ExtinguishAsync(ctx, player, flames[i]);
+        await HexaMechanics.IgniteAsync(ctx, player, flames[0]); // 1 ignited -> Inferno hits twice (2 * 4 = 8 dmg)!
+        await PowerCmd.Remove<SoulburnPower>(enemy);
+        int hpBeforeGi = enemy.CurrentHp;
+        var gi = combatState.CreateCard<GhostflameInferno>(player);
+        await CardPileCmd.Add(gi, PileType.Hand);
+        await PlayCardAsync(gi, enemy);
+        AutoTestAssert.Equal(12, enemy.GetPowerAmount<SoulburnPower>(), "GhostflameInferno applied 12 Soulburn");
+        AutoTestAssert.Equal(5, HexaMechanics.GetActiveSlotIndex(player), "GhostflameInferno switched active slot to 5 (Inferno)");
+        AutoTestAssert.True(flames[5].IsIgnited, "GhostflameInferno ignited Slot 5 Inferno");
+        AutoTestAssert.Equal(hpBeforeGi - 8, enemy.CurrentHp, "GhostflameInferno triggered Inferno for 4 * 2 = 8 damage");
+
+        // 9. ApocalypticArmor (threshold 6) + ApocalypticArmor+ threshold lowering (6 -> 5, NOT 11!) + unupgraded threshold 6 triggering on Slot 5 Inferno via UnlimitedPower!
+        await ClearHandAndRefillAsync();
+        await PowerCmd.Remove<EnhancePower>(player.Creature);
+        var doomsdayCheck = combatState.CreateCard<ApocalypticArmor>(player);
+        var doomsdayPlusCheck = combatState.CreateCard<ApocalypticArmor>(player);
+        CardCmd.Upgrade(doomsdayPlusCheck); // threshold 5
+        await CardPileCmd.Add(doomsdayCheck, PileType.Hand);
+        await CardPileCmd.Add(doomsdayPlusCheck, PileType.Hand);
+        await PlayCardAsync(doomsdayCheck);
+        AutoTestAssert.Equal(6, player.Creature.GetPowerAmount<ApocalypticArmorPower>(), "Unupgraded ApocalypticArmor applied threshold 6");
+        await PlayCardAsync(doomsdayPlusCheck);
+        AutoTestAssert.Equal(5, player.Creature.GetPowerAmount<ApocalypticArmorPower>(), "ApocalypticArmor+ lowered existing threshold 6 -> 5 (did not stack to 11)");
+        await PowerCmd.Remove<ApocalypticArmorPower>(player.Creature);
+
+        // Now test UNUPGRADED threshold 6 triggering on Slot 5 Inferno via UnlimitedPower!
+        var doomsday6 = combatState.CreateCard<ApocalypticArmor>(player);
+        await CardPileCmd.Add(doomsday6, PileType.Hand);
+        await PlayCardAsync(doomsday6);
+        AutoTestAssert.Equal(6, player.Creature.GetPowerAmount<ApocalypticArmorPower>(), "ApocalypticArmor applied threshold 6");
+
+        var unlim = combatState.CreateCard<UnlimitedPower>(player);
+        CardCmd.Upgrade(unlim); // cost 3
+        await CardPileCmd.Add(unlim, PileType.Hand);
+        await PlayCardAsync(unlim);
+        AutoTestAssert.Equal(5, HexaMechanics.GetActiveSlotIndex(player), "UnlimitedPower ended on Slot 5");
+        AutoTestAssert.Equal(2, HexaMechanics.GetIntensity(player), "UnlimitedPower 6/6 Inferno granted +2 Intensity");
+        AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<ApocalypticArmorPower>(), "Unupgraded ApocalypticArmorPower(6) consumed on Slot 5 6/6 Inferno ignition");
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<HexaTimeStopPower>(), "Unupgraded ApocalypticArmorPower(6) granted HexaTimeStopPower(1)");
+        await PowerCmd.Remove<StrengthPower>(player.Creature);
+        await PowerCmd.Remove<EnhancePower>(player.Creature);
+
+        // 10. TurnItUp (+3 temp Intensity/Str/Dex), HexaLevel+ (+2 immediate +2/turn Intensity), GiftsFromTheDead (+1 Afterlife/turn), GhostOfSpirePresent (+1 Energy/turn + Extinguish instead of Advance)!
+        await ClearHandAndRefillAsync();
+        var turnItUp = combatState.CreateCard<TurnItUp>(player);
+        CardCmd.Upgrade(turnItUp);
+        AutoTestAssert.True(turnItUp.Keywords.Contains(CardKeyword.Retain), "TurnItUp+ has Retain");
+        await CardPileCmd.Add(turnItUp, PileType.Hand);
+        await PlayCardAsync(turnItUp);
+        AutoTestAssert.Equal(3, HexaMechanics.GetIntensity(player), "TurnItUp granted +3 Intensity");
+        AutoTestAssert.Equal(3, player.Creature.GetPowerAmount<LoseIntensityPower>(), "TurnItUp applied LoseIntensityPower(3)");
+        AutoTestAssert.Equal(3, player.Creature.GetPowerAmount<StrengthPower>(), "TurnItUp granted +3 temp Strength");
+        AutoTestAssert.Equal(3, player.Creature.GetPowerAmount<DexterityPower>(), "TurnItUp granted +3 temp Dexterity");
+
+        var hexaLevel = combatState.CreateCard<HexaLevel>(player);
+        CardCmd.Upgrade(hexaLevel); // +2 immediate Intensity + HexalevelPower(2)
+        var gifts = combatState.CreateCard<GiftsFromTheDead>(player);
+        var present = combatState.CreateCard<GhostOfSpirePresent>(player);
+        await CardPileCmd.Add(hexaLevel, PileType.Hand);
+        await CardPileCmd.Add(gifts, PileType.Hand);
+        await CardPileCmd.Add(present, PileType.Hand);
+        await PlayCardAsync(hexaLevel);
+        await PlayCardAsync(gifts);
+        await PlayCardAsync(present);
+        AutoTestAssert.Equal(5, HexaMechanics.GetIntensity(player), "HexaLevel+ immediately granted +2 Intensity (3 -> 5)");
+        AutoTestAssert.Equal(2, player.Creature.GetPowerAmount<HexalevelPower>(), "HexaLevel+ applied HexalevelPower(2)");
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<GiftsFromTheDeadPower>(), "GiftsFromTheDead applied GiftsFromTheDeadPower(1)");
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<HexaEnergyPerTurnPower>(), "GhostOfSpirePresent applied HexaEnergyPerTurnPower(1)");
+        AutoTestAssert.Equal(1, player.Creature.GetPowerAmount<StopFromAdvancingPower>(), "GhostOfSpirePresent applied StopFromAdvancingPower");
+
+        // Ignite Slot 0 and leave it active so we can verify StopFromAdvancingPower extinguishes Slot 0 instead of advancing!
+        HexaCombatState.Get(combatState).ActiveSlotIndex = 0;
+        await HexaMechanics.IgniteAsync(ctx, player, flames[0], extinguishFirstIfIgnited: true);
+        int exhaustedThisTurn = HexaCombatState.Get(combatState).CardsExhaustedThisTurn;
+        AutoTestAssert.True(exhaustedThisTurn >= 2, "Multiple cards exhausted during Round 1");
+
+        // End turn -> HexaTimeStopPower triggers an EXTRA PLAYER TURN (enemy skipped)!
+        int turnBeforeEnd = pcs.TurnNumber;
+        var extraTurnTcs = new TaskCompletionSource();
+        void OnExtraTurnStarted(CombatState state)
+        {
+            if (state.CurrentSide == CombatSide.Player && pcs.TurnNumber > turnBeforeEnd)
+                extraTurnTcs.TrySetResult();
+        }
+        CombatManager.Instance.TurnStarted += OnExtraTurnStarted;
+        try
+        {
+            RunManager.Instance.ActionQueueSynchronizer.RequestEnqueue(
+                new MegaCrit.Sts2.Core.GameActions.EndPlayerTurnAction(player, combatState.RoundNumber));
+            await extraTurnTcs.Task.WaitAsync(TimeSpan.FromSeconds(15));
+            await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        }
+        finally
+        {
+            CombatManager.Instance.TurnStarted -= OnExtraTurnStarted;
+        }
+
+        AutoTestAssert.Equal(turnBeforeEnd + 1, pcs.TurnNumber, "HexaTimeStopPower started extra player turn");
+        AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<HexaTimeStopPower>(), "HexaTimeStopPower decremented to 0 after extra turn");
+        AutoTestAssert.Equal(0, HexaMechanics.GetActiveSlotIndex(player), "StopFromAdvancingPower prevented end-of-turn Advance (stayed on Slot 0)");
+        AutoTestAssert.True(!flames[0].IsIgnited, "StopFromAdvancingPower extinguished active Slot 0 at end of turn");
+        // Intensity: started 5 -> LoseIntensityPower(-3) -> 2 -> HexalevelPower(+2) at turn start -> 4!
+        AutoTestAssert.Equal(4, HexaMechanics.GetIntensity(player), "LoseIntensityPower(-3) + HexalevelPower(+2) resulted in Intensity == 4");
+        AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<LoseIntensityPower>(), "LoseIntensityPower removed at end of turn");
+        AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<StrengthPower>(), "TurnItUp temporary Strength expired at end of turn");
+        AutoTestAssert.Equal(0, player.Creature.GetPowerAmount<DexterityPower>(), "TurnItUp temporary Dexterity expired at end of turn");
+        AutoTestAssert.True(pcs.Energy >= 4, $"HexaEnergyPerTurnPower granted +1 Energy at turn start (Energy={pcs.Energy})");
+        AutoTestAssert.True(pcs.Hand.Cards.Any(c => c is HexaCard { HasAfterlife: true }), "GiftsFromTheDeadPower added an Afterlife card to Hand at turn start");
+
+        // 11. UnleashSpirits: deals 10 damage (1 + CardsExhaustedLastTurn) times!
+        int expectedHits = 1 + HexaCombatState.Get(combatState).CardsExhaustedLastTurn;
+        AutoTestAssert.True(expectedHits >= 3, $"CardsExhaustedLastTurn populated ({expectedHits} hits)");
+        if (enemy.Block > 0)
+            await CreatureCmd.LoseBlock(ctx, enemy, enemy.Block, null);
+        int hpBeforeUnleash = enemy.CurrentHp;
+        pcs.Energy = 10;
+        var unleash = combatState.CreateCard<UnleashSpirits>(player);
+        await CardPileCmd.Add(unleash, PileType.Hand);
+        await PlayCardAsync(unleash);
+        AutoTestAssert.Equal(hpBeforeUnleash - 10 * expectedHits, enemy.CurrentHp, $"UnleashSpirits dealt 10 * {expectedHits} = {10 * expectedHits} damage");
+    }
 }

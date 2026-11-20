@@ -221,6 +221,7 @@ internal static class DownfallAutoTestRunner
                 ("HexaCommonCardsInCombat", HexaghostTests.TestCommonCardsInCombat),
                 ("HexaUncommonBatch1InCombat", HexaghostTests.TestUncommonBatch1InCombat),
                 ("HexaUncommonBatch2InCombat", HexaghostTests.TestUncommonBatch2InCombat),
+                ("HexaRareCardsInCombat", HexaghostTests.TestRareCardsInCombat),
             ];
 
             int matchedIndex = 0;
@@ -782,6 +783,7 @@ internal static class DownfallAutoTestRunner
         AutoTestAssert.True(new LocString("cards", "DOWNFALL-REWIND.selectionScreenPrompt").Exists(), "Missing Rewind prompt");
         AutoTestAssert.True(new LocString("cards", "DOWNFALL-SEVENTH_EYE.selectionScreenPrompt").Exists(), "Missing SeventhEye prompt");
         AutoTestAssert.True(new LocString("cards", "DOWNFALL-SPECTRAL_GRACE.selectionScreenPrompt").Exists(), "Missing SpectralGrace prompt");
+        AutoTestAssert.True(new LocString("cards", "DOWNFALL-ETHER_STEP.selectionScreenPrompt").Exists(), "Missing EtherStep prompt");
 
         return Task.CompletedTask;
     }

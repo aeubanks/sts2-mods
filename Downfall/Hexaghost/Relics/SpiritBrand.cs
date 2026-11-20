@@ -48,7 +48,8 @@ public abstract class SpiritBrandBase : HexaRelic, IGhostflameIgniteListener
     public abstract Task OnGhostflameIgnitedAsync(
         PlayerChoiceContext choiceContext,
         Player player,
-        GhostflameOrb ghostflame);
+        GhostflameOrb ghostflame,
+        int ignitedCount);
 }
 
 /// <summary>
@@ -75,7 +76,8 @@ public sealed class SpiritBrand : SpiritBrandBase
     public override async Task OnGhostflameIgnitedAsync(
         PlayerChoiceContext choiceContext,
         Player player,
-        GhostflameOrb ghostflame)
+        GhostflameOrb ghostflame,
+        int ignitedCount)
     {
         if (player != Owner || _triggeredThisTurn || !Owner.Creature.IsAlive || CombatManager.Instance.IsOverOrEnding)
             return;
@@ -95,7 +97,8 @@ public sealed class UnbrokenSoul : SpiritBrandBase
     public override async Task OnGhostflameIgnitedAsync(
         PlayerChoiceContext choiceContext,
         Player player,
-        GhostflameOrb ghostflame)
+        GhostflameOrb ghostflame,
+        int ignitedCount)
     {
         if (player != Owner || !Owner.Creature.IsAlive || CombatManager.Instance.IsOverOrEnding)
             return;
