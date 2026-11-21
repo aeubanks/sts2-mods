@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using Downfall.Hexaghost.Orbs;
 using MegaCrit.Sts2.Core.Combat;
 
 namespace Downfall.Hexaghost;
@@ -13,6 +14,7 @@ public sealed class HexaCombatState
 
     public static HexaCombatState Get(ICombatState combatState) => States.GetOrCreateValue(combatState);
 
+    public List<GhostflameOrb> Ghostflames { get; } = new(HexaMechanics.WheelSlotCount);
     public bool WheelInitialized { get; set; }
     public int ActiveSlotIndex { get; set; }
     public bool WasActiveIgnitedBeforeCardPlay { get; set; }

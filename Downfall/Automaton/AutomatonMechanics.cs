@@ -73,11 +73,11 @@ public static class AutomatonMechanics
 
     public static IReadOnlyList<EncodedCardOrb> GetEncodedOrbs(Player? player)
     {
-        var orbs = player?.PlayerCombatState?.OrbQueue.Orbs;
-        if (orbs is null || orbs.Count == 0)
+        var combatState = player?.Creature.CombatState;
+        if (combatState is null)
             return [];
 
-        return orbs.OfType<EncodedCardOrb>().ToList();
+        return AutomatonCombatState.Get(combatState).EncodedOrbs.ToList();
     }
 
     public static IReadOnlyList<BronzeCard> GetEncodedCards(Player? player)
@@ -113,7 +113,7 @@ public static class AutomatonMechanics
         if (player is null)
             return;
 
-        NCombatRoom.Instance?.GetCreatureNode(player.Creature)?.OrbManager?.UpdateVisuals(OrbEvokeType.None);
+        AutomatonFunctionOverlay.UpdateVisuals(player);
     }
 
     public static Task AddGeneratedCardToHandOrDiscardAsync(CardModel card, Player player)
@@ -271,18 +271,18 @@ public static class AutomatonMechanics
     }
 
     /// <summary>
-    /// Removes a specific EncodedCardOrb from the OrbQueue cleanly without triggering Evoke effects,
-    /// then re-indexes remaining encoded orbs.
+    /// Removes a specific EncodedCardOrb from Automaton's Function sequence cleanly without touching Defect's OrbQueue,
+    /// then re-indexes remaining encoded slots.
     /// </summary>
     public static bool RemoveEncodedOrb(Player player, EncodedCardOrb orb)
     {
-        if (player.PlayerCombatState is not { } pcs)
+        if (player.Creature.CombatState is not { } combatState)
             return false;
 
-        if (!pcs.OrbQueue.Remove(orb))
+        var list = AutomatonCombatState.Get(combatState).EncodedOrbs;
+        if (!list.Remove(orb))
             return false;
 
-        NCombatRoom.Instance?.GetCreatureNode(player.Creature)?.OrbManager?.EvokeOrbAnim(orb);
         orb.RemoveInternal();
         ReindexEncodedOrbs(player);
         return true;
@@ -345,27 +345,12 @@ public static class AutomatonMechanics
                 cloneTemplate = (BronzeCard)card.CreateClone();
         }
 
-        // If sequence is already at capacity (e.g. re-entrant encode), compile first so Channel never evicts an EncodedCardOrb.
+        // If sequence is already at capacity (e.g. re-entrant encode), compile first before adding the new card.
         if (GetEncodedOrbs(player).Count >= FunctionCapacity)
         {
             await CompileFunctionAsync(choiceContext, player);
             if (!player.Creature.IsAlive || CombatManager.Instance.IsOverOrEnding)
                 return;
-        }
-
-        // Ensure OrbQueue can hold the sequence (and evict oldest non-EncodedCardOrb if full via crossover).
-        if (pcs.OrbQueue.Capacity < FunctionCapacity)
-            await OrbCmd.AddSlots(player, FunctionCapacity - pcs.OrbQueue.Capacity);
-
-        if (pcs.OrbQueue.Orbs.Count >= pcs.OrbQueue.Capacity)
-        {
-            var nonEncoded = pcs.OrbQueue.Orbs.FirstOrDefault(o => o is not EncodedCardOrb);
-            if (nonEncoded is not null)
-            {
-                await EvokeNonEncodedOrbAsync(choiceContext, player, nonEncoded);
-                if (!player.Creature.IsAlive || CombatManager.Instance.IsOverOrEnding)
-                    return;
-            }
         }
 
         // Run pre-encode hooks (OptimizePower, RemoveNextErrorPower).
@@ -376,15 +361,17 @@ public static class AutomatonMechanics
             await listener.OnBeforeEncodeAsync(choiceContext, player, card);
         }
 
-        if (!player.Creature.IsAlive || CombatManager.Instance.IsOverOrEnding)
+        if (!player.Creature.IsAlive || CombatManager.Instance.IsOverOrEnding || player.Creature.CombatState is not { } combatState)
             return;
 
-        int slotIndex = GetEncodedOrbs(player).Count;
+        var state = AutomatonCombatState.Get(combatState);
+        int slotIndex = state.EncodedOrbs.Count;
         var orb = (EncodedCardOrb)ModelDb.Orb<EncodedCardOrb>().ToMutable();
+        orb.Owner = player;
         orb.InitializeEncodedCard(card, slotIndex);
-        await OrbCmd.Channel(choiceContext, orb, player);
+        state.EncodedOrbs.Add(orb);
         RefreshOrbVisuals(player);
-        orb.PlayPulseVisual();
+        AutomatonFunctionOverlay.PlaySlotPulse(player, slotIndex);
 
         await card.OnEncodedAsync(choiceContext, player, slotIndex);
         if (!player.Creature.IsAlive || CombatManager.Instance.IsOverOrEnding)
@@ -421,12 +408,13 @@ public static class AutomatonMechanics
             return null;
         }
 
-        var encodedOrbs = GetEncodedOrbs(player);
+        var combatStateRef = AutomatonCombatState.Get(combatState);
+        var encodedOrbs = combatStateRef.EncodedOrbs.ToList();
         if (encodedOrbs.Count == 0)
             return null;
 
-        foreach (var encodedOrb in encodedOrbs)
-            encodedOrb.PlayPulseVisual();
+        for (int i = 0; i < encodedOrbs.Count; i++)
+            AutomatonFunctionOverlay.PlaySlotPulse(player, i);
         DownfallSpriteAnimator.ForCreature(player.Creature)?.PlayCast();
         await Cmd.CustomScaledWait(0.08f, 0.16f);
 
@@ -439,9 +427,8 @@ public static class AutomatonMechanics
                 c.SequenceSlotIndex = i;
                 encodedCards.Add(c);
             }
-            if (pcs.OrbQueue.Remove(orb))
+            if (combatStateRef.EncodedOrbs.Remove(orb))
             {
-                NCombatRoom.Instance?.GetCreatureNode(player.Creature)?.OrbManager?.EvokeOrbAnim(orb);
                 orb.RemoveInternal();
             }
         }
@@ -530,24 +517,6 @@ public static class AutomatonMechanics
                 if (card is IFunctionCompiledCardListener listener)
                     listener.OnFunctionCompiled(player, totalCompiled);
             }
-        }
-    }
-
-    private static async Task EvokeNonEncodedOrbAsync(PlayerChoiceContext choiceContext, Player player, OrbModel orb)
-    {
-        if (player.PlayerCombatState is not { } pcs || !pcs.OrbQueue.Remove(orb))
-            return;
-
-        NCombatRoom.Instance?.GetCreatureNode(player.Creature)?.OrbManager?.EvokeOrbAnim(orb);
-        choiceContext.PushModel(orb);
-        try
-        {
-            await orb.Evoke(choiceContext);
-        }
-        finally
-        {
-            choiceContext.PopModel(orb);
-            orb.RemoveInternal();
         }
     }
 

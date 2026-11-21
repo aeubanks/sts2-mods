@@ -38,35 +38,41 @@ internal static class AutomatonTests
         var (player, _, combatState) = await DownfallAutoTestRunner.StartCombatAsync<TheAutomaton>("AUTO_ORBVIS");
         var ctx = new ThrowingPlayerChoiceContext();
 
-        var orbManager = AutoTestAssert.NotNull(
-            NCombatRoom.Instance?.GetCreatureNode(player.Creature)?.OrbManager,
-            "Automaton live NOrbManager");
+        AutoTestAssert.Equal(0, player.PlayerCombatState!.OrbQueue.Capacity, "Automaton does not consume Defect orb slots");
 
-        AutoTestAssert.Equal(3, player.PlayerCombatState!.OrbQueue.Capacity, "Automaton starts combat with 3 orb slots");
+        var visuals = AutoTestAssert.NotNull(
+            NCombatRoom.Instance?.GetCreatureNode(player.Creature)?.Visuals,
+            "Automaton live Visuals");
+        var tray = AutoTestAssert.NotNull(
+            visuals.GetNodeOrNull<Node2D>(AutomatonFunctionOverlay.TrayNodeName),
+            "Automaton dedicated AutomatonFunctionTray mounted on Visuals");
 
-        // Encode 1 card and verify EncodedCardOrb mounts cleanly in live NOrbManager with preloaded icon & label "1"!
+        // Encode 1 card and verify it renders inside the horizontal bronze sequence tray with its card art!
         var rep = (Replicate)combatState.CreateCard<Replicate>(player);
         await AutomatonMechanics.EncodeCardAsync(ctx, player, rep);
 
         var orbs = AutomatonMechanics.GetEncodedOrbs(player);
-        AutoTestAssert.Equal(1, orbs.Count, "1 EncodedCardOrb channeled");
+        AutoTestAssert.Equal(1, orbs.Count, "1 EncodedCardOrb in sequence");
         AutoTestAssert.Equal("1", orbs[0].PrimaryLabelText, "Slot 0 EncodedCardOrb label is '1'");
 
-        var orbNodes = new List<NOrb>();
-        DownfallAutoTestRunner.CollectNodes(orbManager, orbNodes);
-        var orbNode = AutoTestAssert.NotNull(
-            orbNodes.FirstOrDefault(n => ReferenceEquals(n.Model, orbs[0])),
-            "Live NOrb mounted for EncodedCardOrb");
-
-        var sprites = new List<Sprite2D>();
-        DownfallAutoTestRunner.CollectNodes(orbNode, sprites);
-        var sprite = AutoTestAssert.NotNull(
-            sprites.FirstOrDefault(s => s.Texture is not null),
-            "EncodedCardOrb Sprite2D has loaded texture");
+        var pedestal = AutoTestAssert.NotNull(
+            tray.GetNodeOrNull<Sprite2D>("Slot0/Pedestal"),
+            "Slot 0 bronze pedestal Sprite2D");
         AutoTestAssert.Equal(
-            "res://Downfall/images/automaton/orbs/encoded_card_orb.png",
-            sprite.Texture!.ResourcePath,
-            "EncodedCardOrb uses preloaded bronze sequence orb icon");
+            "res://Downfall/images/automaton/ui/sequence_slot.png",
+            pedestal.Texture?.ResourcePath,
+            "Slot 0 uses StS 1 bronze sequence_slot pedestal texture");
+
+        var art = AutoTestAssert.NotNull(
+            tray.GetNodeOrNull<Sprite2D>("Slot0/CardArt"),
+            "Slot 0 encoded card art Sprite2D");
+        AutoTestAssert.True(art.Visible && art.Texture is not null, "Slot 0 displays encoded card artwork");
+
+        // Verify Automaton's Function sequence and Defect orb slots coexist cleanly!
+        await OrbCmd.AddSlots(player, 1);
+        await OrbCmd.Channel(ctx, ModelDb.Orb<MegaCrit.Sts2.Core.Models.Orbs.FrostOrb>().ToMutable(), player);
+        AutoTestAssert.Equal(1, AutomatonMechanics.GetEncodedOrbs(player).Count, "Defect orb leaves Automaton sequence untouched");
+        AutoTestAssert.Equal(1, player.PlayerCombatState.OrbQueue.Orbs.Count, "Defect orb occupies its own OrbQueue slot");
 
         // Verify Skill, Attack, and Power FunctionCards all add to Hand and mount NCard visuals cleanly!
         var skillFunc = (FunctionCard)combatState.CreateCard<FunctionCard>(player);
@@ -101,7 +107,7 @@ internal static class AutomatonTests
         // 1. Verify Character stats, starting deck, starter relic & Orobas upgrade
         AutoTestAssert.Equal(70, player.Creature.MaxHp, "Automaton MaxHp == 70");
         AutoTestAssert.Equal(99, player.Gold, "Automaton StartingGold == 99");
-        AutoTestAssert.Equal(3, pcs.OrbQueue.Capacity, "Automaton starts with 3 sequence slots");
+        AutoTestAssert.Equal(0, pcs.OrbQueue.Capacity, "Automaton starts with 0 Defect orb slots (Function sequence is independent)");
         AutoTestAssert.Equal(10, player.Deck.Cards.Count, "Automaton starts with 10 cards");
         var bronzeCore = AutoTestAssert.NotNull(player.GetRelic<BronzeCore>(), "Starts with BronzeCore");
         AutoTestAssert.Equal(RelicRarity.Starter, bronzeCore.Rarity, "BronzeCore is Starter");

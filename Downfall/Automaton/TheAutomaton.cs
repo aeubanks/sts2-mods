@@ -21,7 +21,7 @@ public sealed class TheAutomaton : DownfallCharacter
     public override CharacterGender Gender => CharacterGender.Neutral;
     public override int StartingHp => 70;
     public override int StartingGold => 99;
-    public override int BaseOrbSlotCount => AutomatonMechanics.FunctionCapacity;
+    public override int BaseOrbSlotCount => 0;
 
     public override CardPoolModel CardPool => ModelDb.CardPool<AutomatonCardPool>();
     public override RelicPoolModel RelicPool => ModelDb.RelicPool<AutomatonRelicPool>();

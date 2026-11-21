@@ -39,9 +39,14 @@ internal static class HexaghostTests
         var (player, _, _) = await DownfallAutoTestRunner.StartCombatAsync<TheHexaghost>("HEXA_ORBVIS");
         var ctx = new ThrowingPlayerChoiceContext();
 
-        var orbManager = AutoTestAssert.NotNull(
-            NCombatRoom.Instance?.GetCreatureNode(player.Creature)?.OrbManager,
-            "Hexaghost live NOrbManager");
+        AutoTestAssert.Equal(0, player.PlayerCombatState!.OrbQueue.Capacity, "Hexaghost does not consume Defect orb slots");
+
+        var visuals = AutoTestAssert.NotNull(
+            NCombatRoom.Instance?.GetCreatureNode(player.Creature)?.Visuals,
+            "Hexaghost live Visuals");
+        var wheel = AutoTestAssert.NotNull(
+            visuals.GetNodeOrNull<Node2D>(HexaGhostflameOverlay.WheelNodeName),
+            "Hexaghost dedicated HexaGhostflameWheel overlay mounted on Visuals");
 
         var flames = HexaMechanics.GetGhostflames(player);
         AutoTestAssert.Equal(6, flames.Count, "Hexaghost starts combat with 6 Ghostflames");
@@ -52,27 +57,21 @@ internal static class HexaghostTests
         AutoTestAssert.True(flames[4] is CrushingGhostflameOrb, "Slot 4 is Crushing");
         AutoTestAssert.True(flames[5] is InfernoGhostflameOrb, "Slot 5 is Inferno");
 
-        var orbNodes = new List<NOrb>();
-        DownfallAutoTestRunner.CollectNodes(orbManager, orbNodes);
-        var slot0Node = AutoTestAssert.NotNull(
-            orbNodes.FirstOrDefault(n => ReferenceEquals(n.Model, flames[0])),
-            "Live NOrb mounted for Slot 0 SearingGhostflameOrb");
-
-        var slot0Sprites = new List<Sprite2D>();
-        DownfallAutoTestRunner.CollectNodes(slot0Node, slot0Sprites);
-        var slot0Sprite = AutoTestAssert.NotNull(slot0Sprites.FirstOrDefault(), "Slot 0 Ghostflame Sprite2D");
+        var slot0Emblem = AutoTestAssert.NotNull(
+            wheel.GetNodeOrNull<Sprite2D>("Flame0/Emblem"),
+            "Slot 0 Ghostflame Emblem Sprite2D");
         AutoTestAssert.Equal(
             "res://Downfall/images/hexaghost/orbs/searing_ghostflame_orb.png",
-            slot0Sprite.Texture?.ResourcePath,
+            slot0Emblem.Texture?.ResourcePath,
             "Unignited SearingGhostflameOrb uses dim texture");
 
         await HexaMechanics.IgniteAsync(ctx, player, flames[0]);
         AutoTestAssert.Equal(
             "res://Downfall/images/hexaghost/orbs/searing_ghostflame_orb_bright.png",
-            slot0Sprite.Texture?.ResourcePath,
+            slot0Emblem.Texture?.ResourcePath,
             "Ignited SearingGhostflameOrb live-swapped to bright texture");
 
-        // Verify in-place ReplaceGhostflame preserves exact slot 1 index and updates mounted NOrb!
+        // Verify in-place ReplaceGhostflame preserves exact slot 1 index and updates live hexagonal wheel!
         var replacement = (BolsteringGhostflameOrb)ModelDb.Orb<BolsteringGhostflameOrb>().ToMutable();
         HexaMechanics.ReplaceGhostflame(player, 1, replacement);
         var flamesAfter = HexaMechanics.GetGhostflames(player);
@@ -80,11 +79,19 @@ internal static class HexaghostTests
         AutoTestAssert.True(ReferenceEquals(flamesAfter[1], replacement), "Slot 1 replaced in-place");
         AutoTestAssert.True(flamesAfter[5] is InfernoGhostflameOrb, "Slot 5 Inferno untouched by slot 1 replacement");
 
-        orbNodes.Clear();
-        DownfallAutoTestRunner.CollectNodes(orbManager, orbNodes);
-        AutoTestAssert.True(
-            orbNodes.Any(n => ReferenceEquals(n.Model, replacement)),
-            "Live NOrbManager updated to mount replacement GhostflameOrb in-place");
+        var slot1Emblem = AutoTestAssert.NotNull(
+            wheel.GetNodeOrNull<Sprite2D>("Flame1/Emblem"),
+            "Slot 1 Ghostflame Emblem Sprite2D");
+        AutoTestAssert.Equal(
+            "res://Downfall/images/hexaghost/orbs/bolstering_ghostflame_orb.png",
+            slot1Emblem.Texture?.ResourcePath,
+            "Live HexaGhostflameWheel updated Slot 1 emblem in-place");
+
+        // Verify Ghostflames and Defect orb slots coexist cleanly with zero overlap/eviction!
+        await OrbCmd.AddSlots(player, 1);
+        await OrbCmd.Channel(ctx, ModelDb.Orb<MegaCrit.Sts2.Core.Models.Orbs.LightningOrb>().ToMutable(), player);
+        AutoTestAssert.Equal(6, HexaMechanics.GetGhostflames(player).Count, "Adding Defect orb leaves all 6 Ghostflames untouched");
+        AutoTestAssert.Equal(1, player.PlayerCombatState.OrbQueue.Orbs.Count, "Defect orb occupies its own OrbQueue slot");
     }
 
     internal static async Task TestStarterGhostflamesAndAfterlife()

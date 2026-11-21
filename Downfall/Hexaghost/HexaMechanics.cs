@@ -82,11 +82,11 @@ public static class HexaMechanics
 
     public static IReadOnlyList<GhostflameOrb> GetGhostflames(Player? player)
     {
-        var orbs = player?.PlayerCombatState?.OrbQueue.Orbs;
-        if (orbs is null || orbs.Count == 0)
+        var combatState = player?.Creature.CombatState;
+        if (combatState is null)
             return [];
 
-        return orbs.OfType<GhostflameOrb>().ToList();
+        return HexaCombatState.Get(combatState).Ghostflames.ToList();
     }
 
     public static int GetActiveSlotIndex(Player? player)
@@ -222,48 +222,43 @@ public static class HexaMechanics
         return 1;
     }
 
-    public static async Task EnsureWheelInitializedAsync(PlayerChoiceContext choiceContext, Player player)
+    public static Task EnsureWheelInitializedAsync(PlayerChoiceContext choiceContext, Player player)
     {
         if (player.Creature.CombatState is not { } combatState
             || player.PlayerCombatState is null
             || CombatManager.Instance.IsOverOrEnding)
         {
-            return;
+            return Task.CompletedTask;
         }
 
         var state = HexaCombatState.Get(combatState);
-        if (state.WheelInitialized && GetGhostflames(player).Count > 0)
-            return;
+        if (state.WheelInitialized && state.Ghostflames.Count > 0)
+            return Task.CompletedTask;
 
         state.WheelInitialized = true;
         state.ActiveSlotIndex = 0;
-
-        var orbQueue = player.PlayerCombatState.OrbQueue;
-        if (orbQueue.Capacity < WheelSlotCount)
-        {
-            await OrbCmd.AddSlots(player, WheelSlotCount - orbQueue.Capacity);
-        }
+        state.Ghostflames.Clear();
 
         // Exact DownfallSTS 6-slot wheel order:
         // [Searing, Crushing, Bolstering, Searing, Crushing, Inferno]
-        OrbModel[] initialFlames =
+        GhostflameOrb[] initialFlames =
         [
-            ModelDb.Orb<SearingGhostflameOrb>().ToMutable(),
-            ModelDb.Orb<CrushingGhostflameOrb>().ToMutable(),
-            ModelDb.Orb<BolsteringGhostflameOrb>().ToMutable(),
-            ModelDb.Orb<SearingGhostflameOrb>().ToMutable(),
-            ModelDb.Orb<CrushingGhostflameOrb>().ToMutable(),
-            ModelDb.Orb<InfernoGhostflameOrb>().ToMutable()
+            (GhostflameOrb)ModelDb.Orb<SearingGhostflameOrb>().ToMutable(),
+            (GhostflameOrb)ModelDb.Orb<CrushingGhostflameOrb>().ToMutable(),
+            (GhostflameOrb)ModelDb.Orb<BolsteringGhostflameOrb>().ToMutable(),
+            (GhostflameOrb)ModelDb.Orb<SearingGhostflameOrb>().ToMutable(),
+            (GhostflameOrb)ModelDb.Orb<CrushingGhostflameOrb>().ToMutable(),
+            (GhostflameOrb)ModelDb.Orb<InfernoGhostflameOrb>().ToMutable()
         ];
 
-        foreach (var orb in initialFlames)
+        foreach (var flame in initialFlames)
         {
-            if (CombatManager.Instance.IsOverOrEnding)
-                return;
-            await OrbCmd.Channel(choiceContext, orb, player);
+            flame.Owner = player;
+            state.Ghostflames.Add(flame);
         }
 
         RefreshGhostflameVisuals(player);
+        return Task.CompletedTask;
     }
 
     public static async Task IgniteActiveAsync(
@@ -306,7 +301,7 @@ public static class HexaMechanics
         }
 
         RefreshGhostflameVisuals(player);
-        ghostflame.PlayIgniteVisual();
+        HexaGhostflameOverlay.PlaySlotAnimation(player, ghostflame, ignited: true);
         DownfallSpriteAnimator.ForCreature(player.Creature)?.PlayHexaPulse(new Color(1.25f, 1.65f, 1.35f, 1f), 0.20f);
 
         await ghostflame.OnIgniteAsync(choiceContext, player);
@@ -343,7 +338,7 @@ public static class HexaMechanics
 
         ghostflame.MarkExtinguished();
         RefreshGhostflameVisuals(player);
-        ghostflame.PlayExtinguishVisual();
+        HexaGhostflameOverlay.PlaySlotAnimation(player, ghostflame, ignited: false);
 
         if (!player.Creature.IsAlive)
             return;
@@ -500,35 +495,19 @@ public static class HexaMechanics
 
     public static void ReplaceGhostflame(Player player, int slotIndex, GhostflameOrb newOrb)
     {
-        if (player.PlayerCombatState is null || CombatManager.Instance.IsOverOrEnding)
+        if (player.Creature.CombatState is not { } combatState || CombatManager.Instance.IsOverOrEnding)
             return;
 
-        var orbQueue = player.PlayerCombatState.OrbQueue;
-        var flames = GetGhostflames(player);
+        var flames = HexaCombatState.Get(combatState).Ghostflames;
         if (slotIndex < 0 || slotIndex >= flames.Count)
             return;
 
         var oldOrb = flames[slotIndex];
-        int queueIndex = -1;
-        for (int i = 0; i < orbQueue.Orbs.Count; i++)
-        {
-            if (orbQueue.Orbs[i] == oldOrb)
-            {
-                queueIndex = i;
-                break;
-            }
-        }
-
-        if (queueIndex < 0)
-            return;
-
         newOrb.AssertMutable();
         newOrb.Owner = player;
-        orbQueue.Remove(oldOrb);
         oldOrb.RemoveInternal();
-        orbQueue.Insert(queueIndex, newOrb);
+        flames[slotIndex] = newOrb;
 
-        NCombatRoom.Instance?.GetCreatureNode(player.Creature)?.OrbManager?.ReplaceOrb(oldOrb, newOrb);
         RefreshGhostflameVisuals(player);
     }
 
@@ -581,7 +560,7 @@ public static class HexaMechanics
         if (player is null)
             return;
 
-        NCombatRoom.Instance?.GetCreatureNode(player.Creature)?.OrbManager?.UpdateVisuals(OrbEvokeType.None);
+        HexaGhostflameOverlay.UpdateVisuals(player);
     }
 
     public static bool PreventsEndTurnAdvance(Player player)

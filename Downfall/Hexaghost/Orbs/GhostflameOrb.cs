@@ -38,10 +38,10 @@ public abstract class GhostflameOrb : DownfallOrb
     protected bool IsCoordinatorOrb =>
         SafeOwner is not null && HexaMechanics.GetGhostflames(SafeOwner).FirstOrDefault() == this;
 
+    internal string BrightIconPath => $"res://Downfall/images/{CharacterKey}/orbs/{IconKey}_bright.png";
+
     public override string SpriteTexturePath =>
-        _isIgnited
-            ? $"res://Downfall/images/{CharacterKey}/orbs/{IconKey}_bright.png"
-            : CustomIconPath;
+        _isIgnited ? BrightIconPath : CustomIconPath;
 
     public override Color SpriteTint
     {
