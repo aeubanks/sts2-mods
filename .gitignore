@@ -1,0 +1,4 @@
+workshop/uploader/
+workshop/*/content/
+mod-uploader.log
+scripts/__pycache__/
