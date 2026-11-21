@@ -1,9 +1,0 @@
-{
-  "PACKMASTER-MODDERS_DELIGHT.title": "Modder's Delight",
-  "PACKMASTER-MODDERS_DELIGHT.description": "Shuffle your [gold]Discard Pile[/gold] into your [gold]Draw Pile[/gold]. Put {Cards} random cards from different Packs from your [gold]Draw Pile[/gold] into your [gold]Hand[/gold].",
-  "PACKMASTER-BOOSTER_BREW.title": "Booster Brew",
-  "PACKMASTER-BOOSTER_BREW.description": "Choose 1 of 3 Packs. Shuffle {Cards} random cards from it into your [gold]Draw Pile[/gold]. They cost 0 this combat.",
-  "PACKMASTER-SMITHING_OIL.title": "Smithing Oil",
-  "PACKMASTER-SMITHING_OIL.description": "Choose {Cards} {Cards:plural:card|cards} in your [gold]Hand[/gold] to [gold]Upgrade[/gold] permanently.",
-  "PACKMASTER-SMITHING_OIL.selectionScreenPrompt": "Choose a card to Upgrade permanently."
-}

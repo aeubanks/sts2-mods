@@ -2,10 +2,10 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-MOD_DIR="$ROOT_DIR/Packmaster"
+MOD_DIR="$ROOT_DIR/RandomSts1Mods"
 STS2_DIR="${STS2_DIR:-$HOME/.local/share/Steam/steamapps/common/Slay the Spire 2}"
 STS2_BIN="$STS2_DIR/SlayTheSpire2"
-DEPLOY_DIR="$STS2_DIR/mods/Packmaster"
+DEPLOY_DIR="$STS2_DIR/mods/RandomSts1Mods"
 HEADLESS_SETTINGS="$HOME/.local/share/SlayTheSpire2/default/1/settings.save"
 
 export DOTNET_ROOT="$HOME/.dotnet"
@@ -35,7 +35,7 @@ data["mod_settings"] = {
     "mod_list": [
         {"id": "BaseLibCompatibilityHelper", "is_enabled": True, "source": "mods_directory"},
         {"id": "BaseLib", "is_enabled": True, "source": "mods_directory"},
-        {"id": "Packmaster", "is_enabled": True, "source": "mods_directory"},
+        {"id": "RandomSts1Mods", "is_enabled": True, "source": "mods_directory"},
     ],
 }
 with open(path, "w", encoding="utf-8") as f:
@@ -44,10 +44,10 @@ PY
 
 # 2. Build (fast dotnet build for code-only changes; dotnet publish when .pck needs refresh).
 NEED_PACK=$FORCE_PACK
-PCK_FILE="$DEPLOY_DIR/Packmaster.pck"
+PCK_FILE="$DEPLOY_DIR/RandomSts1Mods.pck"
 if [[ ! -f "$PCK_FILE" ]]; then
   NEED_PACK=1
-elif [[ -n "$(find "$MOD_DIR/Packmaster" "$MOD_DIR/project.godot" "$MOD_DIR/export_presets.cfg" -newer "$PCK_FILE" 2>/dev/null)" ]]; then
+elif [[ -n "$(find "$MOD_DIR/Packmaster" "$MOD_DIR/Downfall" "$MOD_DIR/RandomSts1Mods" "$MOD_DIR/images" "$MOD_DIR/project.godot" "$MOD_DIR/export_presets.cfg" -newer "$PCK_FILE" 2>/dev/null)" ]]; then
   NEED_PACK=1
 fi
 
