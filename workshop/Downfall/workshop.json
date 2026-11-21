@@ -2,7 +2,7 @@
   "title": "Downfall",
   "description": "Port of all 10 playable Slay the Spire 1 Downfall characters to Slay the Spire 2:\n\n- The Hermit\n- The Awakened One\n- The Gremlins\n- The Champ\n- The Snecko\n- The Slime Boss\n- The Guardian\n- The Hexaghost\n- The Automaton\n- The Collector\n\nIncludes their full card pools, relics, potions, custom mechanics, animations, and visuals.\n\nRequires BaseLib.",
   "visibility": "friends_only",
-  "changeNote": "Initial release with all 10 Downfall characters.",
+  "changeNote": "Fix Downfall.dll architecture to AnyCPU (ILOnly) for arm64 macOS compatibility.",
   "tags": [
     "Characters"
   ],
