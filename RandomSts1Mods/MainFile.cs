@@ -9,6 +9,7 @@ using MegaCrit.Sts2.Core.Modding;
 using Packmaster.Config;
 using Packmaster.Packs;
 using Packmaster.Testing;
+using RandomSts1Mods.Testing;
 
 namespace RandomSts1Mods;
 
@@ -31,7 +32,12 @@ public static class MainFile
         var harmony = new Harmony(ModId);
         harmony.PatchAll(assembly);
 
-        if (System.Environment.GetEnvironmentVariable("PACKMASTER_AUTOTEST") == "1")
+        var mpRole = System.Environment.GetEnvironmentVariable("MP_AUTOTEST");
+        if (!string.IsNullOrWhiteSpace(mpRole))
+        {
+            Callable.From(() => MultiplayerAutoTestRunner.Start(mpRole)).CallDeferred();
+        }
+        else if (System.Environment.GetEnvironmentVariable("PACKMASTER_AUTOTEST") == "1")
         {
             Callable.From(PackmasterAutoTestRunner.Start).CallDeferred();
         }
