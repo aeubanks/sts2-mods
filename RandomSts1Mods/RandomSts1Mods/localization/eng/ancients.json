@@ -1,0 +1,56 @@
+{
+  "THE_ARCHITECT.talk.PACKMASTER-THE_PACKMASTER.0-0r.ancient": "A collector of borrowed styles... Yet every pack in your satchel bends to the same Spire.",
+  "THE_ARCHITECT.talk.PACKMASTER-THE_PACKMASTER.0-0r.next": "Respond",
+  "THE_ARCHITECT.talk.PACKMASTER-THE_PACKMASTER.0-1r.char": "Then let's see what happens when I open every pack at once.",
+  "THE_ARCHITECT.talk.PACKMASTER-THE_PACKMASTER.0-attack": "Both",
+
+  "THE_ARCHITECT.talk.DOWNFALL-THE_HERMIT.0-0r.ancient": "You carry old curses to the summit, drifter. Your luck was meant to run dry long ago.",
+  "THE_ARCHITECT.talk.DOWNFALL-THE_HERMIT.0-0r.next": "Respond",
+  "THE_ARCHITECT.talk.DOWNFALL-THE_HERMIT.0-1r.char": "One last shot. Dead center.",
+  "THE_ARCHITECT.talk.DOWNFALL-THE_HERMIT.0-attack": "Both",
+
+  "THE_ARCHITECT.talk.DOWNFALL-THE_AWAKENED_ONE.0-0r.ancient": "A vessel of forgotten worship, risen beyond its shrine. Do you still answer to the feathers and the flame?",
+  "THE_ARCHITECT.talk.DOWNFALL-THE_AWAKENED_ONE.0-0r.next": "Respond",
+  "THE_ARCHITECT.talk.DOWNFALL-THE_AWAKENED_ONE.0-1r.char": "CAW! The ritual ends with you!",
+  "THE_ARCHITECT.talk.DOWNFALL-THE_AWAKENED_ONE.0-attack": "Both",
+
+  "THE_ARCHITECT.talk.DOWNFALL-THE_GREMLINS.0-0r.ancient": "A rabble of scavengers at the throne of the Spire? Amusing.",
+  "THE_ARCHITECT.talk.DOWNFALL-THE_GREMLINS.0-0r.next": "Respond",
+  "THE_ARCHITECT.talk.DOWNFALL-THE_GREMLINS.0-1r.char": "Get 'em, gang! Nobody laughs at us!",
+  "THE_ARCHITECT.talk.DOWNFALL-THE_GREMLINS.0-attack": "Both",
+
+  "THE_ARCHITECT.talk.DOWNFALL-THE_CHAMP.0-0r.ancient": "So the self-proclaimed champion reaches the peak. Will that gilded crown hold against the Architect?",
+  "THE_ARCHITECT.talk.DOWNFALL-THE_CHAMP.0-0r.next": "Respond",
+  "THE_ARCHITECT.talk.DOWNFALL-THE_CHAMP.0-1r.char": "FACE MY WRATH! There is only ONE Champ!",
+  "THE_ARCHITECT.talk.DOWNFALL-THE_CHAMP.0-attack": "Both",
+
+  "THE_ARCHITECT.talk.DOWNFALL-THE_SNECKO.0-0r.ancient": "Chaos incarnate, slithering up the stairs by sheer improbability.",
+  "THE_ARCHITECT.talk.DOWNFALL-THE_SNECKO.0-0r.next": "Respond",
+  "THE_ARCHITECT.talk.DOWNFALL-THE_SNECKO.0-1r.char": "Hsssss... let's roll the dice!",
+  "THE_ARCHITECT.talk.DOWNFALL-THE_SNECKO.0-attack": "Both",
+
+  "THE_ARCHITECT.talk.DOWNFALL-THE_SLIME_BOSS.0-0r.ancient": "Even the ooze of the lowest floor dares to climb so high.",
+  "THE_ARCHITECT.talk.DOWNFALL-THE_SLIME_BOSS.0-0r.next": "Respond",
+  "THE_ARCHITECT.talk.DOWNFALL-THE_SLIME_BOSS.0-1r.char": "CRUSH! Time to make a big mess!",
+  "THE_ARCHITECT.talk.DOWNFALL-THE_SLIME_BOSS.0-attack": "Both",
+
+  "THE_ARCHITECT.talk.DOWNFALL-THE_GUARDIAN.0-0r.ancient": "A construct built to defend the Spire, turned against its maker.",
+  "THE_ARCHITECT.talk.DOWNFALL-THE_GUARDIAN.0-0r.next": "Respond",
+  "THE_ARCHITECT.talk.DOWNFALL-THE_GUARDIAN.0-1r.char": "DIRECTIVE OVERRIDE: DESTROY ARCHITECT.",
+  "THE_ARCHITECT.talk.DOWNFALL-THE_GUARDIAN.0-attack": "Both",
+
+  "THE_ARCHITECT.talk.DOWNFALL-THE_HEXAGHOST.0-0r.ancient": "Six spectral flames burning out of turn. How did a warden of ash reach the summit?",
+  "THE_ARCHITECT.talk.DOWNFALL-THE_HEXAGHOST.0-0r.next": "Respond",
+  "THE_ARCHITECT.talk.DOWNFALL-THE_HEXAGHOST.0-1r.char": "The seal ignites. Burn away!",
+  "THE_ARCHITECT.talk.DOWNFALL-THE_HEXAGHOST.0-attack": "Both",
+
+  "THE_ARCHITECT.talk.DOWNFALL-THE_AUTOMATON.0-0r.ancient": "Bronze gears compiling defiance. Your final function ends here.",
+  "THE_ARCHITECT.talk.DOWNFALL-THE_AUTOMATON.0-0r.next": "Respond",
+  "THE_ARCHITECT.talk.DOWNFALL-THE_AUTOMATON.0-1r.char": "FUNCTION COMPILED. EXECUTING HYPER BEAM.",
+  "THE_ARCHITECT.talk.DOWNFALL-THE_AUTOMATON.0-attack": "Both",
+
+  "THE_ARCHITECT.talk.DOWNFALL-THE_COLLECTOR.0-0r.ancient": "A monarch of torchlight and thralls, coveting even the summit.",
+  "THE_ARCHITECT.talk.DOWNFALL-THE_COLLECTOR.0-0r.next": "Respond",
+  "THE_ARCHITECT.talk.DOWNFALL-THE_COLLECTOR.0-1r.char": "You are mine! Add this Spire to my collection!",
+  "THE_ARCHITECT.talk.DOWNFALL-THE_COLLECTOR.0-attack": "Both"
+}

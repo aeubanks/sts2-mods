@@ -1,7 +1,9 @@
 using BaseLib.Abstracts;
 using Godot;
 using MegaCrit.Sts2.Core.Entities.Cards;
+using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Models;
+using MegaCrit.Sts2.Core.Runs;
 using MegaCrit.Sts2.Core.Unlocks;
 using Packmaster.Packs;
 
@@ -22,7 +24,7 @@ public class PackmasterCardPool : CustomCardPoolModel
     protected override IEnumerable<CardModel> FilterThroughEpochs(UnlockState unlockState, IEnumerable<CardModel> cards)
     {
         var baseFiltered = base.FilterThroughEpochs(unlockState, cards);
-        var activePacks = PackRunState.GetActivePackIdsForCurrentRun();
+        var activePacks = ResolveActivePackIds(unlockState);
         if (activePacks is null)
             return baseFiltered;
 
@@ -31,5 +33,31 @@ public class PackmasterCardPool : CustomCardPoolModel
                 ? activePacks.Contains(pack.Id)
                 : card.Rarity is not (CardRarity.Common or CardRarity.Uncommon or CardRarity.Rare)
         ).ToList();
+    }
+
+    private static IReadOnlySet<string>? ResolveActivePackIds(UnlockState unlockState)
+    {
+        var scoped = PackRunState.CurrentScopedPlayer;
+        if (scoped is not null && scoped.Character is ThePackmaster)
+            return PackRunState.GetActivePackIds(scoped);
+
+        var runState = RunManager.Instance.DebugOnlyGetState();
+        if (runState is not null)
+        {
+            Player? matched = null;
+            int matches = 0;
+            foreach (var p in runState.Players)
+            {
+                if (p.Character is ThePackmaster && ReferenceEquals(p.UnlockState, unlockState))
+                {
+                    matched = p;
+                    matches++;
+                }
+            }
+            if (matches == 1 && matched is not null)
+                return PackRunState.GetActivePackIds(matched);
+        }
+
+        return PackRunState.GetActivePackIds(runState);
     }
 }

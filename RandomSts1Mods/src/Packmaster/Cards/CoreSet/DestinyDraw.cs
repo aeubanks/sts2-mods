@@ -16,7 +16,7 @@ public sealed class DestinyDraw()
 
     protected override async Task OnPlay(PlayerChoiceContext choiceContext, CardPlay cardPlay)
     {
-        var activeIds = PackRunState.GetActivePackIdsForCurrentRun();
+        var activeIds = PackRunState.GetActivePackIds(Owner);
         var eligibleByPack = ModelDb.CardPool<PackmasterCardPool>().AllCards
             .Where(c => c.CanBeGeneratedInCombat && c is not DestinyDraw)
             .Select(c => (Card: c, Pack: PackRegistry.GetForCard(c)))

@@ -650,6 +650,40 @@ internal static class DownfallAutoTestRunner
         AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-DEAD_ON_KEYWORD.title").Exists(), "Missing Dead On title loc");
         AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-DEAD_ON_KEYWORD.description").Exists(), "Missing Dead On desc loc");
         AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-COALESCENCE.selectionScreenPrompt").Exists(), "Missing Coalescence prompt loc");
+
+        // Verify TheArchitect dialogues exist and repeat for all 11 modded characters (prevents WinRun NRE).
+        var architect = ModelDb.Event<MegaCrit.Sts2.Core.Models.Events.TheArchitect>();
+        var allModdedChars = ModelDb.AllCharacters.Where(c => c is DownfallCharacter or Packmaster.Character.ThePackmaster).ToList();
+        AutoTestAssert.Equal(11, allModdedChars.Count, "Expected 11 modded characters (Packmaster + 10 Downfall)");
+        foreach (var modChar in allModdedChars)
+        {
+            foreach (int visits in new[] { 0, 5 })
+            {
+                var dialogues = architect.DialogueSet.GetValidDialogues(modChar.Id, visits, visits, allowAnyCharacterDialogues: false).ToList();
+                AutoTestAssert.True(dialogues.Count >= 1, $"Missing TheArchitect dialogue for {modChar.Id} at visits={visits}");
+                AutoTestAssert.Equal(MegaCrit.Sts2.Core.Entities.Ancients.ArchitectAttackers.Both, dialogues[0].EndAttackers,
+                    $"TheArchitect dialogue for {modChar.Id} should use EndAttackers.Both");
+            }
+        }
+
+        // Verify Find and Replace upgrade description actually changes (removes Dazed line).
+        var fnrBase = (CardModel)ModelDb.Card<Downfall.Automaton.Cards.FindAndReplace>().ToMutable();
+        var fnrUpg = (CardModel)fnrBase.MutableClone();
+        fnrUpg.UpgradeInternal();
+        fnrUpg.FinalizeUpgradeInternal();
+        var fnrBaseDesc = fnrBase.GetDescriptionForPile(PileType.None);
+        var fnrUpgDesc = fnrUpg.GetDescriptionForPile(PileType.None);
+        AutoTestAssert.True(fnrBaseDesc.Contains("Dazed", StringComparison.OrdinalIgnoreCase),
+            $"Unupgraded Find and Replace should mention Dazed (got: {fnrBaseDesc})");
+        AutoTestAssert.True(!fnrUpgDesc.Contains("Dazed", StringComparison.OrdinalIgnoreCase),
+            $"Upgraded Find and Replace+ should NOT mention Dazed (got: {fnrUpgDesc})");
+
+        // Verify NCardPlayQueue.ReAddCardAfterPlayerChoice guard safely ignores detached/parentless NCard nodes.
+        var tempQueue = new MegaCrit.Sts2.Core.Nodes.Combat.NCardPlayQueue();
+        var detachedCard = new MegaCrit.Sts2.Core.Nodes.Cards.NCard();
+        tempQueue.ReAddCardAfterPlayerChoice(detachedCard, null!);
+        detachedCard.Free();
+        tempQueue.Free();
         AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-ADAPT.selectionScreenPrompt").Exists(), "Missing Adapt prompt loc");
         AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-CHANT_KEYWORD.title").Exists(), "Missing Chant title loc");
         AutoTestAssert.True(new LocString("gameplay_ui", "DOWNFALL-CHANT_KEYWORD.description").Exists(), "Missing Chant desc loc");

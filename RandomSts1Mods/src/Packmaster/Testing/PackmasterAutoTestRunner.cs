@@ -119,6 +119,7 @@ internal static class PackmasterAutoTestRunner
                 ("PackSystemAndCardPoolFiltering", TestPackSystemAndCardPoolFiltering),
                 ("PackRunStateSaveLoadPersistence", TestPackRunStateSaveLoadPersistence),
                 ("NeowInteractivePackDraft", TestNeowInteractivePackDraft),
+                ("MultiplayerPerPlayerPacksAndTopBarUi", TestMultiplayerPerPlayerPacksAndTopBarUi),
                 ("CorePackmasterRelics", TestCorePackmasterRelics),
                 ("CorePackmasterPotions", TestCorePackmasterPotions),
                 ("StartRunAndPlayStarterCombat", TestStartRunAndPlayStarterCombat),
@@ -2413,6 +2414,128 @@ internal static class PackmasterAutoTestRunner
             PackmasterConfig.AllPacksMode = savedAllPacks;
             PackmasterConfig.PacksPerRun = savedPacksPerRun;
         }
+    }
+
+    private static async Task TestMultiplayerPerPlayerPacksAndTopBarUi()
+    {
+        bool savedAllPacks = PackmasterConfig.AllPacksMode;
+        int savedPacksPerRun = PackmasterConfig.PacksPerRun;
+        try
+        {
+            PackmasterConfig.AllPacksMode = false;
+            PackmasterConfig.PacksPerRun = 5;
+
+            // Start a real live Packmaster run, verify TopBar Active Packs button + card viewer screen first.
+            var p1 = Player.CreateForNewRun<ThePackmaster>(new UnlockState(SaveManager.Instance.Progress), 1uL);
+            var runState = await NGame.Instance!.StartNewSingleplayerRun(
+                p1,
+                shouldSave: false,
+                ActModel.GetDefaultList(),
+                Array.Empty<ModifierModel>(),
+                "PM_MP_TEST",
+                GameMode.Standard,
+                isCustomGame: false);
+
+            var topBar = AutoTestAssert.NotNull(NRun.Instance?.GlobalUi?.TopBar, "TopBar present");
+            var packsBtn = AutoTestAssert.NotNull(
+                topBar.RightContainer?.GetNodeOrNull<Control>("PackmasterActivePacksButton"),
+                "PackmasterActivePacksButton attached next to Deck button in TopBar");
+            AutoTestAssert.True(packsBtn.GetIndex() < topBar.Deck.GetIndex(),
+                "PackmasterActivePacksButton positioned directly beside Deck button");
+
+            // Add a second Packmaster player to test full 2-Packmaster multiplayer isolation & persistence!
+            var p2 = Player.CreateForNewRun<ThePackmaster>(new UnlockState(SaveManager.Instance.Progress), 202uL);
+            p2.RunState = runState;
+            var playersList = (List<Player>)HarmonyLib.AccessTools.Field(typeof(RunState), "_players")!.GetValue(runState)!;
+            playersList.Add(p2);
+
+            // Both Packmasters get their own independent Neow pack draft options.
+            var neow1 = (MegaCrit.Sts2.Core.Models.Events.Neow)ModelDb.Event<MegaCrit.Sts2.Core.Models.Events.Neow>().ToMutable();
+            var neow2 = (MegaCrit.Sts2.Core.Models.Events.Neow)ModelDb.Event<MegaCrit.Sts2.Core.Models.Events.Neow>().ToMutable();
+            var ownerProp = HarmonyLib.AccessTools.Property(typeof(EventModel), "Owner")!;
+            var genMethod = HarmonyLib.AccessTools.Method(typeof(MegaCrit.Sts2.Core.Models.Events.Neow), "GenerateInitialOptions")!;
+            ownerProp.SetValue(neow1, p1);
+            ownerProp.SetValue(neow2, p2);
+
+            var opts1 = (IReadOnlyList<MegaCrit.Sts2.Core.Events.EventOption>)genMethod.Invoke(neow1, null)!;
+            var opts2 = (IReadOnlyList<MegaCrit.Sts2.Core.Events.EventOption>)genMethod.Invoke(neow2, null)!;
+            AutoTestAssert.True(opts1.Count >= 1 && opts1.All(o => o.TextKey.StartsWith("PACKMASTER_DRAFT_")),
+                "Player 1 Packmaster gets independent Neow draft options");
+            AutoTestAssert.True(opts2.Count >= 1 && opts2.All(o => o.TextKey.StartsWith("PACKMASTER_DRAFT_")),
+                "Player 2 Packmaster ALSO gets independent Neow draft options");
+
+            // Assign distinct pack sets to P1 and P2.
+            string[] p1Packs = [PackDefinitions.CoreSetId, PackDefinitions.QuietId, PackDefinitions.WarlockId];
+            string[] p2Packs = [PackDefinitions.CoreSetId, PackDefinitions.FarmerId, PackDefinitions.DistortionId];
+            PackRunState.SetActivePacksForPlayer(p1, p1Packs);
+            PackRunState.SetActivePacksForPlayer(p2, p2Packs);
+
+            // Verify per-player card reward pools strictly match each player's own packs!
+            var p1Options = CardCreationOptions.ForRoom(p1, RoomType.Monster);
+            var p2Options = CardCreationOptions.ForRoom(p2, RoomType.Monster);
+            var p1Cards = p1Options.GetPossibleCards(p1).ToList();
+            var p2Cards = p2Options.GetPossibleCards(p2).ToList();
+
+            AutoTestAssert.True(p1Cards.Any(c => c is Soulfire), "P1 reward pool includes Warlock cards");
+            AutoTestAssert.True(!p1Cards.Any(c => c is HarvestCarrots), "P1 reward pool excludes P2's Farmer cards");
+            AutoTestAssert.True(p2Cards.Any(c => c is HarvestCarrots), "P2 reward pool includes Farmer cards");
+            AutoTestAssert.True(!p2Cards.Any(c => c is Soulfire), "P2 reward pool excludes P1's Warlock cards");
+
+            // Verify JSON + Packet save/load preserves BOTH players' distinct pack sets!
+            var serializable = RunManager.Instance.ToSave(null);
+            var typeInfo = JsonSerializationUtility.GetTypeInfo<SerializableRun>();
+            var json = JsonSerializer.Serialize(serializable, typeInfo);
+            var fromJson = RunState.FromSerializable(
+                AutoTestAssert.NotNull(JsonSerializer.Deserialize(json, typeInfo), "Deserialized MP SerializableRun"));
+            var jp1 = fromJson.Players.First(p => p.NetId == 1uL);
+            var jp2 = fromJson.Players.First(p => p.NetId == 202uL);
+            AutoTestAssert.True(PackRunState.GetActivePackIds(jp1)!.SetEquals(p1Packs), "JSON round-trip preserved P1 packs");
+            AutoTestAssert.True(PackRunState.GetActivePackIds(jp2)!.SetEquals(p2Packs), "JSON round-trip preserved P2 packs");
+
+            var writer = new PacketWriter();
+            serializable.Serialize(writer);
+            var reader = new PacketReader();
+            reader.Reset(writer.Buffer);
+            var packetSave = new SerializableRun();
+            packetSave.Deserialize(reader);
+            var fromPacket = RunState.FromSerializable(packetSave);
+            var pp1 = fromPacket.Players.First(p => p.NetId == 1uL);
+            var pp2 = fromPacket.Players.First(p => p.NetId == 202uL);
+            AutoTestAssert.True(PackRunState.GetActivePackIds(pp1)!.SetEquals(p1Packs), "Packet round-trip preserved P1 packs");
+            AutoTestAssert.True(PackRunState.GetActivePackIds(pp2)!.SetEquals(p2Packs), "Packet round-trip preserved P2 packs");
+
+            // Verify Active Packs viewer screen opens, displays Pack filter bar, and closes cleanly!
+            var capstone = AutoTestAssert.NotNull(
+                MegaCrit.Sts2.Core.Nodes.Screens.Capstones.NCapstoneContainer.Instance,
+                "CapstoneContainer present");
+            var screen = AutoTestAssert.NotNull(
+                Packmaster.UI.PackmasterPacksViewScreen.ShowScreen(p1),
+                "PackmasterPacksViewScreen opened cleanly");
+            await ToSignalNextFrame();
+            AutoTestAssert.True(
+                Packmaster.UI.PackmasterPacksViewScreen.IsOpen,
+                "PackmasterPacksViewScreen registered as active capstone screen");
+            AutoTestAssert.NotNull(
+                screen.GetNodeOrNull<Control>("PackmasterPackFilterBar"),
+                "PackmasterPackFilterBar attached to active packs screen");
+            capstone.Close();
+            await ToSignalNextFrame();
+            AutoTestAssert.True(
+                !Packmaster.UI.PackmasterPacksViewScreen.IsOpen,
+                "PackmasterPacksViewScreen closed cleanly");
+        }
+        finally
+        {
+            CleanupRun();
+            PackmasterConfig.AllPacksMode = savedAllPacks;
+            PackmasterConfig.PacksPerRun = savedPacksPerRun;
+        }
+    }
+
+    private static async Task ToSignalNextFrame()
+    {
+        var tree = (SceneTree)Engine.GetMainLoop();
+        await tree.ToSignal(tree, SceneTree.SignalName.ProcessFrame);
     }
 
     private sealed class TakeNCardSelector(int count) : ICardSelector

@@ -38,11 +38,7 @@ internal static class NeowPackDraftPatch
             return true;
 
         var runState = owner.RunState;
-        // In co-op with multiple Packmasters, only the first Packmaster runs the shared run-wide draft.
-        if (runState.Players.FirstOrDefault(p => p.Character is ThePackmaster) != owner)
-            return true;
-
-        if (PackRunState.HasPersistedActivePacks(runState))
+        if (PackRunState.HasPersistedActivePacks(owner))
             return true;
 
         var allPacks = PackRegistry.AllPacks;
@@ -63,11 +59,11 @@ internal static class NeowPackDraftPatch
         int slotsToFill = targetCount - chosen.Count;
         if (slotsToFill <= 0 || remaining.Count <= slotsToFill)
         {
-            PackRunState.SetActivePacksForRun(runState, slotsToFill <= 0 ? chosen : allPacks.Select(p => p.Id));
+            PackRunState.SetActivePacksForPlayer(owner, slotsToFill <= 0 ? chosen : allPacks.Select(p => p.Id));
             return true;
         }
 
-        var rng = new Rng((uint)StringHelper.GetDeterministicHashCode(runState.Rng.StringSeed + "_PACKMASTER_DRAFT"));
+        var rng = new Rng((uint)StringHelper.GetDeterministicHashCode(PackRunState.GetDraftSeed(runState, owner)));
         int choicePicks = Math.Min(MaxChoicePicks, slotsToFill);
         int randomPicks = slotsToFill - choicePicks;
 
@@ -146,10 +142,13 @@ internal static class NeowPackDraftPatch
             return Task.CompletedTask;
         }
 
-        // Draft complete: persist chosen packs, then let vanilla Neow generate fresh blessings using the drafted pool!
-        PackRunState.SetActivePacksForRun(neow.Owner!.RunState, chosen);
-        var neowOptions = GenerateInitialOptionsWrapper(neow);
-        SetEventState(neow, neow.InitialDescription, neowOptions);
+        // Draft complete: persist chosen packs for this Packmaster, then let vanilla Neow generate fresh blessings using the drafted pool!
+        PackRunState.SetActivePacksForPlayer(neow.Owner!, chosen);
+        using (PackRunState.ScopePlayer(neow.Owner))
+        {
+            var neowOptions = GenerateInitialOptionsWrapper(neow);
+            SetEventState(neow, neow.InitialDescription, neowOptions);
+        }
         return Task.CompletedTask;
     }
 

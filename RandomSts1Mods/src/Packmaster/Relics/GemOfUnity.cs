@@ -46,7 +46,7 @@ public sealed class GemOfUnity : PackmasterRelic
     {
         _triggered = false;
         _packsPlayed.Clear();
-        _targetCount = PackRunState.GetActivePackIds(Owner.RunState)?.Count ?? 0;
+        _targetCount = PackRunState.GetActivePackIds(Owner)?.Count ?? 0;
         Status = _targetCount > 0 ? RelicStatus.Normal : RelicStatus.Disabled;
         InvokeDisplayAmountChanged();
         return Task.CompletedTask;
@@ -57,7 +57,7 @@ public sealed class GemOfUnity : PackmasterRelic
         if (_triggered || cardPlay.Card.Owner != Owner || !Owner.Creature.IsAlive)
             return;
 
-        var activePacks = PackRunState.GetActivePackIds(Owner.RunState);
+        var activePacks = PackRunState.GetActivePackIds(Owner);
         if (activePacks is null || activePacks.Count == 0)
             return;
 
